@@ -36,6 +36,12 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.8",
 ]
+mcp = ["mcp>=1.0"]
+kernel = ["ipykernel>=6.0"]
+all = ["stata_code[mcp,kernel]"]
+
+[project.entry-points."jupyter kernelspec"]
+stata = "stata_code.kernel:install_kernel"
 
 [project.urls]
 Homepage = "https://github.com/brycewang-stanford/stata_code"
