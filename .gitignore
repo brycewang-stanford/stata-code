@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Stata-specific
+*.gph
+*.smcl
+*.dta
+!tests/fixtures/*.dta

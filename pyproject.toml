@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stata_code"
+version = "0.1.0"
+description = "Unified Stata bridge for agents, VSCode, and Jupyter"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Bryce Wang", email = "brycewang@stanford.edu" }
+]
+keywords = ["stata", "jupyter", "vscode", "mcp", "pystata", "causal-inference"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "pystata>=0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/brycewang-stanford/stata_code"
+Repository = "https://github.com/brycewang-stanford/stata_code"
+Issues = "https://github.com/brycewang-stanford/stata_code/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["stata_code/core"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
