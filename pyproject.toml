@@ -49,9 +49,6 @@ all = ["stata_code[mcp,kernel]"]
 stata-code-kernel = "stata_code.kernel.kernel:run_main"
 stata-code-mcp = "stata_code.mcp.server:run_main"
 
-[project.entry-points."jupyter kernelspec"]
-stata = "stata_code.kernel:install_kernel"
-
 [project.urls]
 Homepage = "https://github.com/brycewang-stanford/stata_code"
 Repository = "https://github.com/brycewang-stanford/stata_code"
