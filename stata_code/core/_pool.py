@@ -187,6 +187,13 @@ def _worker_main() -> int:
             op = req.get("op", "execute")
             if op == "ping":
                 response = {"id": req_id, "ok": True, "pong": True}
+            elif op == "list_sessions":
+                # Imported lazily — calling list_sessions() on a worker that
+                # hasn't yet had any execute() request still triggers pystata
+                # init, which is the price of an honest answer.
+                from stata_code.core.runner import list_sessions as _ls
+
+                response = {"id": req_id, "ok": True, "sessions": _ls()}
             elif op == "execute":
                 code = req["code"]
                 options = req.get("options", {})
@@ -380,6 +387,54 @@ class WorkerProcess:
                 rc = proc.returncode
                 raise _WorkerError(f"worker exited (returncode={rc}) before responding")
 
+    def send_simple_op(
+        self,
+        op: str,
+        *,
+        timeout_ms: int | None,
+    ) -> dict[str, Any]:
+        """Send a no-payload op (e.g., ``ping``, ``list_sessions``) and return
+        the full response dict.
+
+        Unlike :meth:`execute`, this does **not** respawn a dead worker —
+        if the subprocess isn't running, raises :class:`_WorkerError`.
+        Caller should treat that as "this worker has nothing to report"
+        rather than block on a fresh pystata init for a status query.
+        """
+        with self._lock:
+            if self._proc is None or self._proc.poll() is not None:
+                raise _WorkerError(f"worker for {self.session_id!r} not running")
+            proc = self._proc
+            assert proc.stdin is not None and proc.stdout is not None  # for mypy
+            req_id = uuid.uuid4().hex
+            request = {"id": req_id, "op": op}
+            try:
+                proc.stdin.write(json.dumps(request) + "\n")
+                proc.stdin.flush()
+            except BrokenPipeError as exc:
+                raise _WorkerError(f"worker pipe broken on write: {exc}") from exc
+
+            deadline: float | None
+            deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
+
+            line = self._readline_with_deadline(proc, deadline)
+            self.last_used = time.monotonic()
+
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise _WorkerError(f"worker emitted non-JSON: {line!r}") from exc
+
+            if response.get("id") != req_id:
+                raise _WorkerError(
+                    f"worker response id mismatch: expected {req_id}, got {response.get('id')}"
+                )
+            if not response.get("ok"):
+                raise _WorkerError(
+                    f"worker reported failure: {response.get('error', '<no error>')}"
+                )
+            return response
+
     def kill(self) -> None:
         """Terminate the worker. SIGTERM with grace, then SIGKILL."""
         with self._lock:
@@ -533,6 +588,47 @@ class SessionPool:
     def session_ids(self) -> list[str]:
         with self._lock:
             return list(self._workers)
+
+    def list_session_info(
+        self,
+        *,
+        per_worker_timeout_ms: int = 5000,
+    ) -> list[dict[str, Any]]:
+        """Aggregate live-session info across all workers.
+
+        For each worker that's alive, sends ``op=list_sessions`` and pulls
+        back ``[{session_id, frame, n_obs}, ...]`` from that worker's
+        pystata. The pool dedupes by ``session_id`` (first writer wins) and
+        returns the union.
+
+        Workers that are dead, that fail to respond within
+        ``per_worker_timeout_ms``, or that raise a protocol error are
+        silently skipped — partial information is better than failing the
+        whole list call. Workers that haven't yet served an ``execute``
+        will pay the pystata-init cost on the next ``stata_run``, not here:
+        :meth:`WorkerProcess.send_simple_op` deliberately does **not**
+        respawn dead workers.
+        """
+        with self._lock:
+            workers = list(self._workers.items())
+        sessions: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for _sid, worker in workers:
+            if not worker.is_alive():
+                continue
+            try:
+                response = worker.send_simple_op(
+                    "list_sessions", timeout_ms=per_worker_timeout_ms
+                )
+            except (_WorkerError, _WorkerTimeout):
+                continue
+            for entry in response.get("sessions") or []:
+                sid = entry.get("session_id")
+                if sid is None or sid in seen:
+                    continue
+                seen.add(sid)
+                sessions.append(entry)
+        return sessions
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -228,8 +228,15 @@ class TestEndToEnd:
         )
         out = asyncio.run(_dispatch("list_sessions", {}))
         sessions = json.loads(out[0].text)
-        ids = {s["session_id"] for s in sessions}
-        assert "mcp_test" in ids
+        by_id = {s["session_id"]: s for s in sessions}
+        assert "mcp_test" in by_id
+        # Pool aggregator round-trips to the worker, so n_obs reflects the
+        # real Stata state (auto.dta has 74 obs) rather than the legacy 0
+        # placeholder.
+        mcp_entry = by_id["mcp_test"]
+        assert mcp_entry["n_obs"] == 74
+        # Non-main session_id maps to a same-named frame.
+        assert mcp_entry["frame"] == "mcp_test"
 
         # Reset
         out = asyncio.run(_dispatch("reset_session", {"session_id": "mcp_test"}))

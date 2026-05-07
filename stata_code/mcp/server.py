@@ -244,20 +244,12 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
         if name == "list_sessions":
             # In subprocess-pool mode each session lives in its own worker
             # process, so the parent's `list_sessions()` (which queries the
-            # parent's pystata frames) is empty. Authoritative source is the
-            # pool's session-id index.
-            pool_sids = get_default_pool().session_ids()
-            sessions = [
-                {
-                    "session_id": sid,
-                    "frame": "default" if sid == "main" else sid,
-                    # n_obs would require a per-worker round-trip; report 0
-                    # as a "unknown without querying" sentinel rather than
-                    # paying that cost on every list call.
-                    "n_obs": 0,
-                }
-                for sid in pool_sids
-            ]
+            # parent's pystata frames) is empty. Authoritative source is
+            # `pool.list_session_info()`, which round-trips a no-payload
+            # `list_sessions` op to each live worker and aggregates. Dead
+            # or unresponsive workers are skipped silently — partial info
+            # beats failing the whole list call.
+            sessions = get_default_pool().list_session_info()
             return [TextContent(type="text", text=json.dumps(sessions))]
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
