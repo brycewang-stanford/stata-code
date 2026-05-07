@@ -271,5 +271,10 @@ async def main() -> None:
         await APP.run(read, write, APP.create_initialization_options())
 
 
-if __name__ == "__main__":  # pragma: no cover
+def run_main() -> None:
+    """Synchronous entry point for the `stata-code-mcp` console script."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":  # pragma: no cover
+    run_main()

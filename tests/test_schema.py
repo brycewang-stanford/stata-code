@@ -10,23 +10,17 @@ from stata_code.core.errors import classify_rc, suggestions_for
 from stata_code.core.schema import (
     Backend,
     DatasetInfo,
-    ErrorContext,
     ErrorInfo,
     ErrorKind,
     GraphFormat,
     GraphInfo,
     LogInfo,
     Matrix,
-    ResultsInfo,
     RunResult,
     StataEdition,
     StataInfo,
-    StataReturns,
     StataWarning,
-    Suggestion,
-    VariableInfo,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers

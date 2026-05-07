@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from stata_code.core.schema import (
     Backend,
@@ -188,7 +185,7 @@ class TestInstallKernel:
         from stata_code.kernel.kernel import install_kernel
 
         with patch.object(sys, "executable", str(tmp_path / "python")):
-            with patch.object(Path, "mkdir") as mock_mkdir:
+            with patch.object(Path, "mkdir"):
                 with patch("builtins.open", side_effect=OSError("read-only")):
                     # Just verify the function exists and has correct signature
                     import inspect
@@ -198,25 +195,7 @@ class TestInstallKernel:
                     assert "system" in params
 
 
-class TestStataGraphDataUri:
-    """Test StataGraph rendering for Jupyter display."""
-
-    def test_to_base64_roundtrip(self):
-        """StataGraph.to_base64 preserves data."""
-        g = StataGraph(format="png", data=b"\x89PNG\r\n\x1a\n")
-        b64 = g.to_base64()
-        import base64
-
-        assert base64.b64decode(b64) == g.data
-
-    def test_to_data_uri_format(self):
-        """to_data_uri() produces a valid data URI for inline display."""
-        g = StataGraph(format="png", data=b"\x89PNG")
-        uri = g.to_data_uri()
-        assert uri.startswith("data:image/png;base64,")
-
-    def test_svg_data_uri(self):
-        """SVG graphs produce correct SVG data URI."""
-        g = StataGraph(format="svg", data=b"<svg></svg>")
-        uri = g.to_data_uri()
-        assert uri.startswith("data:image/svg+xml;base64,")
+# NOTE: TestStataGraphDataUri was removed in v0.2. The legacy `StataGraph`
+# dataclass (with .to_base64() / .to_data_uri()) is gone; the v1.0 `GraphInfo`
+# schema returns refs by default and inline base64 only when explicitly
+# requested. See tests/test_runner.py::TestGraphCapture for the new behavior.

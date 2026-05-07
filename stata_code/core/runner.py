@@ -1,33 +1,22 @@
 """High-level execute() — runs Stata code and returns a v1.0 RunResult.
 
-This is the new pipeline. The old `stata_code.run()` (returning the legacy
-StataResult dataclass) remains untouched for now; existing callers continue
-to work. Migration to this pipeline happens in subsequent steps.
+This is the only place that touches Stata. The MCP server and Jupyter
+kernel both import from here and only translate transports.
 
-v0.1 scope (what this implements):
-- Single Stata session (session_id must be "main").
-- Result envelope: ok / rc / error / log / results / dataset / metadata.
-- r() and e() collected via sfi (native types, not stringified).
-- Matrices captured with row/col labels and inline values.
-- Dataset metadata (n_obs, n_vars, variables, frame, changed, filename).
-- Structured errors with rc → kind classification, varname/path/name
-  extraction, suggestion seeds.
-- Log truncation (head + tail; no ref store yet — `truncated: true` not
-  emitted in v0.1, full log returned inline).
+Implements the v1.0 envelope from SCHEMA.md: ok / rc / error / log /
+results / dataset / graphs / warnings / capabilities. r() and e() are
+collected via sfi (native types). Multi-session is implemented through
+Stata frames (session_id="main" ↔ default frame). Per-line error
+attribution comes from parsing pystata's transcript.
 
-Deferred (subsequent turns):
-- Graph capture (graph dir + export pipeline).
-- Log ref store + get_log auxiliary tool.
-- Matrix size cap + matrix:// refs.
-- Multi-session via Stata frames.
-- Cooperative cancellation; timeout enforcement.
-- Per-line error attribution (commands_executed, context).
+For deferred items (hard timeout, cooperative cancellation, get_matrix
+ref mode, console fallback for Stata 11–16, streaming logs), see
+SCHEMA.md §8.
 """
 
 from __future__ import annotations
 
 import io
-import os
 import re
 import tempfile
 import time
@@ -683,7 +672,6 @@ def list_sessions() -> list[dict[str, Any]]:
     except PystataNotAvailable:
         return []
     sessions: list[dict[str, Any]] = []
-    Frame = rt.sfi.Frame
     for fname in _list_frame_names(rt):
         sid = "main" if fname == "default" else fname
         # n_obs from each frame; switching is needed since Frame helpers
@@ -727,7 +715,7 @@ def reset_session(session_id: str = "main") -> dict[str, Any]:
 
 # Patterns are ordered: more specific kinds first. Each pattern produces one
 # warning per match (de-duped at the schema level).
-_WARNING_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+_WARNING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Stata's "omitted because of collinearity" note — shows up under
     # `regress`, `logit`, etc. when factor levels or duplicate vars are
     # dropped from the design matrix.

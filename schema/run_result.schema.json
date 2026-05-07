@@ -1,0 +1,726 @@
+{
+  "$defs": {
+    "Backend": {
+      "enum": [
+        "pystata",
+        "console"
+      ],
+      "title": "Backend",
+      "type": "string"
+    },
+    "DatasetInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "changed": {
+          "default": false,
+          "title": "Changed",
+          "type": "boolean"
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filename"
+        },
+        "frame": {
+          "default": "default",
+          "title": "Frame",
+          "type": "string"
+        },
+        "n_obs": {
+          "default": 0,
+          "title": "N Obs",
+          "type": "integer"
+        },
+        "n_vars": {
+          "default": 0,
+          "title": "N Vars",
+          "type": "integer"
+        },
+        "variables": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/VariableInfo"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variables"
+        }
+      },
+      "title": "DatasetInfo",
+      "type": "object"
+    },
+    "ErrorContext": {
+      "additionalProperties": true,
+      "properties": {
+        "after": {
+          "items": {
+            "type": "string"
+          },
+          "title": "After",
+          "type": "array"
+        },
+        "before": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Before",
+          "type": "array"
+        },
+        "failing": {
+          "default": "",
+          "title": "Failing",
+          "type": "string"
+        }
+      },
+      "title": "ErrorContext",
+      "type": "object"
+    },
+    "ErrorInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "commands_executed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commands Executed"
+        },
+        "context": {
+          "$ref": "#/$defs/ErrorContext"
+        },
+        "kind": {
+          "$ref": "#/$defs/ErrorKind"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "rc": {
+          "title": "Rc",
+          "type": "integer"
+        },
+        "rc_label": {
+          "default": "",
+          "title": "Rc Label",
+          "type": "string"
+        },
+        "suggestions": {
+          "items": {
+            "$ref": "#/$defs/Suggestion"
+          },
+          "title": "Suggestions",
+          "type": "array"
+        },
+        "varname": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Varname"
+        }
+      },
+      "required": [
+        "kind",
+        "rc"
+      ],
+      "title": "ErrorInfo",
+      "type": "object"
+    },
+    "ErrorKind": {
+      "enum": [
+        "syntax",
+        "command_not_found",
+        "varname_not_found",
+        "invalid_name",
+        "type_mismatch",
+        "name_conflict",
+        "not_sorted",
+        "convergence",
+        "infeasible",
+        "estimation_sample_empty",
+        "estimation_failure",
+        "no_estimation_results",
+        "no_observations",
+        "data_in_memory",
+        "matrix_singular",
+        "matrix_conformability",
+        "matrix_missing",
+        "file_not_found",
+        "file_exists",
+        "file_corrupt",
+        "file_io",
+        "network",
+        "permission",
+        "encoding",
+        "stata_limit",
+        "out_of_memory",
+        "interrupt",
+        "cancelled",
+        "timeout",
+        "adapter_crash",
+        "unknown"
+      ],
+      "title": "ErrorKind",
+      "type": "string"
+    },
+    "GraphFormat": {
+      "enum": [
+        "png",
+        "svg",
+        "pdf"
+      ],
+      "title": "GraphFormat",
+      "type": "string"
+    },
+    "GraphInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/GraphFormat",
+          "default": "png"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "inline": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inline"
+        },
+        "name": {
+          "default": "Graph",
+          "title": "Name",
+          "type": "string"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "source_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Command"
+        },
+        "source_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Line"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "GraphInfo",
+      "type": "object"
+    },
+    "LogInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "bytes_total": {
+          "default": 0,
+          "title": "Bytes Total",
+          "type": "integer"
+        },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "error_window": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Window"
+        },
+        "head": {
+          "default": "",
+          "title": "Head",
+          "type": "string"
+        },
+        "lines_total": {
+          "default": 0,
+          "title": "Lines Total",
+          "type": "integer"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "tail": {
+          "default": "",
+          "title": "Tail",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "title": "LogInfo",
+      "type": "object"
+    },
+    "Matrix": {
+      "additionalProperties": true,
+      "properties": {
+        "cols": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cols",
+          "type": "array"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "rows": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        }
+      },
+      "required": [
+        "rows",
+        "cols"
+      ],
+      "title": "Matrix",
+      "type": "object"
+    },
+    "ResultsInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "e": {
+          "$ref": "#/$defs/StataReturns"
+        },
+        "last_estimation_cmd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Estimation Cmd"
+        },
+        "r": {
+          "$ref": "#/$defs/StataReturns"
+        }
+      },
+      "title": "ResultsInfo",
+      "type": "object"
+    },
+    "StataEdition": {
+      "enum": [
+        "MP",
+        "SE",
+        "IC",
+        "BE",
+        "unknown"
+      ],
+      "title": "StataEdition",
+      "type": "string"
+    },
+    "StataInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "edition": {
+          "$ref": "#/$defs/StataEdition",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "title": "StataInfo",
+      "type": "object"
+    },
+    "StataReturns": {
+      "additionalProperties": true,
+      "description": "Shape shared by r() and e() \u2014 distinct instances at RunResult.results.{r,e}.",
+      "properties": {
+        "macros": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Macros",
+          "type": "object"
+        },
+        "matrices": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Matrix"
+          },
+          "title": "Matrices",
+          "type": "object"
+        },
+        "scalars": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Scalars",
+          "type": "object"
+        }
+      },
+      "title": "StataReturns",
+      "type": "object"
+    },
+    "StataWarning": {
+      "additionalProperties": true,
+      "description": "JSON wire name is `warnings`; class avoids shadowing the builtin `Warning`.",
+      "properties": {
+        "kind": {
+          "default": "unknown",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "title": "StataWarning",
+      "type": "object"
+    },
+    "Suggestion": {
+      "additionalProperties": true,
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "Suggestion",
+      "type": "object"
+    },
+    "VariableInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "VariableInfo",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/brycewang-stanford/stata_code/schema/run_result.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Machine-readable JSON Schema for the v1.0 result envelope returned by stata_code.run(). The normative contract is SCHEMA.md; this file is auto-generated from stata_code.core.schema.RunResult and kept in sync by tests/test_schema_artifact.py.",
+  "properties": {
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "dataset": {
+      "$ref": "#/$defs/DatasetInfo"
+    },
+    "elapsed_ms": {
+      "title": "Elapsed Ms",
+      "type": "integer"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ErrorInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "graphs": {
+      "items": {
+        "$ref": "#/$defs/GraphInfo"
+      },
+      "title": "Graphs",
+      "type": "array"
+    },
+    "log": {
+      "$ref": "#/$defs/LogInfo"
+    },
+    "ok": {
+      "title": "Ok",
+      "type": "boolean"
+    },
+    "rc": {
+      "title": "Rc",
+      "type": "integer"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "results": {
+      "$ref": "#/$defs/ResultsInfo"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "session_id": {
+      "default": "main",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "started_at": {
+      "title": "Started At",
+      "type": "string"
+    },
+    "stata": {
+      "$ref": "#/$defs/StataInfo"
+    },
+    "stata_elapsed_ms": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stata Elapsed Ms"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/StataWarning"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "ok",
+    "rc",
+    "request_id",
+    "started_at",
+    "elapsed_ms",
+    "stata"
+  ],
+  "title": "stata_code RunResult (v1.0)",
+  "type": "object"
+}

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stata_code"
-version = "0.1.0"
-description = "Unified Stata bridge for agents, VSCode, and Jupyter"
+version = "0.2.0"
+description = "Agent-native Stata bridge — one core, multiple frontends (MCP, Jupyter, VSCode)"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["stata", "jupyter", "vscode", "mcp", "pystata", "causal-inference"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -27,7 +27,11 @@ classifiers = [
 
 dependencies = [
     "pydantic>=2.0",
-    "pystata>=0.5.0",
+    # `pystata` ships with Stata 17+ at /Applications/Stata/utilities/pystata
+    # (macOS) or equivalent — it is NOT on PyPI. Our `_runtime` module locates
+    # and adds it to sys.path on init, so we deliberately do not declare it
+    # as a runtime dependency. Users without Stata 17+ will get a clear
+    # `PystataNotAvailable` error.
 ]
 
 [project.optional-dependencies]
@@ -41,6 +45,10 @@ mcp = ["mcp>=1.0"]
 kernel = ["ipykernel>=6.0"]
 all = ["stata_code[mcp,kernel]"]
 
+[project.scripts]
+stata-code-kernel = "stata_code.kernel.kernel:run_main"
+stata-code-mcp = "stata_code.mcp.server:run_main"
+
 [project.entry-points."jupyter kernelspec"]
 stata = "stata_code.kernel:install_kernel"
 
@@ -50,7 +58,7 @@ Repository = "https://github.com/brycewang-stanford/stata_code"
 Issues = "https://github.com/brycewang-stanford/stata_code/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["stata_code/core"]
+packages = ["stata_code"]
 
 [tool.ruff]
 line-length = 100

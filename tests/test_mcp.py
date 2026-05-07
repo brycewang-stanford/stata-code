@@ -7,7 +7,6 @@ import json
 
 import pytest
 
-
 pytest.importorskip("mcp", reason="mcp package not installed")
 
 from mcp.types import ImageContent, TextContent  # noqa: E402

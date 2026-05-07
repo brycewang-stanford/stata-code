@@ -12,7 +12,6 @@ Install via `python -m stata_code.kernel install --user`.
 
 from __future__ import annotations
 
-import base64
 import json
 import sys
 import traceback
@@ -30,7 +29,6 @@ except ImportError:
 from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.runner import execute
 from stata_code.core.schema import RunResult
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static keyword / help tables (carried over verbatim — independent of
@@ -288,20 +286,40 @@ def install_kernel(user: bool = True, system: bool = False) -> None:
     print("Restart Jupyter and select 'Stata' as the kernel.")
 
 
-if __name__ == "__main__":  # pragma: no cover
+def run_main() -> None:
+    """Console script entry point — installer or kernel launcher.
+
+    Usage::
+
+        stata-code-kernel install [--user|--system]   # install kernel spec
+        stata-code-kernel -f <connection_file>        # launch the kernel
+                                                       # (Jupyter calls this)
+    """
     import argparse
+    import sys as _sys
 
-    parser = argparse.ArgumentParser(description="Stata Jupyter kernel (stata_code)")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    # Distinguish the "install" subcommand from any other invocation (Jupyter
+    # passes connection-file flags that argparse subparsers can't see).
+    if len(_sys.argv) == 1 or _sys.argv[1] in {"-h", "--help"}:
+        print(
+            "usage: stata-code-kernel install [--user|--system]\n"
+            "       stata-code-kernel -f <connection_file>\n\n"
+            "Install or launch the Stata Jupyter kernel."
+        )
+        return
 
-    install_cmd = sub.add_parser("install", help="Install the Stata kernel")
-    install_cmd.add_argument("--system", action="store_true")
-    install_cmd.add_argument("--user", action="store_true", default=True)
-
-    args = parser.parse_args()
-    if args.cmd == "install":
+    if len(_sys.argv) > 1 and _sys.argv[1] == "install":
+        parser = argparse.ArgumentParser(prog="stata-code-kernel install")
+        parser.add_argument("--system", action="store_true")
+        parser.add_argument("--user", action="store_true", default=True)
+        args = parser.parse_args(_sys.argv[2:])
         install_kernel(user=args.user, system=args.system)
-    else:
-        from ipykernel.kernelapp import IPKernelApp
+        return
 
-        IPKernelApp.launch_instance(kernel_class=StataKernel)
+    from ipykernel.kernelapp import IPKernelApp
+
+    IPKernelApp.launch_instance(kernel_class=StataKernel)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    run_main()

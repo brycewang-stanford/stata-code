@@ -96,9 +96,8 @@ class PystataRuntime:
         cfg.set_graph_show(False)
         cfg.set_graph_format("png")
 
-        from pystata import stata as st  # must be imported after config.init
-
         import sfi  # type: ignore[import-not-found]
+        from pystata import stata as st  # must be imported after config.init
 
         self._config = cfg
         self._stata = st

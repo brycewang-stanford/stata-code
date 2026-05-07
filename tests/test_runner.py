@@ -420,7 +420,7 @@ class TestWarnings:
 class TestMultiSession:
     def setup_method(self):
         # Ensure clean state — drop any non-default frames left over.
-        from stata_code.core.runner import execute, list_sessions, reset_session
+        from stata_code.core.runner import list_sessions, reset_session
 
         for sess in list_sessions():
             if sess["session_id"] != "main":
@@ -508,6 +508,50 @@ class TestMultiSession:
 
         r = execute('display "x"')
         assert "multi_session" in r.capabilities
+
+
+class TestRefsLruEviction:
+    def test_capacity_drops_oldest(self):
+        from stata_code.core import _refs
+
+        try:
+            original = _refs.get_capacity()
+            _refs.set_capacity(3)
+            _refs.put("a", "first")
+            _refs.put("b", "second")
+            _refs.put("c", "third")
+            _refs.put("d", "fourth")  # should evict 'a'
+            assert _refs.get("a") is None
+            assert _refs.get("b") == "second"
+            assert _refs.get("d") == "fourth"
+        finally:
+            _refs.set_capacity(original)
+            _refs.clear_all()
+
+    def test_get_promotes_to_recent(self):
+        from stata_code.core import _refs
+
+        try:
+            original = _refs.get_capacity()
+            _refs.set_capacity(3)
+            _refs.put("a", "first")
+            _refs.put("b", "second")
+            _refs.put("c", "third")
+            # touch 'a' to mark recent — 'b' is now oldest
+            _refs.get("a")
+            _refs.put("d", "fourth")  # should evict 'b'
+            assert _refs.get("a") == "first"
+            assert _refs.get("b") is None
+            assert _refs.get("c") == "third"
+        finally:
+            _refs.set_capacity(original)
+            _refs.clear_all()
+
+    def test_capacity_must_be_positive(self):
+        from stata_code.core import _refs
+
+        with pytest.raises(ValueError):
+            _refs.set_capacity(0)
 
 
 class TestErrorPinpointing:
