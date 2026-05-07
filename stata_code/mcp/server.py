@@ -35,10 +35,12 @@ except ImportError:  # pragma: no cover - environment without mcp installed
 
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.runner import (
+    cancel,
     execute,
     get_graph,
     get_log,
     get_matrix,
+    is_cancel_pending,
     list_sessions,
     reset_session,
 )
@@ -165,6 +167,23 @@ def _tool_definitions() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
+            name="cancel_session",
+            description=(
+                "Request cooperative cancellation of the next stata_run for "
+                "this session. The flag is consumed by the next call and "
+                "produces a RunResult with ok=false, rc=-3, "
+                "error.kind='cancelled'. Does NOT interrupt code that is "
+                "currently mid-execution (pystata is in-process). Returns "
+                "JSON {session_id, was_pending, is_pending}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "default": "main"},
+                },
+            },
+        ),
+        Tool(
             name="reset_session",
             description=(
                 "Drop a session's data. session_id='main' performs `clear "
@@ -226,6 +245,21 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             return [TextContent(type="text", text=json.dumps(payload))]
         if name == "list_sessions":
             return [TextContent(type="text", text=json.dumps(list_sessions()))]
+        if name == "cancel_session":
+            sid = arguments.get("session_id", "main")
+            was_pending = not cancel(sid)  # cancel() returns False if already pending
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "session_id": sid,
+                            "was_pending": was_pending,
+                            "is_pending": is_cancel_pending(sid),
+                        }
+                    ),
+                )
+            ]
         if name == "reset_session":
             sid = arguments.get("session_id", "main")
             return [TextContent(type="text", text=json.dumps(reset_session(sid)))]

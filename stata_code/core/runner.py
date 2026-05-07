@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import re
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import redirect_stdout
@@ -66,6 +67,16 @@ _FILE_PATH_RE = re.compile(
 )
 _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
 _UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
+
+# Cooperative cancellation: a per-session "cancel-pending" flag, settable
+# from any thread via `cancel(session_id)`. The flag is consumed by the
+# next `execute()` call for that session, which short-circuits and returns
+# a RunResult with `error.kind="cancelled"` instead of forwarding the code
+# to Stata. Cooperative semantics — does NOT interrupt code that is
+# already mid-`stata.run()`. Hard interruption requires the subprocess-
+# based runtime planned for v0.3+ (see SCHEMA.md §8).
+_cancel_lock = threading.Lock()
+_cancel_pending: set[str] = set()
 
 # Cap on `dataset.variables` to avoid pathological return sizes (per SCHEMA §3.5).
 _DATASET_VAR_CAP = 200
@@ -151,6 +162,107 @@ def get_log(ref: str) -> dict[str, Any]:
         "lines_total": payload["lines_total"],
         "bytes_total": payload["bytes_total"],
     }
+
+
+def cancel(session_id: str = "main") -> bool:
+    """Request cancellation of the next ``execute()`` call for ``session_id``.
+
+    Cooperative: does **not** interrupt code that is currently mid-execution
+    inside pystata. The flag is consumed (and the run short-circuited)
+    when ``execute(session_id=...)`` is next invoked for the same session.
+    The short-circuit returns a ``RunResult`` with ``ok=False``, ``rc=-1``,
+    and ``error.kind=cancelled``.
+
+    Returns ``True`` if a new cancel was registered, ``False`` if one was
+    already pending (idempotent).
+    """
+    with _cancel_lock:
+        if session_id in _cancel_pending:
+            return False
+        _cancel_pending.add(session_id)
+        return True
+
+
+def is_cancel_pending(session_id: str = "main") -> bool:
+    """Whether a cancel will fire on the next ``execute()`` for this session."""
+    with _cancel_lock:
+        return session_id in _cancel_pending
+
+
+def clear_cancel(session_id: str = "main") -> bool:
+    """Drop any pending cancel for ``session_id`` without firing it.
+
+    Returns ``True`` if a pending cancel was cleared.
+    """
+    with _cancel_lock:
+        if session_id in _cancel_pending:
+            _cancel_pending.remove(session_id)
+            return True
+        return False
+
+
+def _consume_cancel(session_id: str) -> bool:
+    """Pop and return whether a cancel is pending for ``session_id``."""
+    with _cancel_lock:
+        if session_id in _cancel_pending:
+            _cancel_pending.remove(session_id)
+            return True
+        return False
+
+
+def _build_cancelled_result(
+    *,
+    rt: Any,
+    session_id: str,
+    request_id: str,
+    started_at: str,
+    started: float,
+    include_dataset_variables: bool,
+) -> RunResult:
+    """Synthesize a RunResult for a cancel-before-Stata short-circuit.
+
+    The dataset block still reflects current state (post-cancel snapshot);
+    log / results / graphs / warnings are empty because no code ran.
+    rc=-3 is the synthetic code reserved for cooperative cancellation
+    (distinct from -1 adapter_crash and -2 timeout, per SCHEMA.md §3.7).
+    """
+    elapsed_total_ms = max(1, int((time.monotonic() - started) * 1000))
+    return RunResult(
+        ok=False,
+        rc=-3,
+        session_id=session_id,
+        request_id=request_id,
+        started_at=started_at,
+        elapsed_ms=elapsed_total_ms,
+        stata_elapsed_ms=0,
+        stata=_stata_info(rt),
+        log=LogInfo(
+            head="", tail="", lines_total=0, bytes_total=0,
+            truncated=False, complete=True, ref=None,
+        ),
+        results=ResultsInfo(),
+        dataset=_collect_dataset(rt, include_dataset_variables),
+        graphs=[],
+        warnings=[],
+        error=ErrorInfo(
+            kind=ErrorKind.CANCELLED,
+            rc=-3,
+            rc_label="cancelled",
+            message=(
+                "Execution cancelled before Stata received the code "
+                f"(session_id={session_id!r})."
+            ),
+            command=None,
+            line=None,
+            context=ErrorContext(before=[], failing="", after=[]),
+            commands_executed=0,
+            path=None,
+            varname=None,
+            name=None,
+            suggestions=[],
+        ),
+        capabilities=["cancel", "multi_session"],
+    )
 
 
 def _parse_return_list(text: str) -> dict[str, list[str]]:
@@ -543,6 +655,16 @@ def execute(
     request_id = _new_request_id()
     started_at = _utc_iso_ms()
     started = time.monotonic()
+
+    if _consume_cancel(session_id):
+        return _build_cancelled_result(
+            rt=rt,
+            session_id=session_id,
+            request_id=request_id,
+            started_at=started_at,
+            started=started,
+            include_dataset_variables=include_dataset_variables,
+        )
 
     # Snapshot existing graph names before user code so we can take a delta
     # afterward. This itself calls `graph dir`, which clobbers r(); user code

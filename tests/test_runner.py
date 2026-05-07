@@ -504,6 +504,67 @@ class TestMatrices:
             get_matrix("matrix://does-not-exist/r/M")
 
 
+class TestCooperativeCancel:
+    """End-to-end: cancel(session_id) short-circuits the next execute()."""
+
+    def setup_method(self):
+        from stata_code.core import runner as rm
+
+        with rm._cancel_lock:
+            rm._cancel_pending.clear()
+
+    def test_cancel_then_execute_returns_cancelled_result(self, loaded_auto):
+        from stata_code.core.runner import cancel, execute, is_cancel_pending
+        from stata_code.core.schema import ErrorKind
+
+        assert cancel("main") is True
+        assert is_cancel_pending("main") is True
+
+        r = execute('display "should not run"')
+        assert r.ok is False
+        assert r.rc == -3
+        assert r.error is not None
+        assert r.error.kind == ErrorKind.CANCELLED
+        assert r.error.rc == -3
+        assert r.error.commands_executed == 0
+        # Cancel was consumed; next call runs normally.
+        assert is_cancel_pending("main") is False
+
+    def test_cancelled_result_does_not_run_user_code(self, loaded_auto):
+        from stata_code.core.runner import cancel, execute
+
+        cancel("main")
+        r = execute('display "marker_X1Y2Z3"')
+        assert r.ok is False
+        # The marker string must not appear anywhere in the cancelled
+        # envelope — it never reached Stata.
+        assert "marker_X1Y2Z3" not in r.log.head
+        assert "marker_X1Y2Z3" not in r.log.tail
+        assert r.log.lines_total == 0
+
+    def test_cancel_only_fires_once(self, loaded_auto):
+        from stata_code.core.runner import cancel, execute
+
+        cancel("main")
+        r1 = execute('display "first"')
+        r2 = execute('display "second"')
+        assert r1.ok is False  # cancelled
+        assert r2.ok is True
+        assert "second" in r2.log.head
+
+    def test_cancel_isolates_sessions_under_real_runner(self, loaded_auto):
+        from stata_code.core.runner import cancel, execute
+
+        cancel("alpha")
+        # Main session unaffected.
+        r_main = execute('display "main runs"')
+        assert r_main.ok is True
+        # Alpha session run is short-circuited.
+        r_alpha = execute('display "alpha"', session_id="alpha")
+        assert r_alpha.ok is False
+        assert r_alpha.session_id == "alpha"
+
+
 class TestMultiSession:
     def setup_method(self):
         # Ensure clean state — drop any non-default frames left over.

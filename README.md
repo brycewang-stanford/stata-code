@@ -109,7 +109,7 @@ Or run as a module:
 python -m stata_code.mcp
 ```
 
-Seven tools are registered:
+Eight tools are registered:
 
 | Tool | Purpose |
 | --- | --- |
@@ -119,6 +119,7 @@ Seven tools are registered:
 | `get_graph` | Fetch graph bytes (`ImageContent`) behind a `graph://` ref |
 | `get_matrix` | Fetch matrix `{rows, cols, values}` behind a `matrix://` ref |
 | `list_sessions` | Enumerate live sessions |
+| `cancel_session` | Cooperatively cancel the next `stata_run` for a session |
 | `reset_session` | Drop a session's data |
 
 ### As a Jupyter kernel
@@ -218,19 +219,20 @@ The runner is the only place that touches Stata. Both the Jupyter kernel and the
 - Log truncation with ref store
 - Warning extraction (5 categories + generic notes)
 - 32-kind error taxonomy with canonical suggestions
-- MCP server (7 tools)
+- MCP server (8 tools)
 - Jupyter kernel (rewired to v1.0 pipeline)
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
+- Cooperative cancellation (`cancel(session_id)` / MCP `cancel_session`) — short-circuits the next `execute()` for a session
 - JSON Schema artifact auto-generated from `schema.py`
   ([`schema/run_result.schema.json`](schema/run_result.schema.json))
+- VSCode extension scaffold ([`vscode/`](vscode/)) — `Run Selection`, graph webview, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next up
 
 - **v0.3** — Console fallback for Stata 11–16 (re-implemented against the v1.0 schema)
-- **v0.3** — Cooperative cancellation (`cancel(session_id)`)
-- **v0.3** — Hard timeout enforcement (subprocess-based)
-- **v0.4** — Native VSCode extension (TypeScript) — [scaffold landed](vscode/) with `Run Selection` command, MCP child-process spawn, and `RunResult` typing; needs marketplace publish + graph webview
+- **v0.3** — Hard timeout / mid-Stata interrupt — requires a subprocess-based runtime; cooperative cancel exists but doesn't interrupt code already in-flight
+- **v0.4** — VSCode Marketplace publishing (the scaffold + graph webview already work in dev host)
 - **v1.0** — Stable schema, published to PyPI / VSCode Marketplace
 
 See [SCHEMA.md §7](SCHEMA.md) for explicitly-out-of-scope items.

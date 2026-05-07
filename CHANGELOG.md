@@ -41,9 +41,21 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `pytest -m "not stata_required"`, completing in ~1.5s instead of
   ~19s. Local without Stata, the same tests still skip cleanly.
 
+- **Cooperative cancellation.** New `cancel(session_id)` /
+  `clear_cancel(session_id)` / `is_cancel_pending(session_id)` Python
+  API plus the MCP `cancel_session` tool (eighth tool). A pending
+  cancel short-circuits the next `execute()` call for that session
+  and returns a `RunResult` with `ok=false`, `rc=-3` (synthetic),
+  `error.kind="cancelled"`. The flag is one-shot per cancel, isolated
+  per session, and thread-safe. Note: this is *cooperative* — it does
+  not interrupt code that is currently mid-`stata.run()` (pystata is
+  in-process and has no clean cancel primitive). Hard interruption
+  remains deferred to the subprocess-based runtime planned for v0.3+.
+
 ### Changed
 
-- **MCP server tool count is now 7** (added `get_matrix`).
+- **MCP server tool count is now 8** (added `get_matrix`,
+  `cancel_session`).
 
 ## [0.2.0] — 2026-05-07
 

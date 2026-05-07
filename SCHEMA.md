@@ -389,7 +389,7 @@ Suggestions are best-effort; agents should treat them as hints, not directives. 
 | `stata_limit` | 901, 902, 903 | Edition / matsize / similar Stata-imposed caps. Distinct from OS OOM. Suggestion: `set maxvar` or upgrade edition. |
 | `out_of_memory` | 480, 909 | OS-level memory exhaustion. |
 | `interrupt` | 1 | User Break / Ctrl-C from a frontend. |
-| `cancelled` | (synthetic, future) | Reserved for v2 cooperative cancellation. v1 producers MUST NOT emit. |
+| `cancelled` | (synthetic `rc: -3`) | Cooperative cancellation: a prior `cancel(session_id)` short-circuited this run before Stata received the code. |
 | `timeout` | (synthetic `rc: -2`) | Adapter-imposed time limit exceeded. |
 | `adapter_crash` | (synthetic `rc: -1`) | Producer-side failure (pystata exception, IPC death). |
 | `unknown` | any unmapped rc | Catch-all. Agents fall back to `message`. We aim to shrink this over time. |
@@ -500,7 +500,7 @@ When v2 ships, v1 is supported by frontends for at least 6 months. Servers MAY e
 Explicitly *not* in this version, to keep the surface small:
 
 - **Streaming logs.** All output is batched at end-of-call. `log.complete: false` is reserved for this in v2. Streams (Stata vs Python vs Mata) may be separated under a future `log.streams` field.
-- **Cooperative cancellation.** Only `timeout_ms` for now. `error.kind: "cancelled"` is reserved.
+- **Hard timeout enforcement / mid-Stata interrupt.** `cancel(session_id)` is implemented as a *cooperative* signal that short-circuits the next `execute()` call before pystata is invoked; it does not interrupt code that is already mid-`stata.run()`. Hard interruption requires a subprocess-based runtime (post-v0.2).
 - **Distributed / remote sessions.** Sessions are per-process. `session_id` reserves `:` for future host-prefixing.
 - **Authentication / authorization.** Local trusted environment is assumed.
 - **Mata internals.** Mata code runs (`stata.run("mata: ...")`) but Mata-specific return values aren't surfaced beyond what `r()` carries.
@@ -554,14 +554,21 @@ This section tracks how much of the schema is wired up in code. Not normative
 - LRU eviction on the ref store (default cap 256) keeps long-running
   producers from growing unboundedly.
 
+- **Cooperative cancellation** via `cancel(session_id)` /
+  `clear_cancel(session_id)` / `is_cancel_pending(session_id)`,
+  exposed as a Python API and as the MCP `cancel_session` tool.
+  Short-circuits the next `execute()` call for the named session and
+  returns a `RunResult` with `ok=false`, `rc=-3`,
+  `error.kind="cancelled"`. Cooperative semantics — does not
+  interrupt code that is already mid-`stata.run()`.
+
 ### Still deferred (post-v0.2)
 
-- **Hard timeout enforcement.** `timeout_ms` is accepted by `execute()`
-  but not yet enforced — pystata's in-process model has no clean cancel
-  primitive. v0.3 will move long calls into a subprocess pool with
-  signal-based cancellation.
-- **Cooperative cancellation** (`error.kind: "cancelled"` reserved in
-  the enum since v1.0).
+- **Hard timeout / mid-Stata interrupt.** `timeout_ms` is accepted by
+  `execute()` but not yet enforced; cancellation is cooperative-only
+  (does not interrupt code already in-flight). pystata's in-process
+  model has no clean cancel primitive — v0.3 will move long calls
+  into a subprocess pool with signal-based cancellation.
 - **Console fallback for Stata 11–16.** Earlier scaffold's
   `ConsoleFallback` was deleted in v0.2 (it produced legacy
   `StataResult` and didn't fit the new pipeline). v0.3 will reintroduce

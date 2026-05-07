@@ -23,10 +23,13 @@ from __future__ import annotations
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.errors import classify_rc, suggestions_for
 from stata_code.core.runner import (
+    cancel,
+    clear_cancel,
     execute,
     get_graph,
     get_log,
     get_matrix,
+    is_cancel_pending,
     list_sessions,
     reset_session,
 )
@@ -67,6 +70,9 @@ __all__ = [
     "get_matrix",
     "list_sessions",
     "reset_session",
+    "cancel",
+    "clear_cancel",
+    "is_cancel_pending",
     # Availability check
     "is_available",
     "PystataNotAvailable",
