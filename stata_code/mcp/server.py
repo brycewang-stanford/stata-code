@@ -41,8 +41,6 @@ from stata_code.core.runner import (
     get_log,
     get_matrix,
     is_cancel_pending,
-    list_sessions,
-    reset_session,
 )
 
 __version__ = "0.2.0"
@@ -244,7 +242,23 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             payload = get_matrix(arguments["ref"])
             return [TextContent(type="text", text=json.dumps(payload))]
         if name == "list_sessions":
-            return [TextContent(type="text", text=json.dumps(list_sessions()))]
+            # In subprocess-pool mode each session lives in its own worker
+            # process, so the parent's `list_sessions()` (which queries the
+            # parent's pystata frames) is empty. Authoritative source is the
+            # pool's session-id index.
+            pool_sids = get_default_pool().session_ids()
+            sessions = [
+                {
+                    "session_id": sid,
+                    "frame": "default" if sid == "main" else sid,
+                    # n_obs would require a per-worker round-trip; report 0
+                    # as a "unknown without querying" sentinel rather than
+                    # paying that cost on every list call.
+                    "n_obs": 0,
+                }
+                for sid in pool_sids
+            ]
+            return [TextContent(type="text", text=json.dumps(sessions))]
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
             was_pending = not cancel(sid)  # cancel() returns False if already pending
@@ -267,7 +281,24 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             ]
         if name == "reset_session":
             sid = arguments.get("session_id", "main")
-            return [TextContent(type="text", text=json.dumps(reset_session(sid)))]
+            # Pool-mode: killing the session's worker drops its data and
+            # all in-memory state; the next stata_run for that session
+            # respawns a fresh worker. For "main" this is equivalent to
+            # `clear all` (both wipe data + r()/e()), with the wrinkle
+            # that ref-store entries this session produced stay valid in
+            # the parent's `_refs` LRU until naturally evicted.
+            dropped = get_default_pool().kill_session(sid)
+            return [
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {
+                            "session_id": sid,
+                            "dropped_frame": dropped,
+                        }
+                    ),
+                )
+            ]
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     except KeyError as exc:
         return [TextContent(type="text", text=f"Unknown ref: {exc}")]

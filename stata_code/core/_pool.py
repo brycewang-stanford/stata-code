@@ -40,7 +40,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import signal
 import subprocess
 import sys
 import threading
@@ -151,21 +150,31 @@ def _worker_main() -> int:
     """Worker entry. Reads one JSON request per line from stdin, writes one
     JSON response per line to stdout. Exits 0 on EOF.
     """
+    # CRITICAL: dup FDs 0 and 1 BEFORE pystata gets imported / initialized.
+    # `pystata.config.init()` reaches into the runtime's FDs (closes /
+    # redirects stdin, redirects stdout to its own buffer). If we read /
+    # write through `sys.stdin` / `sys.stdout` the protocol breaks the
+    # moment Stata initializes — subsequent reads see EOF and the worker
+    # exits returncode=0 without responding to the second request.
+    #
+    # Duping the file descriptors gives us a reader/writer rooted at a
+    # *separate* FD that pystata cannot reach via the sys.* indirection.
+    saved_stdin_fd = os.dup(0)
+    saved_stdout_fd = os.dup(1)
+    proto_in = os.fdopen(saved_stdin_fd, "r", buffering=1, encoding="utf-8")
+    proto_out = os.fdopen(saved_stdout_fd, "w", buffering=1, encoding="utf-8")
+
     # Imported here so `python -m stata_code.core._pool` can fail loudly
     # only if a request actually arrives — listing the worker as a tool
     # candidate shouldn't cost a Stata init.
     from stata_code.core.runner import execute
 
-    # Capture stdout BEFORE pystata init so any of its messing with file
-    # descriptors doesn't take us with it.
-    out = sys.stdout
-
-    # Explicit readline() loop instead of `for line in sys.stdin` — the latter
+    # Explicit readline() loop instead of `for line in proto_in` — the latter
     # uses the io module's buffered iterator, which read-aheads more bytes
     # than are available on a pipe and breaks the request/response cadence
     # after pystata init.
     while True:
-        line = sys.stdin.readline()
+        line = proto_in.readline()
         if not line:
             break  # EOF — parent closed the pipe
         line = line.strip()
@@ -209,8 +218,8 @@ def _worker_main() -> int:
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
-        out.write(json.dumps(response) + "\n")
-        out.flush()
+        proto_out.write(json.dumps(response) + "\n")
+        proto_out.flush()
     return 0
 
 

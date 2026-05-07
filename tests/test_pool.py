@@ -7,7 +7,6 @@ when available.
 
 from __future__ import annotations
 
-import json
 import sys
 import textwrap
 import time
@@ -25,7 +24,6 @@ from stata_code.core._pool import (
 )
 from stata_code.core._runtime import is_available
 from stata_code.core.schema import ErrorKind, RunResult
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mock-worker scripts. Each script reads one JSON request per line and writes
