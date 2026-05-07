@@ -47,7 +47,7 @@ against it and end-to-end-tested on Stata 18 MP.
   to keep long-running MCP processes from growing unboundedly.
 - **`LICENSE-POLICY.md`** — clean-room policy that forbids opening
   AGPL/GPL Stata project source.
-- **133 tests** covering schema, runner integration, MCP, kernel,
+- **138 tests** covering schema, runner integration, MCP, kernel,
   `_refs`, and error helpers. Real-Stata tests run against Stata 18 MP
   when available.
 

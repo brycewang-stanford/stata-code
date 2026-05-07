@@ -16,6 +16,7 @@ import json
 import sys
 import traceback
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 try:
@@ -253,9 +254,13 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
 
 
 def install_kernel(user: bool = True, system: bool = False) -> None:
-    """Register the Stata kernel with Jupyter."""
-    import os
-    import shutil
+    """Register the Stata kernel with Jupyter.
+
+    By default installs into the current user's Jupyter data dir. Pass
+    `system=True` to request a non-user install through Jupyter's kernelspec
+    manager.
+    """
+    from jupyter_client.kernelspec import KernelSpecManager
 
     py_exec = Path(sys.executable).resolve()
     kernel_json = {
@@ -271,16 +276,16 @@ def install_kernel(user: bool = True, system: bool = False) -> None:
         "metadata": {"debugger": False},
     }
 
-    src_dir = Path(__file__).parent / "stata_kernel"
-    src_dir.mkdir(exist_ok=True)
-    (src_dir / "kernel.json").write_text(json.dumps(kernel_json, indent=2))
-
-    dest = src_dir
-    if user:
-        dest = Path(os.path.expanduser("~/.local/share/jupyter/kernels"))
-        dest.mkdir(parents=True, exist_ok=True)
-        dest = dest / "stata"
-        shutil.copytree(src_dir, dest, dirs_exist_ok=True)
+    install_user = False if system else user
+    with TemporaryDirectory(prefix="stata_code_kernel_") as td:
+        src_dir = Path(td)
+        (src_dir / "kernel.json").write_text(json.dumps(kernel_json, indent=2))
+        dest = KernelSpecManager().install_kernel_spec(
+            str(src_dir),
+            kernel_name="stata",
+            user=install_user,
+            replace=True,
+        )
 
     print(f"Kernel installed to: {dest}")
     print("Restart Jupyter and select 'Stata' as the kernel.")
@@ -310,10 +315,11 @@ def run_main() -> None:
 
     if len(_sys.argv) > 1 and _sys.argv[1] == "install":
         parser = argparse.ArgumentParser(prog="stata-code-kernel install")
-        parser.add_argument("--system", action="store_true")
-        parser.add_argument("--user", action="store_true", default=True)
+        target = parser.add_mutually_exclusive_group()
+        target.add_argument("--user", dest="user", action="store_true", default=True)
+        target.add_argument("--system", dest="user", action="store_false")
         args = parser.parse_args(_sys.argv[2:])
-        install_kernel(user=args.user, system=args.system)
+        install_kernel(user=args.user, system=not args.user)
         return
 
     from ipykernel.kernelapp import IPKernelApp

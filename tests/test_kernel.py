@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -180,19 +181,84 @@ class TestStataKernelClass:
 class TestInstallKernel:
     """Test the kernel installation CLI."""
 
-    def test_install_kernel_writes_kernel_json(self, tmp_path):
-        """install_kernel should write a valid kernel.json."""
+    def test_install_kernel_writes_user_kernel_spec(self, tmp_path):
+        """install_kernel should generate a valid user kernelspec."""
         from stata_code.kernel.kernel import install_kernel
 
+        installed: list[dict] = []
+
+        class DummyKernelSpecManager:
+            def install_kernel_spec(
+                self,
+                source_dir: str,
+                *,
+                kernel_name: str,
+                user: bool,
+                replace: bool,
+            ) -> str:
+                spec = json.loads((Path(source_dir) / "kernel.json").read_text())
+                installed.append(
+                    {
+                        "kernel_name": kernel_name,
+                        "user": user,
+                        "replace": replace,
+                        "spec": spec,
+                    }
+                )
+                return str(tmp_path / "kernels" / kernel_name)
+
         with patch.object(sys, "executable", str(tmp_path / "python")):
-            with patch.object(Path, "mkdir"):
-                with patch("builtins.open", side_effect=OSError("read-only")):
-                    # Just verify the function exists and has correct signature
-                    import inspect
-                    sig = inspect.signature(install_kernel)
-                    params = list(sig.parameters.keys())
-                    assert "user" in params
-                    assert "system" in params
+            with patch(
+                "jupyter_client.kernelspec.KernelSpecManager",
+                return_value=DummyKernelSpecManager(),
+            ):
+                install_kernel(user=True)
+
+        assert installed == [
+            {
+                "kernel_name": "stata",
+                "user": True,
+                "replace": True,
+                "spec": {
+                    "argv": [
+                        str((tmp_path / "python").resolve()),
+                        "-m",
+                        "stata_code.kernel",
+                        "-f",
+                        "{connection_file}",
+                    ],
+                    "display_name": "Stata",
+                    "language": "stata",
+                    "metadata": {"debugger": False},
+                },
+            }
+        ]
+
+    def test_install_kernel_system_not_user(self, tmp_path):
+        """system=True should pass user=False to Jupyter's installer."""
+        from stata_code.kernel.kernel import install_kernel
+
+        flags: list[bool] = []
+
+        class DummyKernelSpecManager:
+            def install_kernel_spec(
+                self,
+                source_dir: str,
+                *,
+                kernel_name: str,
+                user: bool,
+                replace: bool,
+            ) -> str:
+                flags.append(user)
+                return str(tmp_path / "kernels" / kernel_name)
+
+        with patch(
+            "jupyter_client.kernelspec.KernelSpecManager",
+            return_value=DummyKernelSpecManager(),
+        ):
+            install_kernel(system=True)
+
+        assert flags == [False]
 
 
 # NOTE: TestStataGraphDataUri was removed in v0.2. The legacy `StataGraph`

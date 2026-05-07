@@ -21,7 +21,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.2 (May 2026)** — core, MCP server, and Jupyter kernel are working end-to-end against Stata 18 MP. 133 tests passing including real-Stata integration tests. License: **MIT**.
+**Status: v0.2 (May 2026)** — core, MCP server, and Jupyter kernel are working end-to-end against Stata 18 MP. 138 tests passing including real-Stata integration tests. License: **MIT**.
 
 ---
 
@@ -233,7 +233,7 @@ See [SCHEMA.md §7](SCHEMA.md) for explicitly-out-of-scope items.
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite (133 tests)
+pytest                              # full suite (138 tests)
 pytest tests/test_schema.py         # schema-only (no Stata required)
 pytest tests/test_runner.py -v      # real-Stata integration
 ```
