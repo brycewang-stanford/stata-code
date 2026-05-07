@@ -231,7 +231,7 @@ The runner is the only place that touches Stata. Both the Jupyter kernel and the
 ### Next up
 
 - **v0.3** — Console fallback for Stata 11–16 (re-implemented against the v1.0 schema)
-- **v0.3** — Hard timeout / mid-Stata interrupt — requires a subprocess-based runtime; cooperative cancel exists but doesn't interrupt code already in-flight
+- **v0.3** — Hard timeout / mid-Stata interrupt — design + tradeoffs in [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md); requires a subprocess-based runtime, cooperative cancel exists but doesn't interrupt code already in-flight
 - **v0.4** — VSCode Marketplace publishing (the scaffold + graph webview already work in dev host)
 - **v1.0** — Stable schema, published to PyPI / VSCode Marketplace
 

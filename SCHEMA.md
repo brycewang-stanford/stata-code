@@ -568,7 +568,9 @@ This section tracks how much of the schema is wired up in code. Not normative
   `execute()` but not yet enforced; cancellation is cooperative-only
   (does not interrupt code already in-flight). pystata's in-process
   model has no clean cancel primitive — v0.3 will move long calls
-  into a subprocess pool with signal-based cancellation.
+  into a subprocess pool with signal-based cancellation. Design
+  constraints, options considered, and an effort estimate are
+  written up in [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md).
 - **Console fallback for Stata 11–16.** Earlier scaffold's
   `ConsoleFallback` was deleted in v0.2 (it produced legacy
   `StataResult` and didn't fit the new pipeline). v0.3 will reintroduce
