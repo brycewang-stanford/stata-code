@@ -128,6 +128,7 @@ class TestDispatch:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.stata_required
 @pytest.mark.skipif(not _real_stata, reason="Stata not available")
 class TestEndToEnd:
     def test_stata_run_returns_run_result_json(self):

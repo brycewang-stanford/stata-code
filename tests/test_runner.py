@@ -10,9 +10,12 @@ import pytest
 from stata_code.core._runtime import is_available
 from stata_code.core.schema import Backend, ErrorKind, RunResult, StataEdition
 
-pytestmark = pytest.mark.skipif(
-    not is_available(), reason="pystata / Stata 17+ not available"
-)
+pytestmark = [
+    pytest.mark.stata_required,
+    pytest.mark.skipif(
+        not is_available(), reason="pystata / Stata 17+ not available"
+    ),
+]
 
 
 @pytest.fixture(scope="session")

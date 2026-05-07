@@ -56,6 +56,7 @@ stata = "stata_code.kernel:install_kernel"
 Homepage = "https://github.com/brycewang-stanford/stata_code"
 Repository = "https://github.com/brycewang-stanford/stata_code"
 Issues = "https://github.com/brycewang-stanford/stata_code/issues"
+Changelog = "https://github.com/brycewang-stanford/stata_code/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["stata_code"]
@@ -77,3 +78,6 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "stata_required: test exercises a real Stata installation via pystata. Skipped automatically when pystata is not available; CI can also exclude with `pytest -m 'not stata_required'`.",
+]

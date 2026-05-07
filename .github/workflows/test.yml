@@ -33,10 +33,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,mcp,kernel]"
 
-      - name: Run tests
-        # Stata-dependent tests skip themselves cleanly on CI; schema/MCP/kernel
-        # unit tests run unconditionally. See README "Testing" for details.
-        run: pytest -v
+      - name: Run no-Stata tests
+        # CI runners don't have Stata installed. Skip the stata_required
+        # marker explicitly so we don't pay the per-test skip cost on every
+        # integration test, and so failures remain easy to read. Run the
+        # full suite locally with plain `pytest`.
+        run: pytest -v -m "not stata_required"
 
       - name: Verify JSON Schema artifact is in sync
         run: python scripts/export_schema.py --check
@@ -77,8 +79,11 @@ jobs:
 
       - name: Build sdist + wheel
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build twine
           python -m build
+
+      - name: twine check (catches PyPI metadata breakage on every PR)
+        run: python -m twine check dist/*
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

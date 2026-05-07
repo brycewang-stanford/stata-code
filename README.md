@@ -21,7 +21,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.2 (May 2026)** — core, MCP server, and Jupyter kernel are working end-to-end against Stata 18 MP. 138 tests passing including real-Stata integration tests. License: **MIT**.
+**Status: v0.2 (May 2026)** — core, MCP server, and Jupyter kernel are working end-to-end against Stata 18 MP. 144 tests passing (88 no-Stata + 56 real-Stata integration). License: **MIT**.
 
 ---
 
@@ -50,10 +50,13 @@ See [LICENSE-POLICY.md](LICENSE-POLICY.md) for the project's clean-room policy o
 Requirements: **Stata 17+** (with `pystata` shipped) and **Python 3.10+**.
 
 ```bash
-# from PyPI (once published; coming soon)
+# from PyPI
 pip install stata_code
 
-# or from source
+# with the MCP server and Jupyter kernel extras
+pip install "stata_code[mcp,kernel]"
+
+# or from source (editable install for development)
 git clone https://github.com/brycewang-stanford/stata_code.git
 cd stata_code
 pip install -e ".[mcp,kernel]"
@@ -64,6 +67,8 @@ pip install -e ".[mcp,kernel]"
 ---
 
 ## Quick start
+
+> See [`examples/`](examples/) for end-to-end cookbook entries (regression, DiD, graphs, multi-session, large matrices).
 
 ### As a Python library
 
@@ -236,12 +241,15 @@ See [SCHEMA.md §7](SCHEMA.md) for explicitly-out-of-scope items.
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite (138 tests)
-pytest tests/test_schema.py         # schema-only (no Stata required)
-pytest tests/test_runner.py -v      # real-Stata integration
+pytest                              # full suite (144 tests)
+pytest -m "not stata_required"      # CI subset — no Stata needed
+pytest -m "stata_required" -v       # Stata-only integration tests
 ```
 
-Tests skipping with "pystata / Stata 17+ not available" is the expected behavior on machines without Stata.
+The `stata_required` marker tags the integration tests; CI uses
+`pytest -m "not stata_required"` so it doesn't even collect them.
+Locally without Stata, those tests still skip cleanly with the
+"pystata / Stata 17+ not available" message.
 
 ---
 
