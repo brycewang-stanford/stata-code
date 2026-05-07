@@ -14,13 +14,20 @@ The extension is a thin VSCode transport in front of the same
 Stata logic; everything goes through the MCP `stata_run`, `get_log`,
 `get_graph`, `get_matrix`, `list_sessions`, `reset_session` tools.
 
-Three commands are registered:
+Four commands are registered:
 
 | Command | Default keybinding | Purpose |
 | --- | --- | --- |
 | `Stata: Run Selection` | `Cmd/Ctrl+Enter` | Run the selection (or current line) |
 | `Stata: Run Active File` | — | Run the entire file |
+| `Stata: Show Graphs` | — | Reopen the most recent run's graphs in a webview |
 | `Stata: Show Last Result (JSON)` | — | Open the last `RunResult` envelope as JSON |
+
+A successful run with one or more captured graphs auto-opens the
+graph webview side-by-side with the editor. The webview fetches the
+PNG/SVG/PDF bytes via `get_graph(ref)` lazily — they are never
+embedded in the original `RunResult`, so token economy is preserved
+even when running headlessly through the MCP server.
 
 ## Setup
 
@@ -74,7 +81,7 @@ Diff the two and pull in any newly-added fields by hand.
 
 ## Architecture
 
-```
+```text
 VSCode editor
    │
    ▼  (text/code via callTool)

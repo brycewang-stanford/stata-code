@@ -17,10 +17,7 @@
   "keywords": ["stata", "pystata", "mcp", "causal-inference"],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:stata",
-    "onCommand:stataCode.runSelection",
-    "onCommand:stataCode.runFile",
-    "onCommand:stataCode.showLastResult"
+    "onLanguage:stata"
   ],
   "contributes": {
     "languages": [
@@ -44,6 +41,11 @@
       {
         "command": "stataCode.showLastResult",
         "title": "Stata: Show Last Result (JSON)",
+        "category": "stata_code"
+      },
+      {
+        "command": "stataCode.showGraphs",
+        "title": "Stata: Show Graphs",
         "category": "stata_code"
       }
     ],

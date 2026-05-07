@@ -19,13 +19,27 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   hundreds of variables) from blowing up the result envelope.
 
 - **VSCode extension scaffold** (`vscode/`). TypeScript extension that
-  spawns `stata-code-mcp` over stdio and registers three commands
-  (`Run Selection`, `Run Active File`, `Show Last Result`). Hand-rolled
-  TypeScript types in `vscode/src/types/runResult.ts` mirror the
-  Pydantic envelope; `npm run gen-types` regenerates a full copy from
+  spawns `stata-code-mcp` over stdio and registers four commands
+  (`Run Selection`, `Run Active File`, `Show Graphs`, `Show Last
+  Result`). Hand-rolled TypeScript types in
+  `vscode/src/types/runResult.ts` mirror the Pydantic envelope;
+  `npm run gen-types` regenerates a full copy from
   `schema/run_result.schema.json` for cross-checking. Source-only —
-  build with `npm install && npm run compile`. Marketplace publishing
-  and webview graph rendering deferred to v0.4.
+  build with `npm install && npm run compile`.
+
+- **VSCode graph webview** (`vscode/src/graphPanel.ts`). Successful
+  runs that capture graphs auto-open a side-by-side webview that
+  renders PNG / SVG / PDF inline. The webview lazily fetches each
+  graph's bytes via `get_graph(ref)` rather than embedding them in
+  the original `RunResult`, so token economy is preserved end-to-end
+  (an agent driving the same MCP server pays nothing extra for
+  inlining). Strict CSP (`default-src 'none'`, no scripts).
+  Marketplace publishing still deferred.
+
+- **`stata_required` pytest marker.** Integration tests against a
+  real Stata installation are now tagged with the marker; CI runs
+  `pytest -m "not stata_required"`, completing in ~1.5s instead of
+  ~19s. Local without Stata, the same tests still skip cleanly.
 
 ### Changed
 

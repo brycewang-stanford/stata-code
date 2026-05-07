@@ -7,6 +7,7 @@
 
 import * as vscode from "vscode";
 
+import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
 import type { RunResult } from "./types/runResult";
 
@@ -24,6 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("stataCode.runFile", () => runSelection(true)),
     vscode.commands.registerCommand("stataCode.showLastResult", showLastResult),
+    vscode.commands.registerCommand("stataCode.showGraphs", showGraphs),
   );
 }
 
@@ -81,6 +83,9 @@ async function runSelection(wholeFile: boolean): Promise<void> {
         const result = await c.runStata(code, { sessionId, includeFullLog });
         lastResult = result;
         renderResult(result);
+        if (result.ok && result.graphs.length > 0) {
+          await GraphPanel.show(c, result, output!);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         output!.appendLine(`[stata_code] error: ${msg}`);
@@ -126,9 +131,21 @@ function renderResult(r: RunResult): void {
 
   if (r.graphs.length > 0) {
     output.appendLine(
-      `[stata_code] ${r.graphs.length} graph(s) captured. Use the Show Last Result command to render.`,
+      `[stata_code] ${r.graphs.length} graph(s) captured (rendered in side panel).`,
     );
   }
+}
+
+async function showGraphs(): Promise<void> {
+  if (!lastResult) {
+    vscode.window.showInformationMessage("stata_code: no result yet");
+    return;
+  }
+  if (lastResult.graphs.length === 0) {
+    vscode.window.showInformationMessage("stata_code: last run produced no graphs");
+    return;
+  }
+  await GraphPanel.show(getClient(), lastResult, output!);
 }
 
 async function showLastResult(): Promise<void> {
