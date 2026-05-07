@@ -65,6 +65,7 @@ _FILE_PATH_RE = re.compile(
     r"file\s+(\S+?)\s+(?:not\s+found|already\s+exists|could\s+not)"
 )
 _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
+_UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
 
 # Cap on `dataset.variables` to avoid pathological return sizes (per SCHEMA §3.5).
 _DATASET_VAR_CAP = 200
@@ -320,7 +321,12 @@ def _stata_info(rt: Any) -> StataInfo:
 
 
 def _extract_typed_fields(kind: ErrorKind, message: str) -> dict[str, str | None]:
-    fields: dict[str, str | None] = {"varname": None, "path": None, "name": None}
+    fields: dict[str, str | None] = {
+        "varname": None,
+        "path": None,
+        "name": None,
+        "command": None,
+    }
     if kind == ErrorKind.VARNAME_NOT_FOUND or kind == ErrorKind.NAME_CONFLICT:
         m = _VARNAME_RE.search(message)
         if m:
@@ -341,6 +347,10 @@ def _extract_typed_fields(kind: ErrorKind, message: str) -> dict[str, str | None
         m = _NAME_CONFLICT_RE.search(message)
         if m:
             fields["name"] = m.group(1)
+    if kind == ErrorKind.COMMAND_NOT_FOUND:
+        m = _UNRECOGNIZED_CMD_RE.search(message)
+        if m:
+            fields["command"] = m.group(1)
     return fields
 
 
@@ -437,6 +447,7 @@ def _build_error(
         kind,
         varname=typed["varname"],
         name=typed["name"],
+        command=typed["command"],
         path=typed["path"],
         available_varnames=available_varnames,
     )

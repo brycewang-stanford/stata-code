@@ -136,6 +136,18 @@ class TestErrorClassification:
         # Suggestion includes the closest match (mpg in auto.dta)
         assert any("mpg" in s.action for s in r.error.suggestions)
 
+    def test_varname_not_found_emits_did_you_mean(self, loaded_auto):
+        """End-to-end: real fuzzy match against the dataset's variable list."""
+        from stata_code.core.runner import execute
+
+        r = execute("summarize mpgg")
+        assert r.ok is False
+        # The headline win for agents: a "Did you mean `mpg`?" suggestion.
+        assert any(
+            "Did you mean" in s.action and "mpg" in s.action
+            for s in r.error.suggestions
+        )
+
     def test_unrecognized_command(self):
         from stata_code.core.runner import execute
 
