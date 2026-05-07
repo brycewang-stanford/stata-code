@@ -1,0 +1,128 @@
+// Thin wrapper around @modelcontextprotocol/sdk's stdio client.
+//
+// One MCP client instance per VSCode workspace, lazily started on the
+// first call. The child process is `stata-code-mcp` (configurable). The
+// extension calls high-level methods (`runStata`, `getLog`, `getGraph`,
+// `getMatrix`); this module hides the JSON-RPC plumbing.
+
+import * as vscode from "vscode";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+import type { RunResult } from "./types/runResult";
+
+export interface RunStataOptions {
+  sessionId?: string;
+  includeFullLog?: boolean;
+  includeGraphs?: "ref" | "inline" | "none";
+}
+
+export class StataMcpClient implements vscode.Disposable {
+  private client: Client | null = null;
+  private transport: StdioClientTransport | null = null;
+  private startPromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly command: string,
+    private readonly args: string[],
+    private readonly output: vscode.OutputChannel,
+  ) {}
+
+  private async start(): Promise<void> {
+    if (this.client) return;
+    if (this.startPromise) return this.startPromise;
+
+    this.startPromise = (async () => {
+      this.transport = new StdioClientTransport({
+        command: this.command,
+        args: this.args,
+      });
+      this.client = new Client(
+        { name: "stata-code-vscode", version: "0.1.0" },
+        { capabilities: {} },
+      );
+      this.output.appendLine(
+        `[stata_code] launching MCP server: ${this.command} ${this.args.join(" ")}`,
+      );
+      await this.client.connect(this.transport);
+      this.output.appendLine("[stata_code] MCP server connected");
+    })();
+
+    try {
+      await this.startPromise;
+    } catch (err) {
+      this.startPromise = null;
+      this.client = null;
+      this.transport = null;
+      throw err;
+    }
+  }
+
+  async runStata(code: string, opts: RunStataOptions = {}): Promise<RunResult> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+
+    const args: Record<string, unknown> = { code };
+    if (opts.sessionId !== undefined) args.session_id = opts.sessionId;
+    if (opts.includeFullLog !== undefined) args.include_full_log = opts.includeFullLog;
+    if (opts.includeGraphs !== undefined) args.include_graphs = opts.includeGraphs;
+
+    const reply = await this.client.callTool({ name: "stata_run", arguments: args });
+    return parseTextResult<RunResult>(reply, "stata_run");
+  }
+
+  async getLog(ref: string): Promise<{ text: string; lines_total: number; bytes_total: number }> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = await this.client.callTool({ name: "get_log", arguments: { ref } });
+    return parseTextResult(reply, "get_log");
+  }
+
+  async getMatrix(
+    ref: string,
+  ): Promise<{ rows: string[]; cols: string[]; values: (number | null)[][] }> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = await this.client.callTool({ name: "get_matrix", arguments: { ref } });
+    return parseTextResult(reply, "get_matrix");
+  }
+
+  async getGraphBytes(ref: string): Promise<{ data: string; mimeType: string }> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = (await this.client.callTool({
+      name: "get_graph",
+      arguments: { ref },
+    })) as { content: Array<{ type: string; data?: string; mimeType?: string }> };
+    const image = reply.content.find((c) => c.type === "image");
+    if (!image || !image.data) {
+      throw new Error("get_graph did not return an image");
+    }
+    return { data: image.data, mimeType: image.mimeType ?? "image/png" };
+  }
+
+  dispose(): void {
+    if (this.transport) {
+      void this.transport.close();
+    }
+    this.transport = null;
+    this.client = null;
+    this.startPromise = null;
+  }
+}
+
+function parseTextResult<T>(
+  reply: unknown,
+  toolName: string,
+): T {
+  const r = reply as { content?: Array<{ type: string; text?: string }> };
+  const text = r.content?.find((c) => c.type === "text")?.text;
+  if (text === undefined) {
+    throw new Error(`${toolName} returned no text content`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${toolName} returned non-JSON text: ${text.slice(0, 200)}`);
+  }
+}

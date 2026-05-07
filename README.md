@@ -225,7 +225,7 @@ The runner is the only place that touches Stata. Both the Jupyter kernel and the
 - **v0.3** — Console fallback for Stata 11–16 (re-implemented against the v1.0 schema)
 - **v0.3** — Cooperative cancellation (`cancel(session_id)`)
 - **v0.3** — Hard timeout enforcement (subprocess-based)
-- **v0.4** — Native VSCode extension (TypeScript), launches the MCP server
+- **v0.4** — Native VSCode extension (TypeScript) — [scaffold landed](vscode/) with `Run Selection` command, MCP child-process spawn, and `RunResult` typing; needs marketplace publish + graph webview
 - **v1.0** — Stable schema, published to PyPI / VSCode Marketplace
 
 See [SCHEMA.md §7](SCHEMA.md) for explicitly-out-of-scope items.

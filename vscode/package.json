@@ -1,0 +1,100 @@
+{
+  "name": "stata-code-vscode",
+  "displayName": "stata_code",
+  "description": "Run Stata code from VSCode through the agent-native stata_code MCP server.",
+  "version": "0.1.0",
+  "publisher": "brycewang-stanford",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brycewang-stanford/stata_code.git",
+    "directory": "vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Data Science", "Notebooks"],
+  "keywords": ["stata", "pystata", "mcp", "causal-inference"],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:stata",
+    "onCommand:stataCode.runSelection",
+    "onCommand:stataCode.runFile",
+    "onCommand:stataCode.showLastResult"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "stata",
+        "aliases": ["Stata", "stata"],
+        "extensions": [".do", ".ado", ".mata"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "stataCode.runSelection",
+        "title": "Stata: Run Selection",
+        "category": "stata_code"
+      },
+      {
+        "command": "stataCode.runFile",
+        "title": "Stata: Run Active File",
+        "category": "stata_code"
+      },
+      {
+        "command": "stataCode.showLastResult",
+        "title": "Stata: Show Last Result (JSON)",
+        "category": "stata_code"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "stataCode.runSelection",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == stata"
+      }
+    ],
+    "configuration": {
+      "title": "stata_code",
+      "properties": {
+        "stataCode.serverCommand": {
+          "type": "string",
+          "default": "stata-code-mcp",
+          "description": "Command used to launch the stata_code MCP server. Must be on PATH or an absolute path. Override if you installed the package into a non-default Python environment."
+        },
+        "stataCode.serverArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra args passed to the MCP server process."
+        },
+        "stataCode.sessionId": {
+          "type": "string",
+          "default": "main",
+          "description": "Session id passed to stata_run. 'main' is the default Stata frame; other values create/route to same-named frames."
+        },
+        "stataCode.includeFullLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether to ask the runner for the full log inline. When false (the default) the extension fetches the log on demand via get_log(ref)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "gen-types": "node scripts/gen-types.cjs",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

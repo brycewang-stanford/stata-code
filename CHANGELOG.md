@@ -18,6 +18,15 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   SCHEMA.md and prevents pathological commands (e.g., `correlate` over
   hundreds of variables) from blowing up the result envelope.
 
+- **VSCode extension scaffold** (`vscode/`). TypeScript extension that
+  spawns `stata-code-mcp` over stdio and registers three commands
+  (`Run Selection`, `Run Active File`, `Show Last Result`). Hand-rolled
+  TypeScript types in `vscode/src/types/runResult.ts` mirror the
+  Pydantic envelope; `npm run gen-types` regenerates a full copy from
+  `schema/run_result.schema.json` for cross-checking. Source-only —
+  build with `npm install && npm run compile`. Marketplace publishing
+  and webview graph rendering deferred to v0.4.
+
 ### Changed
 
 - **MCP server tool count is now 7** (added `get_matrix`).
