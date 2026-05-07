@@ -33,10 +33,10 @@ except ImportError:  # pragma: no cover - environment without mcp installed
     stdio_server = None  # type: ignore[assignment]
     _MCP_AVAILABLE = False
 
+from stata_code.core._pool import get_default_pool, pool_execute
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.runner import (
     cancel,
-    execute,
     get_graph,
     get_log,
     get_matrix,
@@ -248,6 +248,10 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
             was_pending = not cancel(sid)  # cancel() returns False if already pending
+            # In subprocess-pool mode, also SIGTERM the worker so an in-flight
+            # call that's blocked inside Stata C-land actually terminates rather
+            # than waiting for the next inter-command cooperative checkpoint.
+            killed_worker = get_default_pool().kill_session(sid)
             return [
                 TextContent(
                     type="text",
@@ -256,6 +260,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
                             "session_id": sid,
                             "was_pending": was_pending,
                             "is_pending": is_cancel_pending(sid),
+                            "killed_worker": killed_worker,
                         }
                     ),
                 )
@@ -280,7 +285,7 @@ def _run_tool(arguments: dict[str, Any]) -> list[Any]:
     if not code:
         return [TextContent(type="text", text='{"error": "code is required"}')]
     try:
-        result = execute(code, **args)
+        result = pool_execute(code, **args)
     except (ValueError, NotImplementedError) as exc:
         return [
             TextContent(
