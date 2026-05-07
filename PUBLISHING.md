@@ -1,4 +1,4 @@
-# Publishing `stata_code` to PyPI
+# Publishing `stata-code` to PyPI
 
 This project publishes to PyPI via **GitHub Actions Trusted Publishing** (OIDC).
 There are **no API tokens** stored in GitHub repository secrets — PyPI verifies
@@ -24,7 +24,7 @@ Trusted Publishing has two modes:
 - **Existing project**: if you already pushed an initial release manually
   (e.g. via `twine upload` with a one-off API token), configure trusted
   publishing on the project page at
-  https://pypi.org/manage/project/stata_code/settings/publishing/.
+  https://pypi.org/manage/project/stata-code/settings/publishing/.
 
 Either path lands you in the same place after the first run.
 
@@ -35,7 +35,7 @@ On the PyPI publishing page, add a GitHub publisher with these values:
 | Field | Value |
 | --- | --- |
 | Owner | `brycewang-stanford` |
-| Repository name | `stata_code` |
+| Repository name | `stata-code` |
 | Workflow filename | `release.yml` |
 | Environment name | `pypi` |
 

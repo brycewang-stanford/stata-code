@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/brycewang-stanford/stata_code.git",
+    "url": "https://github.com/brycewang-stanford/stata-code.git",
     "directory": "vscode"
   },
   "engines": {
@@ -47,6 +47,40 @@
         "command": "stataCode.showLastResult",
         "title": "Stata: Show Last Result (JSON)",
         "category": "stata-code"
+      },
+      {
+        "command": "stataCode.openRunResult",
+        "title": "Stata: Open Run Result (JSON)",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.openMatrix",
+        "title": "Stata: Open Matrix",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.rerunHistory",
+        "title": "Stata: Rerun",
+        "category": "stata-code",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "stataCode.copyRunCode",
+        "title": "Stata: Copy Run Code",
+        "category": "stata-code",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "stataCode.exportRunBundle",
+        "title": "Stata: Export Run Bundle...",
+        "category": "stata-code",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "stataCode.clearRunHistory",
+        "title": "Stata: Clear Run History",
+        "category": "stata-code",
+        "icon": "$(trash)"
       },
       {
         "command": "stataCode.showGraphs",
@@ -90,6 +124,32 @@
       {
         "command": "stataCode.resetSession",
         "title": "Stata: Reset Current Session",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.workingDirectoryMenu",
+        "title": "Stata: Working Directory...",
+        "category": "stata-code",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "stataCode.showStataPwd",
+        "title": "Stata: Show Working Directory",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.cdToWorkspace",
+        "title": "Stata: cd to Workspace Folder",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.cdToCurrentFile",
+        "title": "Stata: cd to Current File Folder",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.chooseWorkingDirectory",
+        "title": "Stata: Choose Working Directory...",
         "category": "stata-code"
       },
       {
@@ -166,6 +226,12 @@
           "contextualTitle": "stata-code"
         },
         {
+          "id": "stataCode.runHistory",
+          "name": "Run History",
+          "icon": "$(history)",
+          "contextualTitle": "stata-code"
+        },
+        {
           "id": "stataCode.logsHistory",
           "name": "Logs",
           "icon": "$(output)",
@@ -183,6 +249,10 @@
       {
         "view": "stataCode.lastResult",
         "contents": "No run yet. Open a Stata file and press Cmd/Ctrl+Enter to run a selection."
+      },
+      {
+        "view": "stataCode.runHistory",
+        "contents": "No run history yet. Each run will appear here for rerun, copy, and export."
       },
       {
         "view": "stataCode.logsHistory",
@@ -211,6 +281,11 @@
           "command": "stataCode.runFile",
           "when": "editorLangId == stata",
           "group": "stataCode@2"
+        },
+        {
+          "command": "stataCode.workingDirectoryMenu",
+          "when": "editorLangId == stata",
+          "group": "stataCode@3"
         }
       ],
       "view/title": [
@@ -232,6 +307,16 @@
         {
           "command": "stataCode.clearLogs",
           "when": "view == stataCode.logsHistory",
+          "group": "navigation@2"
+        },
+        {
+          "command": "stataCode.exportRunBundle",
+          "when": "view == stataCode.runHistory",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.clearRunHistory",
+          "when": "view == stataCode.runHistory",
           "group": "navigation@2"
         },
         {
@@ -277,6 +362,26 @@
           "group": "inline@2"
         },
         {
+          "command": "stataCode.rerunHistory",
+          "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.exportRunBundle",
+          "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "stataCode.copyRunCode",
+          "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
+          "group": "inline@3"
+        },
+        {
+          "command": "stataCode.openRunResult",
+          "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
+          "group": "inline@4"
+        },
+        {
           "command": "stataCode.openGraph",
           "when": "view == stataCode.graphsHistory && viewItem == stataCode.graphHistoryItem",
           "group": "inline@1"
@@ -303,6 +408,38 @@
         {
           "command": "stataCode.runCell",
           "when": "false"
+        },
+        {
+          "command": "stataCode.rerunHistory",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.copyRunCode",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.openRunResult",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.openMatrix",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.showStataPwd",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.cdToWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.cdToCurrentFile",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.chooseWorkingDirectory",
+          "when": "false"
         }
       ]
     },
@@ -312,7 +449,7 @@
         "stataCode.serverCommand": {
           "type": "string",
           "default": "stata-code-mcp",
-          "description": "Command used to launch the stata_code MCP server. Must be on PATH or an absolute path. Override if you installed the package into a non-default Python environment."
+          "description": "Command used to launch the stata-code MCP server. Must be on PATH or an absolute path. Override if you installed the package into a non-default Python environment."
         },
         "stataCode.serverArgs": {
           "type": "array",

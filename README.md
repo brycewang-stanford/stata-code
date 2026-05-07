@@ -1,15 +1,15 @@
-# stata_code
+# stata-code
 
 > 面向 LLM 智能体的 Stata 桥接工具 - **一个 Python 核心，多种前端入口**。
 > Agent-native Stata bridge - **one Python core, multiple frontends**.
 
-`stata_code` 让你可以从现代开发环境中驱动 Stata：LLM 智能体（Claude Code、Cursor、Claude Desktop）、Jupyter notebook，或计划中的 VS Code 编辑器入口。它们共享同一个 Python 核心，并返回稳定、结构化、**适合智能体读取**的结果格式。
+`stata-code` 让你可以从现代开发环境中驱动 Stata：LLM 智能体（Claude Code、Cursor、Claude Desktop）、Jupyter notebook，或计划中的 VS Code 编辑器入口。它们共享同一个 Python 核心，并返回稳定、结构化、**适合智能体读取**的结果格式。
 
-`stata_code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a planned VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
+`stata-code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a planned VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
 
 ```text
                     ┌────────────────────────────────────────┐
-                    │     stata_code core (Python)           │
+                    │     stata-code core (Python)           │
                     │                                        │
                     │   • pystata adapter (Stata 17+)        │
                     │   • v1.0 unified result schema         │
@@ -48,9 +48,9 @@ The Stata AI / agent tooling landscape is fragmented; see [References-tools.md](
 - 很多工具一开始是为人类交互设计的，再接到 MCP 上；它们经常把 200 行日志和 base64 图片直接塞进回复，默认就大量消耗 token。
   Many existing tools were designed for humans first and then bolted onto MCP; they often dump long logs and base64 graph blobs into every reply, burning tokens by default.
 
-`stata_code` 要填补的就是这个空位：
+`stata-code` 要填补的就是这个空位：
 
-`stata_code` is designed to fill that gap:
+`stata-code` is designed to fill that gap:
 
 1. **MIT 许可证**，没有 copyleft 传染问题。
    **MIT-licensed**, with no copyleft contagion.
@@ -95,9 +95,9 @@ pip install -e ".[mcp,kernel]"
 > `import sklearn`. So: `pip install stata-code`,
 > `from stata_code import run`.
 
-注意：`pystata` **不在 PyPI 上**，它随 Stata 一起安装。`stata_code` 会自动在 macOS 的 `/Applications/Stata/utilities/pystata` 以及 Linux / Windows 的对应位置寻找它。如果你的 Stata 安装在其他位置，请在导入前把 `pystata` 加到 `PYTHONPATH`。
+注意：`pystata` **不在 PyPI 上**，它随 Stata 一起安装。`stata-code` 会自动在 macOS 的 `/Applications/Stata/utilities/pystata` 以及 Linux / Windows 的对应位置寻找它。如果你的 Stata 安装在其他位置，请在导入前把 `pystata` 加到 `PYTHONPATH`。
 
-Note: `pystata` is **not** on PyPI; it ships with Stata. `stata_code` auto-discovers it on macOS at `/Applications/Stata/utilities/pystata` and at equivalent Linux / Windows paths. If your install is elsewhere, add it to `PYTHONPATH` before importing.
+Note: `pystata` is **not** on PyPI; it ships with Stata. `stata-code` auto-discovers it on macOS at `/Applications/Stata/utilities/pystata` and at equivalent Linux / Windows paths. If your install is elsewhere, add it to `PYTHONPATH` before importing.
 
 ---
 
@@ -191,8 +191,8 @@ Then open a notebook and select the **Stata** kernel. Stata commands run in cell
 
 A typical `stata_run` response is about **10x smaller** than servers that dump logs and images directly. Three design choices drive this:
 
-1. **日志默认只返回 `head` + `tail` + `ref`**。默认各 20 行；完整日志可以按需用 `get_log(ref)` 获取。Stata 回归日志可能有约 6,000 tokens，`stata_code` 默认约 600 tokens。
-   **Logs return `head` + `tail` + `ref`** by default. Full logs are fetched on demand via `get_log(ref)`. A Stata regression log can be about 6,000 tokens; `stata_code` returns about 600 by default.
+1. **日志默认只返回 `head` + `tail` + `ref`**。默认各 20 行；完整日志可以按需用 `get_log(ref)` 获取。Stata 回归日志可能有约 6,000 tokens，`stata-code` 默认约 600 tokens。
+   **Logs return `head` + `tail` + `ref`** by default. Full logs are fetched on demand via `get_log(ref)`. A Stata regression log can be about 6,000 tokens; `stata-code` returns about 600 by default.
 
 2. **图形默认返回 refs，不内联 base64**。一个 30 KB PNG 转成 base64 约 50,000 tokens；返回 ref 可以让智能体只在真正需要渲染时再取 bytes。
    **Graphs return refs, not inline base64**. A 30 KB PNG can become about 50,000 base64 tokens; returning a ref avoids that unless the agent actually needs the bytes.
@@ -254,7 +254,7 @@ stata_code/
 
 ## 对比 / Comparison
 
-| | stata_code | SepineTam/stata-mcp | hanlulong/stata-mcp | nbstata |
+| | stata-code | SepineTam/stata-mcp | hanlulong/stata-mcp | nbstata |
 | --- | --- | --- | --- | --- |
 | License / 许可证 | **MIT** | AGPL-3.0 | MIT | GPL-3.0 |
 | Standalone MCP / 独立 MCP | ✓ | ✓ | bundled with VS Code | - |
@@ -265,9 +265,9 @@ stata_code/
 | Multi-session / 多 session | ✓ (Stata frames) | partial | - | - |
 | Mature ecosystem / 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
-`stata_code` 是这个问题空间里更年轻的、MIT 许可证的、agent-native 的替代方案。AGPL 方案里，SepineTam 的 `stata-mcp` 目前更成熟；`stata_code` 的目标是服务那些不能接受 copyleft 传染、又需要结构化智能体接口的场景。
+`stata-code` 是这个问题空间里更年轻的、MIT 许可证的、agent-native 的替代方案。AGPL 方案里，SepineTam 的 `stata-mcp` 目前更成熟；`stata-code` 的目标是服务那些不能接受 copyleft 传染、又需要结构化智能体接口的场景。
 
-`stata_code` is the younger, MIT-licensed, agent-native alternative in this problem space. Among the AGPL options, SepineTam's `stata-mcp` is currently more mature; `stata_code` is aimed at cases where copyleft contagion is unacceptable and agents need structured results.
+`stata-code` is the younger, MIT-licensed, agent-native alternative in this problem space. Among the AGPL options, SepineTam's `stata-mcp` is currently more mature; `stata-code` is aimed at cases where copyleft contagion is unacceptable and agents need structured results.
 
 ---
 

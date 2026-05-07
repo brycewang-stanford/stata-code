@@ -56,7 +56,7 @@ jobs:
     # "Trusted publishers". See PUBLISHING.md for setup.
     environment:
       name: pypi
-      url: https://pypi.org/p/stata_code
+      url: https://pypi.org/p/stata-code
     permissions:
       # Required for PyPI Trusted Publishing (OIDC).
       id-token: write
@@ -70,7 +70,7 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         # No `password:` — this uses OIDC against the trusted publisher
-        # configured at https://pypi.org/manage/project/stata_code/settings/publishing/
+        # configured at https://pypi.org/manage/project/stata-code/settings/publishing/
 
   github-release:
     name: create GitHub Release

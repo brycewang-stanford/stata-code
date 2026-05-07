@@ -13,7 +13,7 @@
 import * as vscode from "vscode";
 
 import type { StataMcpClient } from "./mcpClient";
-import type { GraphInfo, RunResult } from "./types/runResult";
+import type { GraphInfo, Matrix, RunResult } from "./types/runResult";
 
 export interface ResultStore {
   getLastResult(): RunResult | undefined;
@@ -275,30 +275,34 @@ function rootNodesFor(r: RunResult): LastNode[] {
   if (r.results) {
     const rScalars = Object.entries(r.results.r?.scalars ?? {});
     const rMacros = Object.entries(r.results.r?.macros ?? {});
+    const rMatrices = Object.entries(r.results.r?.matrices ?? {});
     const eScalars = Object.entries(r.results.e?.scalars ?? {});
     const eMacros = Object.entries(r.results.e?.macros ?? {});
+    const eMatrices = Object.entries(r.results.e?.matrices ?? {});
 
-    if (rScalars.length || rMacros.length) {
+    if (rScalars.length || rMacros.length || rMatrices.length) {
       nodes.push({
         kind: "section",
         label: "r() returns",
-        description: `${rScalars.length}s ${rMacros.length}m`,
+        description: `${rScalars.length}s ${rMacros.length}m ${rMatrices.length}x`,
         icon: "symbol-namespace",
         children: [
           ...rScalars.map(([k, v]) => leaf(k, formatScalar(v))),
           ...rMacros.map(([k, v]) => leaf(k, String(v))),
+          ...rMatrices.map(([k, v]) => matrixLeaf("r", k, v)),
         ],
       });
     }
-    if (eScalars.length || eMacros.length) {
+    if (eScalars.length || eMacros.length || eMatrices.length) {
       nodes.push({
         kind: "section",
         label: "e() returns",
-        description: `${eScalars.length}s ${eMacros.length}m`,
+        description: `${eScalars.length}s ${eMacros.length}m ${eMatrices.length}x`,
         icon: "symbol-namespace",
         children: [
           ...eScalars.map(([k, v]) => leaf(k, formatScalar(v))),
           ...eMacros.map(([k, v]) => leaf(k, String(v))),
+          ...eMatrices.map(([k, v]) => matrixLeaf("e", k, v)),
         ],
       });
     }
@@ -332,6 +336,24 @@ function rootNodesFor(r: RunResult): LastNode[] {
 
 function leaf(label: string, description?: string, tooltip?: string): LastNode {
   return { kind: "leaf", label, description, tooltip };
+}
+
+function matrixLeaf(scope: "r" | "e", name: string, matrix: Matrix): LastNode {
+  const rows = matrix.rows?.length ?? 0;
+  const cols = matrix.cols?.length ?? 0;
+  return {
+    kind: "leaf",
+    label: `${name}`,
+    description: `${rows}x${cols}`,
+    tooltip: matrix.ref ?? `${scope}(${name}) inline matrix`,
+    icon: "symbol-array",
+    command: {
+      command: "stataCode.openMatrix",
+      title: "Open Matrix",
+      arguments: [{ scope, name, matrix }],
+    },
+    contextValue: "stataCode.matrix",
+  };
 }
 
 function formatScalar(v: unknown): string {

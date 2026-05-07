@@ -1,14 +1,41 @@
 # Changelog
 
-All notable changes to `stata_code` are documented here. The format follows
+All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-07
+
+### Changed
+
+- **PyPI distribution renamed to `stata-code`.** Previously published as
+  `stata_code`. Install with `pip install stata-code` going forward; the
+  Python import name remains `stata_code` (Python identifier rules — same
+  pattern as `scikit-learn` → `import sklearn`). Existing users on
+  `pip install stata_code` will keep working until that PyPI project
+  stops receiving new versions, but should migrate.
+- **Project URLs in `pyproject.toml` corrected** to
+  `github.com/brycewang-stanford/stata-code` (the actual repository
+  URL — the previous metadata had `stata_code`).
+- **MCP server announces itself as `stata-code`** (was `stata_code`).
+  This is the protocol-level server name; tool ids
+  (`stata_run`, `get_log`, etc.) are unchanged.
+- **VSCode extension display name unified to `stata-code`** in the
+  Marketplace, activity-bar tile, command-palette `category`, output
+  channel, all toast messages, and webview title. Code identifiers
+  (`stataCode.*` command / view / setting ids; npm `name`
+  `stata-code-vscode`) are unchanged so existing keybindings keep
+  working.
+- **Version aligned across surfaces.** `pyproject.toml`,
+  `stata_code/__init__.py`, `stata_code/mcp/server.py`,
+  `vscode/package.json`, and the VSCode MCP-client handshake all
+  declare `0.3.0`.
+
 ### Added
 
-- **VSCode extension v0.2 — full UI surface** (`vscode/`). Beyond the
+- **VSCode extension v0.3 — full UI surface** (`vscode/`). Beyond the
   v0.1 "run from command palette" scaffold, the extension now ships
   every common GUI affordance, so users who don't drive Stata through
   Claude Code / Cursor can still operate the same MCP server from the
@@ -33,7 +60,7 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
     with the typed error message, failing snippet, and any
     suggestions surfaced in `runResult.error.suggestions`. Hover
     shows the full text; the Problems panel lists the entry under
-    `source: stata_code, code: <error.kind>`.
+    `source: stata-code, code: <error.kind>`.
   - **Code-lens "Run Cell" support.** Lines starting with `* %%`
     get an inline `▶ Run Cell` lens; clicking submits the code
     between markers. Cell ranges map back to the original file

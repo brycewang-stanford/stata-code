@@ -24,7 +24,7 @@ import {
   type SessionStore,
   SessionsProvider,
 } from "./treeProviders";
-import type { GraphFormat, GraphInfo, RunResult } from "./types/runResult";
+import type { GraphFormat, GraphInfo, Matrix, RunResult } from "./types/runResult";
 
 const HISTORY_CAP = 64;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
@@ -113,6 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.runCell", runCell),
     vscode.commands.registerCommand("stataCode.showLastResult", showLastResult),
     vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
+    vscode.commands.registerCommand("stataCode.openMatrix", openMatrix),
     vscode.commands.registerCommand("stataCode.rerunHistory", rerunHistory),
     vscode.commands.registerCommand("stataCode.copyRunCode", copyRunCode),
     vscode.commands.registerCommand("stataCode.exportRunBundle", exportRunBundle),
@@ -131,6 +132,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.closeSession", closeSession),
     vscode.commands.registerCommand("stataCode.cancelSession", cancelSession),
     vscode.commands.registerCommand("stataCode.resetSession", resetSession),
+    vscode.commands.registerCommand("stataCode.workingDirectoryMenu", workingDirectoryMenu),
+    vscode.commands.registerCommand("stataCode.showStataPwd", showStataPwd),
+    vscode.commands.registerCommand("stataCode.cdToWorkspace", cdToWorkspace),
+    vscode.commands.registerCommand("stataCode.cdToCurrentFile", cdToCurrentFile),
+    vscode.commands.registerCommand("stataCode.chooseWorkingDirectory", chooseWorkingDirectory),
     vscode.commands.registerCommand("stataCode.refreshSessions", () =>
       sessionsProvider?.refresh(),
     ),
@@ -424,6 +430,36 @@ async function openRunResult(target?: unknown): Promise<void> {
   await vscode.window.showTextDocument(doc, { preview: false });
 }
 
+async function openMatrix(target?: unknown): Promise<void> {
+  const matrixTarget = resolveMatrixTarget(target);
+  if (!matrixTarget?.matrix) {
+    vscode.window.showInformationMessage("stata-code: no matrix selected");
+    return;
+  }
+
+  try {
+    const matrix = matrixTarget.matrix.ref
+      ? { ...(await getClient().getMatrix(matrixTarget.matrix.ref)), ref: matrixTarget.matrix.ref }
+      : matrixTarget.matrix;
+    if (!matrix.values) {
+      vscode.window.showInformationMessage("stata-code: matrix values are not available");
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument({
+      language: "plaintext",
+      content: matrixToTsv(matrixTarget.name, matrix),
+    });
+    await vscode.window.showTextDocument(doc, {
+      preview: false,
+      viewColumn: vscode.ViewColumn.Beside,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    output?.appendLine(`[stata-code] open matrix failed: ${msg}`);
+    vscode.window.showErrorMessage(`stata-code: ${msg}`);
+  }
+}
+
 async function rerunHistory(target?: unknown): Promise<void> {
   const entry = resolveRunHistoryEntry(target);
   if (!entry) {
@@ -631,8 +667,10 @@ async function statusBarMenu(): Promise<void> {
   const items = [
     { label: "$(add) New Stata tab...", action: "new" as const },
     { label: "$(arrow-swap) Switch tab...", action: "switch" as const },
+    { label: "$(archive) Export latest run", action: "export" as const },
     { label: "$(output) Open latest log", action: "log" as const },
     { label: "$(graph) Show latest graphs", action: "graphs" as const },
+    { label: "$(folder-opened) Working directory...", action: "cwd" as const },
     { label: "$(terminal) Show output", action: "output" as const },
     { label: `$(stop-circle) Cancel "${sid}"`, action: "cancel" as const },
     { label: `$(trash) Reset "${sid}"`, action: "reset" as const },
@@ -646,12 +684,120 @@ async function statusBarMenu(): Promise<void> {
 
   if (pick.action === "new") return newSession();
   if (pick.action === "switch") return switchSession();
+  if (pick.action === "export") return exportRunBundle();
   if (pick.action === "log") return openLog();
   if (pick.action === "graphs") return showGraphs();
+  if (pick.action === "cwd") return workingDirectoryMenu();
   if (pick.action === "output") return showOutput();
   if (pick.action === "cancel") return cancelSession();
   if (pick.action === "reset") return resetSession();
   if (pick.action === "close") return closeSession();
+}
+
+async function workingDirectoryMenu(): Promise<void> {
+  const items = [
+    { label: "$(terminal) Show current Stata directory", action: "pwd" as const },
+    { label: "$(root-folder) cd to workspace folder", action: "workspace" as const },
+    { label: "$(file-directory) cd to current file folder", action: "file" as const },
+    { label: "$(folder-opened) Choose folder...", action: "choose" as const },
+  ];
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: `Stata working directory · session "${currentSessionId()}"`,
+  });
+  if (!pick) return;
+  if (pick.action === "pwd") return showStataPwd();
+  if (pick.action === "workspace") return cdToWorkspace();
+  if (pick.action === "file") return cdToCurrentFile();
+  if (pick.action === "choose") return chooseWorkingDirectory();
+}
+
+async function showStataPwd(): Promise<void> {
+  const result = await runUtilityCode("pwd", "show working directory");
+  if (!result) return;
+  const log = inlineLogText(result).trim();
+  vscode.window.showInformationMessage(log || "stata-code: pwd returned no output");
+}
+
+async function cdToWorkspace(): Promise<void> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    vscode.window.showInformationMessage("stata-code: no workspace folder is open");
+    return;
+  }
+
+  let folder = folders[0];
+  if (folders.length > 1) {
+    const pick = await vscode.window.showQuickPick(
+      folders.map((f) => ({ label: f.name, description: f.uri.fsPath, folder: f })),
+      { placeHolder: "Choose workspace folder for Stata cd" },
+    );
+    if (!pick) return;
+    folder = pick.folder;
+  }
+  await cdToDirectory(folder.uri);
+}
+
+async function cdToCurrentFile(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") {
+    vscode.window.showInformationMessage("stata-code: no file-backed editor is active");
+    return;
+  }
+  await cdToDirectory(vscode.Uri.file(path.dirname(editor.document.uri.fsPath)));
+}
+
+async function chooseWorkingDirectory(): Promise<void> {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+    openLabel: "cd",
+    title: "Choose Stata working directory",
+  });
+  if (!picked?.[0]) return;
+  await cdToDirectory(picked[0]);
+}
+
+async function cdToDirectory(uri: vscode.Uri): Promise<void> {
+  const directory = uri.fsPath;
+  if (!directory) {
+    vscode.window.showErrorMessage("stata-code: selected folder has no local path");
+    return;
+  }
+  const result = await runUtilityCode(`cd "${escapeStataPath(directory)}"`, "change working directory");
+  if (!result) return;
+  if (result.ok) {
+    vscode.window.showInformationMessage(`stata-code: cd ${directory}`);
+  } else {
+    vscode.window.showErrorMessage(
+      `stata-code: cd failed${result.error?.message ? `: ${result.error.message}` : ""}`,
+    );
+  }
+}
+
+async function runUtilityCode(code: string, label: string): Promise<RunResult | undefined> {
+  const sessionId = currentSessionId();
+  output?.show(true);
+  output?.appendLine(`[stata-code] ${label} (session=${sessionId})`);
+  statusBar?.setRunning(true);
+  try {
+    const result = await getClient().runStata(code, {
+      sessionId,
+      includeFullLog: true,
+      includeGraphs: "none",
+    });
+    renderResult(result);
+    sessionsProvider?.refresh();
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    output?.appendLine(`[stata-code] ${label} failed: ${msg}`);
+    vscode.window.showErrorMessage(`stata-code: ${msg}`);
+    return undefined;
+  } finally {
+    statusBar?.setRunning(false);
+  }
 }
 
 async function newSession(): Promise<void> {
@@ -772,6 +918,7 @@ async function closeSession(target?: unknown): Promise<void> {
 }
 
 function dropHistoryForSession(sessionId: string): void {
+  removeMatching(runHistory, (entry) => entry.result.session_id === sessionId);
   removeMatching(logsHistory, (entry) => entry.result.session_id === sessionId);
   removeMatching(graphsHistory, (entry) => entry.sessionId === sessionId);
   if (lastResult?.session_id === sessionId) lastResult = undefined;
@@ -785,6 +932,7 @@ function removeMatching<T>(items: T[], predicate: (item: T) => boolean): void {
 
 function refreshResultViews(): void {
   lastResultProvider?.refresh();
+  runHistoryProvider?.refresh();
   logsHistoryProvider?.refresh();
   graphsHistoryProvider?.refresh();
   sessionsProvider?.refresh();
@@ -898,6 +1046,44 @@ function resolveLogResult(target?: unknown): RunResult | undefined {
   return lastResult;
 }
 
+function resolveRunResult(target?: unknown): RunResult | undefined {
+  if (!target) return lastResult;
+  if (isRunResult(target)) return target;
+  const entry = resolveRunHistoryEntry(target);
+  if (entry) return entry.result;
+  if (target && typeof target === "object") {
+    if ("result" in target && isRunResult((target as { result?: unknown }).result)) {
+      return (target as { result: RunResult }).result;
+    }
+  }
+  return lastResult;
+}
+
+function resolveRunHistoryEntry(target?: unknown): RunHistoryEntry | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  if (isRunHistoryEntry(target)) return target;
+  if ("entry" in target && isRunHistoryEntry((target as { entry?: unknown }).entry)) {
+    return (target as { entry: RunHistoryEntry }).entry;
+  }
+  return undefined;
+}
+
+function resolveMatrixTarget(
+  target?: unknown,
+): { scope?: string; name: string; matrix: Matrix } | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  if ("matrix" in target && isMatrix((target as { matrix?: unknown }).matrix)) {
+    const maybeName = (target as { name?: unknown }).name;
+    const maybeScope = (target as { scope?: unknown }).scope;
+    return {
+      name: typeof maybeName === "string" ? maybeName : "matrix",
+      scope: typeof maybeScope === "string" ? maybeScope : undefined,
+      matrix: (target as { matrix: Matrix }).matrix,
+    };
+  }
+  return undefined;
+}
+
 function resolveGraphEntry(target?: unknown): GraphHistoryEntry | undefined {
   if (!target || typeof target !== "object") return undefined;
   if ("graph" in target && isGraphInfo((target as { graph?: unknown }).graph)) {
@@ -922,6 +1108,27 @@ function isRunResult(value: unknown): value is RunResult {
   );
 }
 
+function isRunHistoryEntry(value: unknown): value is RunHistoryEntry {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "runId" in value &&
+      "code" in value &&
+      "result" in value &&
+      isRunResult((value as { result?: unknown }).result),
+  );
+}
+
+function isMatrix(value: unknown): value is Matrix {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "rows" in value &&
+      "cols" in value &&
+      "ref" in value,
+  );
+}
+
 function isGraphInfo(value: unknown): value is GraphInfo {
   return Boolean(
     value &&
@@ -943,4 +1150,47 @@ function sanitizeFilename(name: string): string {
 
 function shortRunId(requestId: string): string {
   return sanitizeFilename(requestId).slice(0, 10) || "run";
+}
+
+function formatOriginLabel(origin: SubmitOrigin): string {
+  const label =
+    origin.uri.scheme === "file"
+      ? vscode.workspace.asRelativePath(origin.uri)
+      : origin.uri.toString();
+  return `${label}:${origin.baseLine + 1}`;
+}
+
+function fallbackOrigin(): SubmitOrigin {
+  const editor = vscode.window.activeTextEditor;
+  if (editor) return { uri: editor.document.uri, baseLine: editor.selection.active.line };
+  return { uri: vscode.Uri.parse("untitled:stata-code-history.do"), baseLine: 0 };
+}
+
+function bundleDirectoryName(entry: RunHistoryEntry): string {
+  const stamp = new Date(entry.ts)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+  return `stata-run-${stamp}-${shortRunId(entry.runId)}`;
+}
+
+function escapeStataPath(fsPath: string): string {
+  return fsPath.replace(/\\/g, "/").replace(/"/g, '""');
+}
+
+function matrixToTsv(name: string, matrix: Matrix): string {
+  const rows = matrix.rows ?? [];
+  const cols = matrix.cols ?? [];
+  const values = matrix.values ?? [];
+  const lines = [`# ${name}`, ["", ...cols].join("\t")];
+  for (let i = 0; i < values.length; i++) {
+    const rowLabel = rows[i] ?? String(i + 1);
+    lines.push([rowLabel, ...values[i].map(formatMatrixValue)].join("\t"));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMatrixValue(value: number | null): string {
+  if (value === null) return "";
+  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(12)));
 }
