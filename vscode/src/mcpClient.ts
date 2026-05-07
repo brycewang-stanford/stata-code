@@ -38,14 +38,14 @@ export class StataMcpClient implements vscode.Disposable {
         args: this.args,
       });
       this.client = new Client(
-        { name: "stata-code-vscode", version: "0.1.0" },
+        { name: "stata-code-vscode", version: "0.3.0" },
         { capabilities: {} },
       );
       this.output.appendLine(
-        `[stata_code] launching MCP server: ${this.command} ${this.args.join(" ")}`,
+        `[stata-code] launching MCP server: ${this.command} ${this.args.join(" ")}`,
       );
       await this.client.connect(this.transport);
-      this.output.appendLine("[stata_code] MCP server connected");
+      this.output.appendLine("[stata-code] MCP server connected");
     })();
 
     try {
@@ -85,6 +85,38 @@ export class StataMcpClient implements vscode.Disposable {
     if (!this.client) throw new Error("MCP client not initialized");
     const reply = await this.client.callTool({ name: "get_matrix", arguments: { ref } });
     return parseTextResult(reply, "get_matrix");
+  }
+
+  async listSessions(): Promise<Array<{ session_id: string; frame: string; n_obs: number }>> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = await this.client.callTool({ name: "list_sessions", arguments: {} });
+    return parseTextResult(reply, "list_sessions");
+  }
+
+  async cancelSession(sessionId: string): Promise<{
+    session_id: string;
+    was_pending: boolean;
+    is_pending: boolean;
+    killed_worker: boolean;
+  }> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = await this.client.callTool({
+      name: "cancel_session",
+      arguments: { session_id: sessionId },
+    });
+    return parseTextResult(reply, "cancel_session");
+  }
+
+  async resetSession(sessionId: string): Promise<unknown> {
+    await this.start();
+    if (!this.client) throw new Error("MCP client not initialized");
+    const reply = await this.client.callTool({
+      name: "reset_session",
+      arguments: { session_id: sessionId },
+    });
+    return parseTextResult(reply, "reset_session");
   }
 
   async getGraphBytes(ref: string): Promise<{ data: string; mimeType: string }> {

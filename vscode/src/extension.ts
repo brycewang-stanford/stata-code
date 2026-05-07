@@ -1,31 +1,139 @@
 // Entry point for the stata_code VSCode extension.
 //
-// Activates on Stata files (`.do` / `.ado` / `.mata`) and registers three
-// commands. The MCP client is lazily initialized on first use; it speaks
-// to a `stata-code-mcp` child process over stdio. All Stata interaction
-// goes through that channel — this extension is a thin transport.
+// The extension is a thin VS Code UI layer over the stata_code MCP server:
+// it submits code, tracks lightweight local history, and fetches heavy logs
+// or graphs lazily when the user asks for them.
 
+import * as path from "node:path";
 import * as vscode from "vscode";
 
+import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
+import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
-import type { RunResult } from "./types/runResult";
+import { StataStatusBar, currentSessionId } from "./statusBar";
+import {
+  GraphsHistoryProvider,
+  LastResultProvider,
+  LogsHistoryProvider,
+  RunHistoryProvider,
+  type GraphHistoryEntry,
+  type LogHistoryEntry,
+  type ResultStore,
+  type RunHistoryEntry,
+  type SessionStore,
+  SessionsProvider,
+} from "./treeProviders";
+import type { GraphFormat, GraphInfo, RunResult } from "./types/runResult";
 
+const HISTORY_CAP = 64;
+const SESSION_IDS_KEY = "stataCode.sessionIds";
+const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+
+const EXT_BY_FORMAT: Record<GraphFormat, string> = {
+  png: "png",
+  svg: "svg",
+  pdf: "pdf",
+};
+
+let extensionContext: vscode.ExtensionContext | undefined;
 let client: StataMcpClient | undefined;
 let output: vscode.OutputChannel | undefined;
 let lastResult: RunResult | undefined;
+let statusBar: StataStatusBar | undefined;
+let knownSessionIds = new Set<string>(["main"]);
+
+const graphsHistory: GraphHistoryEntry[] = [];
+const logsHistory: LogHistoryEntry[] = [];
+const runHistory: RunHistoryEntry[] = [];
+
+let sessionsProvider: SessionsProvider | undefined;
+let lastResultProvider: LastResultProvider | undefined;
+let graphsHistoryProvider: GraphsHistoryProvider | undefined;
+let logsHistoryProvider: LogsHistoryProvider | undefined;
+let runHistoryProvider: RunHistoryProvider | undefined;
+let diagnostics: StataDiagnostics | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
-  output = vscode.window.createOutputChannel("stata_code");
+  extensionContext = context;
+  hydrateKnownSessions(context);
+
+  output = vscode.window.createOutputChannel("stata-code");
   context.subscriptions.push(output);
+
+  statusBar = new StataStatusBar("stataCode.statusBarMenu");
+  context.subscriptions.push(statusBar);
+
+  diagnostics = new StataDiagnostics();
+  context.subscriptions.push(diagnostics);
+
+  const cellLens = new CellCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ language: "stata" }, cellLens),
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("stataCode.sessionId")) {
+        rememberSessionId(currentSessionId());
+        statusBar?.refresh();
+        sessionsProvider?.refresh();
+      }
+    }),
+  );
+
+  const resultStore: ResultStore = {
+    getLastResult: () => lastResult,
+    getRunHistory: () => runHistory,
+    getGraphsHistory: () => graphsHistory,
+    getLogsHistory: () => logsHistory,
+  };
+  const sessionStore: SessionStore = {
+    getKnownSessionIds: () => Array.from(knownSessionIds),
+  };
+
+  sessionsProvider = new SessionsProvider(getClient, sessionStore);
+  lastResultProvider = new LastResultProvider(resultStore);
+  runHistoryProvider = new RunHistoryProvider(resultStore);
+  graphsHistoryProvider = new GraphsHistoryProvider(resultStore);
+  logsHistoryProvider = new LogsHistoryProvider(resultStore);
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider("stataCode.sessions", sessionsProvider),
+    vscode.window.registerTreeDataProvider("stataCode.lastResult", lastResultProvider),
+    vscode.window.registerTreeDataProvider("stataCode.runHistory", runHistoryProvider),
+    vscode.window.registerTreeDataProvider("stataCode.logsHistory", logsHistoryProvider),
+    vscode.window.registerTreeDataProvider("stataCode.graphsHistory", graphsHistoryProvider),
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("stataCode.runSelection", () =>
       runSelection(false),
     ),
     vscode.commands.registerCommand("stataCode.runFile", () => runSelection(true)),
+    vscode.commands.registerCommand("stataCode.runCell", runCell),
     vscode.commands.registerCommand("stataCode.showLastResult", showLastResult),
+    vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
+    vscode.commands.registerCommand("stataCode.rerunHistory", rerunHistory),
+    vscode.commands.registerCommand("stataCode.copyRunCode", copyRunCode),
+    vscode.commands.registerCommand("stataCode.exportRunBundle", exportRunBundle),
+    vscode.commands.registerCommand("stataCode.clearRunHistory", clearRunHistory),
     vscode.commands.registerCommand("stataCode.showGraphs", showGraphs),
+    vscode.commands.registerCommand("stataCode.showOutput", showOutput),
+    vscode.commands.registerCommand("stataCode.openLog", openLog),
+    vscode.commands.registerCommand("stataCode.saveLog", saveLog),
+    vscode.commands.registerCommand("stataCode.clearLogs", clearLogs),
+    vscode.commands.registerCommand("stataCode.openGraph", openSingleGraph),
+    vscode.commands.registerCommand("stataCode.saveGraph", saveGraph),
+    vscode.commands.registerCommand("stataCode.clearGraphs", clearGraphs),
+    vscode.commands.registerCommand("stataCode.statusBarMenu", statusBarMenu),
+    vscode.commands.registerCommand("stataCode.switchSession", switchSession),
+    vscode.commands.registerCommand("stataCode.newSession", newSession),
+    vscode.commands.registerCommand("stataCode.closeSession", closeSession),
+    vscode.commands.registerCommand("stataCode.cancelSession", cancelSession),
+    vscode.commands.registerCommand("stataCode.resetSession", resetSession),
+    vscode.commands.registerCommand("stataCode.refreshSessions", () =>
+      sessionsProvider?.refresh(),
+    ),
   );
 }
 
@@ -48,51 +156,137 @@ function getClient(): StataMcpClient {
 async function runSelection(wholeFile: boolean): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    vscode.window.showWarningMessage("stata_code: no active editor");
+    vscode.window.showWarningMessage("stata-code: no active editor");
     return;
   }
-  const code = wholeFile
-    ? editor.document.getText()
-    : editor.selection.isEmpty
-      ? editor.document.lineAt(editor.selection.active.line).text
-      : editor.document.getText(editor.selection);
 
-  if (!code.trim()) {
-    vscode.window.showWarningMessage("stata_code: nothing to run");
+  let code: string;
+  let baseLine: number;
+  if (wholeFile) {
+    code = editor.document.getText();
+    baseLine = 0;
+  } else if (editor.selection.isEmpty) {
+    code = editor.document.lineAt(editor.selection.active.line).text;
+    baseLine = editor.selection.active.line;
+  } else {
+    code = editor.document.getText(editor.selection);
+    baseLine = editor.selection.start.line;
+  }
+
+  await submitCode(code, { uri: editor.document.uri, baseLine });
+}
+
+async function runCell(uri: vscode.Uri, markerLine: number): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument(uri);
+  const rangeInfo = cellRangeAtMarker(doc, markerLine);
+  if (!rangeInfo || rangeInfo.startLine > rangeInfo.endLine) {
+    vscode.window.showWarningMessage("stata-code: empty cell");
     return;
   }
+
+  const range = new vscode.Range(
+    new vscode.Position(rangeInfo.startLine, 0),
+    doc.lineAt(rangeInfo.endLine).range.end,
+  );
+  await submitCode(doc.getText(range), { uri, baseLine: rangeInfo.startLine });
+}
+
+async function submitCode(code: string, origin: SubmitOrigin): Promise<void> {
+  if (!code.trim()) {
+    vscode.window.showWarningMessage("stata-code: nothing to run");
+    return;
+  }
+
+  diagnostics?.clear(origin.uri);
 
   const cfg = vscode.workspace.getConfiguration("stataCode");
   const sessionId = cfg.get<string>("sessionId", "main");
   const includeFullLog = cfg.get<boolean>("includeFullLog", false);
 
   const c = getClient();
-  output!.show(true);
-  output!.appendLine(
-    `[stata_code] run (session=${sessionId}, lines=${code.split("\n").length})`,
+  output?.show(true);
+  output?.appendLine(
+    `[stata-code] run (session=${sessionId}, lines=${code.split("\n").length})`,
   );
 
+  statusBar?.setRunning(true);
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "stata_code: running…",
-      cancellable: false,
+      title: "stata-code: running...",
+      cancellable: true,
     },
-    async () => {
+    async (_progress, token) => {
+      const cancelOnRequest = token.onCancellationRequested(() => {
+        void c.cancelSession(sessionId).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          output?.appendLine(`[stata-code] cancel failed: ${msg}`);
+        });
+      });
       try {
         const result = await c.runStata(code, { sessionId, includeFullLog });
         lastResult = result;
+        rememberSessionId(result.session_id);
+        recordRun(result, code, origin);
+        recordLog(result);
+        recordGraphs(result);
+        diagnostics?.publish(origin, result);
+        lastResultProvider?.refresh();
+        runHistoryProvider?.refresh();
+        logsHistoryProvider?.refresh();
+        graphsHistoryProvider?.refresh();
+        sessionsProvider?.refresh();
         renderResult(result);
         if (result.ok && result.graphs.length > 0) {
           await GraphPanel.show(c, result, output!);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        output!.appendLine(`[stata_code] error: ${msg}`);
-        vscode.window.showErrorMessage(`stata_code: ${msg}`);
+        output?.appendLine(`[stata-code] error: ${msg}`);
+        vscode.window.showErrorMessage(`stata-code: ${msg}`);
+      } finally {
+        cancelOnRequest.dispose();
+        statusBar?.setRunning(false);
       }
     },
   );
+}
+
+function recordRun(result: RunResult, code: string, origin: SubmitOrigin): void {
+  runHistory.push({
+    runId: result.request_id,
+    ts: Date.now(),
+    code,
+    originLabel: formatOriginLabel(origin),
+    result,
+  });
+  trimHistory(runHistory);
+}
+
+function recordLog(result: RunResult): void {
+  if (!result.log.head && !result.log.tail && !result.log.ref) return;
+  logsHistory.push({ runId: result.request_id, ts: Date.now(), result });
+  trimHistory(logsHistory);
+}
+
+function recordGraphs(result: RunResult): void {
+  if (result.graphs.length === 0) return;
+  const ts = Date.now();
+  for (const graph of result.graphs) {
+    graphsHistory.push({
+      runId: result.request_id,
+      ts,
+      sessionId: result.session_id,
+      graph,
+    });
+  }
+  trimHistory(graphsHistory);
+}
+
+function trimHistory<T>(items: T[]): void {
+  if (items.length > HISTORY_CAP) {
+    items.splice(0, items.length - HISTORY_CAP);
+  }
 }
 
 function renderResult(r: RunResult): void {
@@ -100,17 +294,15 @@ function renderResult(r: RunResult): void {
 
   if (r.ok) {
     output.appendLine(
-      `[stata_code] ok rc=${r.rc} elapsed=${r.elapsed_ms}ms session=${r.session_id}`,
+      `[stata-code] ok rc=${r.rc} elapsed=${r.elapsed_ms}ms session=${r.session_id}`,
     );
   } else {
     const err = r.error;
     output.appendLine(
-      `[stata_code] FAIL rc=${r.rc} kind=${err?.kind ?? "?"} line=${err?.line ?? "?"}`,
+      `[stata-code] FAIL rc=${r.rc} kind=${err?.kind ?? "?"} line=${err?.line ?? "?"}`,
     );
     if (err?.message) output.appendLine(`  message: ${err.message}`);
-    if (err?.context?.failing) {
-      output.appendLine(`  failing: ${err.context.failing}`);
-    }
+    if (err?.context?.failing) output.appendLine(`  failing: ${err.context.failing}`);
     for (const s of err?.suggestions ?? []) {
       output.appendLine(`  hint: ${s.action}`);
     }
@@ -124,6 +316,9 @@ function renderResult(r: RunResult): void {
     output.appendLine(`... (truncated; ${r.log.lines_total} lines total) ...`);
     output.appendLine(r.log.tail);
   }
+  if (r.log.ref) {
+    output.appendLine("[stata-code] full log available from the Logs view.");
+  }
 
   for (const w of r.warnings) {
     output.appendLine(`[warn:${w.kind}] ${w.message}`);
@@ -131,31 +326,621 @@ function renderResult(r: RunResult): void {
 
   if (r.graphs.length > 0) {
     output.appendLine(
-      `[stata_code] ${r.graphs.length} graph(s) captured (rendered in side panel).`,
+      `[stata-code] ${r.graphs.length} graph(s) captured (see the Graphs view).`,
     );
   }
 }
 
 async function showGraphs(): Promise<void> {
   if (!lastResult) {
-    vscode.window.showInformationMessage("stata_code: no result yet");
+    vscode.window.showInformationMessage("stata-code: no result yet");
     return;
   }
   if (lastResult.graphs.length === 0) {
-    vscode.window.showInformationMessage("stata_code: last run produced no graphs");
+    vscode.window.showInformationMessage("stata-code: last run produced no graphs");
     return;
   }
   await GraphPanel.show(getClient(), lastResult, output!);
 }
 
+async function openSingleGraph(target?: unknown): Promise<void> {
+  const entry = resolveGraphEntry(target);
+  const graph = entry?.graph ?? (isGraphInfo(target) ? target : undefined);
+  if (!graph) {
+    vscode.window.showInformationMessage("stata-code: no graph selected");
+    return;
+  }
+  const baseResult =
+    lastResult ?? logsHistory.find((logEntry) => logEntry.runId === entry?.runId)?.result;
+  if (!baseResult) {
+    vscode.window.showInformationMessage("stata-code: graph history is empty");
+    return;
+  }
+
+  const synthetic: RunResult = {
+    ...baseResult,
+    request_id: entry?.runId ?? baseResult.request_id,
+    session_id: entry?.sessionId ?? baseResult.session_id,
+    started_at: entry ? new Date(entry.ts).toISOString() : baseResult.started_at,
+    graphs: [graph],
+  };
+  await GraphPanel.show(getClient(), synthetic, output!);
+}
+
+async function saveGraph(target?: unknown): Promise<void> {
+  const entry = resolveGraphEntry(target);
+  const graph = entry?.graph ?? (isGraphInfo(target) ? target : undefined);
+  if (!graph) {
+    vscode.window.showInformationMessage("stata-code: no graph selected");
+    return;
+  }
+
+  try {
+    const { data } = graph.inline
+      ? { data: graph.inline }
+      : await getClient().getGraphBytes(graph.ref);
+    const bytes = Buffer.from(data, "base64");
+    const ext = EXT_BY_FORMAT[graph.format];
+    const defaultUri = defaultWorkspaceUri(`${sanitizeFilename(graph.name) || "graph"}.${ext}`);
+    const targetUri = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { [`${graph.format.toUpperCase()} image`]: [ext] },
+    });
+    if (!targetUri) return;
+    await vscode.workspace.fs.writeFile(targetUri, bytes);
+    vscode.window.showInformationMessage(
+      `stata-code: saved ${path.basename(targetUri.fsPath)}`,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    output?.appendLine(`[stata-code] save graph failed: ${msg}`);
+    vscode.window.showErrorMessage(`stata-code: ${msg}`);
+  }
+}
+
+function clearGraphs(): void {
+  graphsHistory.splice(0);
+  graphsHistoryProvider?.refresh();
+}
+
 async function showLastResult(): Promise<void> {
   if (!lastResult) {
-    vscode.window.showInformationMessage("stata_code: no result yet");
+    vscode.window.showInformationMessage("stata-code: no result yet");
+    return;
+  }
+  await openRunResult(lastResult);
+}
+
+async function openRunResult(target?: unknown): Promise<void> {
+  const result = resolveRunResult(target);
+  if (!result) {
+    vscode.window.showInformationMessage("stata-code: no result yet");
     return;
   }
   const doc = await vscode.workspace.openTextDocument({
     language: "json",
-    content: JSON.stringify(lastResult, null, 2),
+    content: JSON.stringify(result, null, 2),
   });
-  await vscode.window.showTextDocument(doc, { preview: true });
+  await vscode.window.showTextDocument(doc, { preview: false });
+}
+
+async function rerunHistory(target?: unknown): Promise<void> {
+  const entry = resolveRunHistoryEntry(target);
+  if (!entry) {
+    vscode.window.showInformationMessage("stata-code: no run selected");
+    return;
+  }
+  rememberSessionId(entry.result.session_id);
+  await setCurrentSession(entry.result.session_id);
+  await submitCode(entry.code, fallbackOrigin());
+}
+
+async function copyRunCode(target?: unknown): Promise<void> {
+  const entry = resolveRunHistoryEntry(target);
+  if (!entry) {
+    vscode.window.showInformationMessage("stata-code: no run selected");
+    return;
+  }
+  await vscode.env.clipboard.writeText(entry.code);
+  vscode.window.showInformationMessage("stata-code: copied run code");
+}
+
+function clearRunHistory(): void {
+  runHistory.splice(0);
+  runHistoryProvider?.refresh();
+}
+
+async function exportRunBundle(target?: unknown): Promise<void> {
+  const entry = resolveRunHistoryEntry(target) ?? runHistory[runHistory.length - 1];
+  if (!entry) {
+    vscode.window.showInformationMessage("stata-code: no run to export");
+    return;
+  }
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+    openLabel: "Export Here",
+    title: "Choose a folder for the Stata run bundle",
+  });
+  const parent = picked?.[0];
+  if (!parent) return;
+
+  const dir = vscode.Uri.joinPath(parent, bundleDirectoryName(entry));
+  const graphFiles: Array<{ name: string; ref: string; ok: boolean; error?: string }> = [];
+
+  await vscode.workspace.fs.createDirectory(dir);
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(dir, "code.do"),
+    Buffer.from(entry.code, "utf8"),
+  );
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(dir, "result.json"),
+    Buffer.from(JSON.stringify(entry.result, null, 2), "utf8"),
+  );
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(dir, "log.txt"),
+    Buffer.from(formatLogDocument(entry.result, await getLogText(entry.result)), "utf8"),
+  );
+
+  if (entry.result.graphs.length) {
+    const graphsDir = vscode.Uri.joinPath(dir, "graphs");
+    await vscode.workspace.fs.createDirectory(graphsDir);
+    for (const [index, graph] of entry.result.graphs.entries()) {
+      const ext = EXT_BY_FORMAT[graph.format];
+      const fileName = `${String(index + 1).padStart(2, "0")}-${sanitizeFilename(graph.name) || "graph"}.${ext}`;
+      try {
+        const { data } = graph.inline
+          ? { data: graph.inline }
+          : await getClient().getGraphBytes(graph.ref);
+        await vscode.workspace.fs.writeFile(
+          vscode.Uri.joinPath(graphsDir, fileName),
+          Buffer.from(data, "base64"),
+        );
+        graphFiles.push({ name: `graphs/${fileName}`, ref: graph.ref, ok: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        graphFiles.push({
+          name: `graphs/${fileName}`,
+          ref: graph.ref,
+          ok: false,
+          error: message,
+        });
+      }
+    }
+  }
+
+  const manifest = {
+    exported_at: new Date().toISOString(),
+    origin: entry.originLabel,
+    run_id: entry.runId,
+    session_id: entry.result.session_id,
+    ok: entry.result.ok,
+    rc: entry.result.rc,
+    files: ["code.do", "log.txt", "result.json", ...graphFiles.map((g) => g.name)],
+    graphs: graphFiles,
+  };
+  await vscode.workspace.fs.writeFile(
+    vscode.Uri.joinPath(dir, "manifest.json"),
+    Buffer.from(JSON.stringify(manifest, null, 2), "utf8"),
+  );
+
+  vscode.window.showInformationMessage(
+    `stata-code: exported ${path.basename(dir.fsPath)}`,
+  );
+}
+
+function showOutput(): void {
+  output?.show(false);
+}
+
+async function openLog(target?: unknown): Promise<void> {
+  const result = resolveLogResult(target);
+  if (!result) {
+    vscode.window.showInformationMessage("stata-code: no log yet");
+    return;
+  }
+
+  const text = await getLogText(result);
+  const doc = await vscode.workspace.openTextDocument({
+    language: "plaintext",
+    content: formatLogDocument(result, text),
+  });
+  await vscode.window.showTextDocument(doc, {
+    preview: false,
+    viewColumn: vscode.ViewColumn.Beside,
+  });
+}
+
+async function saveLog(target?: unknown): Promise<void> {
+  const result = resolveLogResult(target);
+  if (!result) {
+    vscode.window.showInformationMessage("stata-code: no log yet");
+    return;
+  }
+
+  const text = formatLogDocument(result, await getLogText(result));
+  const defaultUri = defaultWorkspaceUri(
+    `stata-${sanitizeFilename(result.session_id)}-${shortRunId(result.request_id)}.log`,
+  );
+  const targetUri = await vscode.window.showSaveDialog({
+    defaultUri,
+    filters: { "Stata log": ["log", "txt"] },
+  });
+  if (!targetUri) return;
+
+  await vscode.workspace.fs.writeFile(targetUri, Buffer.from(text, "utf8"));
+  vscode.window.showInformationMessage(
+    `stata-code: saved ${path.basename(targetUri.fsPath)}`,
+  );
+}
+
+function clearLogs(): void {
+  logsHistory.splice(0);
+  logsHistoryProvider?.refresh();
+}
+
+async function getLogText(result: RunResult): Promise<string> {
+  if (result.log.ref) {
+    try {
+      const full = await getClient().getLog(result.log.ref);
+      return full.text;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      output?.appendLine(`[stata-code] get_log failed: ${msg}`);
+      vscode.window.showWarningMessage(
+        "stata-code: full log ref is unavailable; showing inline preview",
+      );
+    }
+  }
+  return inlineLogText(result);
+}
+
+function inlineLogText(result: RunResult): string {
+  const chunks: string[] = [];
+  if (result.log.head) chunks.push(result.log.head);
+  if (result.log.truncated && result.log.tail && result.log.tail !== result.log.head) {
+    chunks.push(`... (${result.log.lines_total} lines total; full log unavailable) ...`);
+    chunks.push(result.log.tail);
+  } else if (!result.log.head && result.log.tail) {
+    chunks.push(result.log.tail);
+  }
+  return chunks.join("\n");
+}
+
+function formatLogDocument(result: RunResult, text: string): string {
+  const status = result.ok ? "OK" : `FAIL rc=${result.rc}`;
+  return [
+    "stata-code log",
+    `status: ${status}`,
+    `session: ${result.session_id}`,
+    `request: ${result.request_id}`,
+    `started: ${result.started_at}`,
+    `elapsed_ms: ${result.elapsed_ms}`,
+    `lines: ${result.log.lines_total}`,
+    "",
+    "-".repeat(72),
+    text,
+  ].join("\n");
+}
+
+async function statusBarMenu(): Promise<void> {
+  const sid = currentSessionId();
+  const items = [
+    { label: "$(add) New Stata tab...", action: "new" as const },
+    { label: "$(arrow-swap) Switch tab...", action: "switch" as const },
+    { label: "$(output) Open latest log", action: "log" as const },
+    { label: "$(graph) Show latest graphs", action: "graphs" as const },
+    { label: "$(terminal) Show output", action: "output" as const },
+    { label: `$(stop-circle) Cancel "${sid}"`, action: "cancel" as const },
+    { label: `$(trash) Reset "${sid}"`, action: "reset" as const },
+    { label: `$(close) Close tab "${sid}"`, action: "close" as const },
+  ];
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: `stata-code: current tab "${sid}"`,
+  });
+  if (!pick) return;
+
+  if (pick.action === "new") return newSession();
+  if (pick.action === "switch") return switchSession();
+  if (pick.action === "log") return openLog();
+  if (pick.action === "graphs") return showGraphs();
+  if (pick.action === "output") return showOutput();
+  if (pick.action === "cancel") return cancelSession();
+  if (pick.action === "reset") return resetSession();
+  if (pick.action === "close") return closeSession();
+}
+
+async function newSession(): Promise<void> {
+  const chosen = await vscode.window.showInputBox({
+    prompt: "New Stata tab/session id",
+    value: nextSessionName(),
+    validateInput: validateSessionId,
+  });
+  if (!chosen) return;
+  await setCurrentSession(chosen);
+}
+
+async function switchSession(target?: unknown): Promise<void> {
+  const direct = sessionIdFromTarget(target);
+  if (direct) {
+    await setCurrentSession(direct);
+    return;
+  }
+
+  const current = currentSessionId();
+  const live = await listLiveSessionsForPick();
+  const merged = new Map<string, { session_id: string; n_obs: number; isLive: boolean }>();
+  for (const sid of knownSessionIds) {
+    merged.set(sid, { session_id: sid, n_obs: 0, isLive: false });
+  }
+  for (const s of live) {
+    merged.set(s.session_id, { ...s, isLive: true });
+  }
+
+  type SessionPick = vscode.QuickPickItem & {
+    action?: "new";
+    sessionId?: string;
+  };
+  const items: SessionPick[] = Array.from(merged.values())
+    .sort((a, b) => sessionSortKey(a.session_id, current).localeCompare(sessionSortKey(b.session_id, current)))
+    .map((s) => ({
+      label: s.session_id,
+      description: [s.session_id === current ? "current" : "", s.isLive ? "live" : "not started"]
+        .filter(Boolean)
+        .join(" · "),
+      detail: s.isLive ? `${s.n_obs} obs` : "Will be created on first run.",
+      sessionId: s.session_id,
+    }));
+  items.push({
+    label: "$(add) New Stata tab...",
+    description: "enter a new id",
+    action: "new",
+  });
+
+  const pick = await vscode.window.showQuickPick(items, {
+    placeHolder: "Switch Stata tab/session",
+  });
+  if (!pick) return;
+  if (pick.action === "new") return newSession();
+  if (pick.sessionId) await setCurrentSession(pick.sessionId);
+}
+
+async function listLiveSessionsForPick(): Promise<Array<{ session_id: string; n_obs: number }>> {
+  try {
+    return (await getClient().listSessions()).map((s) => ({
+      session_id: s.session_id,
+      n_obs: s.n_obs,
+    }));
+  } catch (err) {
+    output?.appendLine(
+      `[stata-code] list_sessions failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+}
+
+async function setCurrentSession(sessionId: string): Promise<void> {
+  const validation = validateSessionId(sessionId);
+  if (validation) {
+    vscode.window.showErrorMessage(`stata-code: ${validation}`);
+    return;
+  }
+
+  rememberSessionId(sessionId);
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await vscode.workspace
+    .getConfiguration("stataCode")
+    .update("sessionId", sessionId, target);
+  statusBar?.refresh();
+  sessionsProvider?.refresh();
+  output?.appendLine(`[stata-code] current session: ${sessionId}`);
+}
+
+async function closeSession(target?: unknown): Promise<void> {
+  const sid = resolveTargetSessionId(target);
+  if (sid === "main") {
+    vscode.window.showInformationMessage(
+      'stata-code: the "main" tab cannot be closed; use reset to clear it.',
+    );
+    return;
+  }
+
+  const ok = await vscode.window.showWarningMessage(
+    `Close Stata tab "${sid}"? This drops its data and removes its local history.`,
+    { modal: true },
+    "Close Tab",
+  );
+  if (ok !== "Close Tab") return;
+
+  try {
+    if (client) await client.resetSession(sid);
+    forgetSessionId(sid);
+    dropHistoryForSession(sid);
+    if (currentSessionId() === sid) await setCurrentSession("main");
+    refreshResultViews();
+    vscode.window.showInformationMessage(`stata-code: closed tab "${sid}"`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`stata-code: close failed: ${msg}`);
+  }
+}
+
+function dropHistoryForSession(sessionId: string): void {
+  removeMatching(logsHistory, (entry) => entry.result.session_id === sessionId);
+  removeMatching(graphsHistory, (entry) => entry.sessionId === sessionId);
+  if (lastResult?.session_id === sessionId) lastResult = undefined;
+}
+
+function removeMatching<T>(items: T[], predicate: (item: T) => boolean): void {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (predicate(items[i])) items.splice(i, 1);
+  }
+}
+
+function refreshResultViews(): void {
+  lastResultProvider?.refresh();
+  logsHistoryProvider?.refresh();
+  graphsHistoryProvider?.refresh();
+  sessionsProvider?.refresh();
+}
+
+function resolveTargetSessionId(target?: unknown): string {
+  return sessionIdFromTarget(target) ?? currentSessionId();
+}
+
+function sessionIdFromTarget(target?: unknown): string | undefined {
+  if (target && typeof target === "object" && "info" in target) {
+    const info = (target as { info?: { session_id?: string } }).info;
+    if (info?.session_id) return info.session_id;
+  }
+  return undefined;
+}
+
+async function cancelSession(target?: unknown): Promise<void> {
+  const sid = resolveTargetSessionId(target);
+  try {
+    const r = await getClient().cancelSession(sid);
+    output?.appendLine(
+      `[stata-code] cancel_session ${sid}: was_pending=${r.was_pending} is_pending=${r.is_pending} killed_worker=${r.killed_worker}`,
+    );
+    vscode.window.showInformationMessage(
+      `stata-code: cancel requested for "${sid}"${r.killed_worker ? " (worker killed)" : ""}`,
+    );
+    sessionsProvider?.refresh();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`stata-code: cancel failed: ${msg}`);
+  }
+}
+
+async function resetSession(target?: unknown): Promise<void> {
+  const sid = resolveTargetSessionId(target);
+  const ok = await vscode.window.showWarningMessage(
+    `Reset session "${sid}"? This drops the session data but keeps the tab.`,
+    { modal: true },
+    "Reset",
+  );
+  if (ok !== "Reset") return;
+  try {
+    await getClient().resetSession(sid);
+    rememberSessionId(sid);
+    vscode.window.showInformationMessage(`stata-code: session "${sid}" reset`);
+    sessionsProvider?.refresh();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`stata-code: reset failed: ${msg}`);
+  }
+}
+
+function hydrateKnownSessions(context: vscode.ExtensionContext): void {
+  const persisted = context.workspaceState.get<string[]>(SESSION_IDS_KEY, []);
+  knownSessionIds = new Set(["main", ...persisted.filter((sid) => SESSION_ID_RE.test(sid))]);
+  rememberSessionId(currentSessionId());
+}
+
+function rememberSessionId(sessionId: string): void {
+  if (!SESSION_ID_RE.test(sessionId)) return;
+  const before = knownSessionIds.size;
+  knownSessionIds.add(sessionId);
+  if (knownSessionIds.size !== before) void persistKnownSessionIds();
+}
+
+function forgetSessionId(sessionId: string): void {
+  if (sessionId === "main") return;
+  if (knownSessionIds.delete(sessionId)) void persistKnownSessionIds();
+}
+
+async function persistKnownSessionIds(): Promise<void> {
+  const ids = Array.from(knownSessionIds).sort((a, b) =>
+    sessionSortKey(a, currentSessionId()).localeCompare(sessionSortKey(b, currentSessionId())),
+  );
+  await extensionContext?.workspaceState.update(SESSION_IDS_KEY, ids);
+}
+
+function validateSessionId(value: string): string | null {
+  return SESSION_ID_RE.test(value)
+    ? null
+    : "session id must match [A-Za-z_][A-Za-z0-9_]{0,31}";
+}
+
+function nextSessionName(): string {
+  for (let i = 1; i < 1000; i++) {
+    const candidate = `session${i}`;
+    if (!knownSessionIds.has(candidate)) return candidate;
+  }
+  return "session";
+}
+
+function sessionSortKey(sessionId: string, current: string): string {
+  if (sessionId === current) return `0-${sessionId}`;
+  if (sessionId === "main") return "1-main";
+  return `2-${sessionId.toLocaleLowerCase()}`;
+}
+
+function resolveLogResult(target?: unknown): RunResult | undefined {
+  if (!target) return lastResult;
+  if (isRunResult(target)) return target;
+  if (target && typeof target === "object") {
+    if ("result" in target && isRunResult((target as { result?: unknown }).result)) {
+      return (target as { result: RunResult }).result;
+    }
+    if ("entry" in target) {
+      const entry = (target as { entry?: { result?: unknown } }).entry;
+      if (isRunResult(entry?.result)) return entry.result;
+    }
+  }
+  return lastResult;
+}
+
+function resolveGraphEntry(target?: unknown): GraphHistoryEntry | undefined {
+  if (!target || typeof target !== "object") return undefined;
+  if ("graph" in target && isGraphInfo((target as { graph?: unknown }).graph)) {
+    return target as GraphHistoryEntry;
+  }
+  if ("entry" in target) {
+    const entry = (target as { entry?: unknown }).entry;
+    if (entry && typeof entry === "object" && "graph" in entry) {
+      return entry as GraphHistoryEntry;
+    }
+  }
+  return undefined;
+}
+
+function isRunResult(value: unknown): value is RunResult {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "request_id" in value &&
+      "log" in value &&
+      "session_id" in value,
+  );
+}
+
+function isGraphInfo(value: unknown): value is GraphInfo {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "ref" in value &&
+      "format" in value &&
+      "name" in value,
+  );
+}
+
+function defaultWorkspaceUri(filename: string): vscode.Uri {
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+  return folder ? vscode.Uri.joinPath(folder, filename) : vscode.Uri.file(filename);
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64);
+}
+
+function shortRunId(requestId: string): string {
+  return sanitizeFilename(requestId).slice(0, 10) || "run";
 }

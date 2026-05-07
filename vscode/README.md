@@ -1,37 +1,89 @@
-# stata_code — VSCode extension (scaffold)
+# stata-code — VSCode extension
 
 Run Stata code from VSCode through the agent-native [stata_code](https://github.com/brycewang-stanford/stata_code) MCP server.
 
-> **Status: scaffold (v0.1).** Compiles to a working extension once
-> dependencies are installed, but has not yet been published to the
-> VSCode Marketplace. Intended for development use against a local
-> `stata-code-mcp` install.
+> **Status: v0.2 (May 2026).** Full UI surface — title-bar Run button,
+> editor context menu, status bar with session/cancel actions, activity-bar
+> sidebar with sessions / last result / logs / graphs panels, inline error
+> squigglies, code-lens cells, and the existing graph webview with
+> Save/Open buttons. Source-only — build with `npm install && npm run
+> compile`. Marketplace publishing still pending.
 
 ## What it does
 
-The extension is a thin VSCode transport in front of the same
-`stata-code-mcp` server that Claude Code / Cursor use. It owns no
-Stata logic; everything goes through the MCP `stata_run`, `get_log`,
-`get_graph`, `get_matrix`, `list_sessions`, `reset_session` tools.
+A thin VSCode transport in front of the same `stata-code-mcp` server
+that Claude Code / Cursor use. The extension owns no Stata logic;
+everything goes through MCP `stata_run`, `get_log`, `get_graph`,
+`get_matrix`, `list_sessions`, `cancel_session`, `reset_session`.
 
-Four commands are registered:
+## UI surface
 
-| Command | Default keybinding | Purpose |
-| --- | --- | --- |
-| `Stata: Run Selection` | `Cmd/Ctrl+Enter` | Run the selection (or current line) |
-| `Stata: Run Active File` | — | Run the entire file |
-| `Stata: Show Graphs` | — | Reopen the most recent run's graphs in a webview |
-| `Stata: Show Last Result (JSON)` | — | Open the last `RunResult` envelope as JSON |
+### Editor
 
-A successful run with one or more captured graphs auto-opens the
-graph webview side-by-side with the editor. The webview fetches the
-PNG/SVG/PDF bytes via `get_graph(ref)` lazily — they are never
-embedded in the original `RunResult`, so token economy is preserved
-even when running headlessly through the MCP server.
+| Affordance | What it does |
+| --- | --- |
+| ▶ button in editor title bar | Run the active file |
+| Right-click menu → *Stata: Run Selection / Run Active File* | Same, from the editor |
+| `Cmd/Ctrl+Enter` | Run selection (or current line if no selection) |
+| Inline `▶ Run Cell` code-lens above any `* %%` line | Run that cell |
+| Red squiggle on the failing line | After a failed run; hover to see the typed-error message and suggestions |
+
+**Cell convention.** A line whose trimmed text is `* %%` (optionally
+followed by a title, e.g. `* %% setup`) marks the start of a cell. The
+marker line is a Stata comment, so plain Stata still runs the file
+unchanged. The cell ends at the next marker or EOF. This is the Stata
+analog of Python's `# %%` cells.
+
+### Status bar
+
+A left-aligned `$(database) Stata: <session>` chip is always visible
+once the extension activates. Click it for a QuickPick with eight
+actions:
+
+- New Stata tab… / Switch tab… (live sessions + locally-known
+  "not started" tabs, plus *New tab…*)
+- Open latest log / Show latest graphs / Show output channel
+- Cancel `<sid>` / Reset `<sid>` / Close tab `<sid>`
+
+While a run is in flight, the icon swaps to `$(sync~spin)` and the
+notification toast has a Cancel button (cooperative cancellation via
+the MCP `cancel_session` tool).
+
+### Activity bar sidebar
+
+A new entry on the activity bar opens a sidebar with four sections:
+
+- **Sessions** — live `list_sessions` view with the current session
+  highlighted; header buttons for New / Refresh and per-item actions for
+  Switch / Cancel / Reset / Close. Sessions you've used in this workspace
+  but that aren't currently live still appear as "not started".
+- **Last Result** — collapsible groups for `r()` / `e()` returns,
+  warnings, dataset summary (with variable list), a clickable `log` leaf
+  (opens the run's full log via `get_log(ref)`), a clickable `graphs`
+  leaf, and on failure a typed error block with the failing line and
+  suggestions.
+- **Logs** — recent runs (capped at 64) tagged with success/failure and
+  line count; click to open the full log in an editor pane, or save it
+  from the item context menu.
+- **Graphs** — every captured graph in reverse-chronological order
+  (capped at 64); click any item to open it in the graph webview, or
+  save it directly from the item context menu.
+
+### Graph webview
+
+Successful runs with one or more graphs auto-open a side webview that
+fetches each graph's bytes via `get_graph(ref)` lazily. v0.2 adds:
+
+- Per-graph **Save as…** button → native save dialog → writes PNG / SVG / PDF
+- Per-graph **Open externally** button → writes to OS temp + opens with the
+  default app
+- Per-graph collapsible result block for hiding old figures while comparing
+- Top-level **Refresh** button → re-fetches the current panel
+
+The webview uses a strict CSP with a per-render nonce. Graph bytes
+never leave the local pystata / MCP boundary.
 
 ## Setup
-
-This directory ships **source only**. To build a working extension:
 
 ```bash
 cd vscode
@@ -39,15 +91,10 @@ npm install
 npm run compile
 ```
 
-To launch the extension host for local development:
-
-1. Open this `vscode/` folder in VSCode.
-2. `F5` to start an Extension Development Host.
-3. In the new window, open a `.do` file and `Cmd+Enter` on a line.
-
-The first command invocation spawns `stata-code-mcp` lazily (one
-process per workspace). Make sure `stata-code-mcp` is on your `PATH`
-or override:
+For local development, open this `vscode/` folder in VSCode and `F5` to
+launch an Extension Development Host. The first command invocation
+spawns `stata-code-mcp` lazily (one process per workspace). Make sure
+`stata-code-mcp` is on `PATH` or override:
 
 ```jsonc
 // settings.json
@@ -62,7 +109,7 @@ or override:
 | --- | --- | --- |
 | `stataCode.serverCommand` | `stata-code-mcp` | Command to spawn the MCP server |
 | `stataCode.serverArgs` | `[]` | Extra args passed to the server process |
-| `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` |
+| `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*) |
 | `stataCode.includeFullLog` | `false` | Inline full log instead of fetching via `get_log(ref)` |
 
 ## TypeScript types
@@ -82,9 +129,9 @@ Diff the two and pull in any newly-added fields by hand.
 ## Architecture
 
 ```text
-VSCode editor
+VSCode editor / sidebar / status bar / webview
    │
-   ▼  (text/code via callTool)
+   ▼  (high-level callTool)
 StataMcpClient (src/mcpClient.ts)
    │
    ▼  (stdio JSON-RPC, MCP)
@@ -94,21 +141,24 @@ stata-code-mcp (Python subprocess)
 pystata → Stata 17+
 ```
 
-## Status
+UI modules:
 
-This is the v0.4-roadmap scaffold from the parent project's
-[README](../README.md#roadmap). It deliberately stops at:
+| File | Responsibility |
+| --- | --- |
+| `src/extension.ts` | activation, command registration, run pipeline |
+| `src/mcpClient.ts` | MCP transport (stdio child process) |
+| `src/statusBar.ts` | status bar item + running-state spinner |
+| `src/treeProviders.ts` | sessions / last-result / logs / graphs sidebar trees |
+| `src/cellLens.ts` | `* %%` code-lens provider |
+| `src/diagnostics.ts` | inline error squigglies |
+| `src/graphPanel.ts` | graph webview (Save / Open / Refresh) |
 
-- The `Stata: Run Selection` command (line / selection / file modes)
-- Output-channel rendering of `RunResult` (logs, errors, warnings, graph counts)
-- Last-result JSON viewer
+## Status / not yet shipped
 
-Not yet wired:
-
-- Webview rendering of graphs (would call `get_graph` and decode base64)
-- Matrix / dataset table views
-- Inline error decorations on failing lines
 - Marketplace publishing
+- `.do` notebook editor (kept deliberately minimal in favor of code-lens cells)
+- Matrix / dataset table views (sidebar shows summary; full editor not yet)
+- Extension-host tests (planned)
 
 ## License
 

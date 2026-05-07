@@ -8,6 +8,42 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ### Added
 
+- **VSCode extension v0.2 — full UI surface** (`vscode/`). Beyond the
+  v0.1 "run from command palette" scaffold, the extension now ships
+  every common GUI affordance, so users who don't drive Stata through
+  Claude Code / Cursor can still operate the same MCP server from the
+  editor:
+  - **Editor title-bar ▶ button** (`editor/title/run` menu) and
+    editor right-click menu entries (`Run Selection` / `Run Active File`).
+  - **Status bar item** showing the current session; click for a
+    QuickPick (`Switch session…` / `Cancel` / `Reset`). The icon
+    swaps to a spinner during runs and the run progress notification
+    now has a Cancel button (cooperative cancellation through the
+    MCP `cancel_session` tool).
+  - **Activity-bar sidebar** with four views: live `Sessions` (with
+    inline Cancel/Reset/Close per item — `main` is non-closable;
+    locally-known but not-yet-started sessions persist via
+    `workspaceState`), `Last Result` (collapsible
+    `r()` / `e()` / warnings / dataset / log / graphs), `Graphs`
+    history (click-to-open + per-item Save…), and `Logs`
+    history (click-to-open + per-item Save…). Section-header buttons
+    for Clear (logs / graphs) and New / Refresh (sessions).
+  - **Inline error decorations.** Failed runs now publish a
+    `DiagnosticCollection` entry on the failing file/line, complete
+    with the typed error message, failing snippet, and any
+    suggestions surfaced in `runResult.error.suggestions`. Hover
+    shows the full text; the Problems panel lists the entry under
+    `source: stata_code, code: <error.kind>`.
+  - **Code-lens "Run Cell" support.** Lines starting with `* %%`
+    get an inline `▶ Run Cell` lens; clicking submits the code
+    between markers. Cell ranges map back to the original file
+    lines so error squigglies still anchor correctly.
+  - **Graph webview action buttons.** The webview now uses a strict
+    nonce-based CSP and exposes `Save as…`, `Open externally`, and
+    `Refresh` per-graph and panel-level buttons. PNG/SVG/PDF bytes
+    still flow lazily through `get_graph(ref)`.
+  - Bumped the extension version to `0.2.0`.
+
 - **Matrix size cap + `get_matrix(ref)`.** Matrices larger than
   `MATRIX_INLINE_CELL_CAP` (default 10,000 cells) now drop their
   `values` from the envelope and surface a `matrix://<request_id>/<r|e>/

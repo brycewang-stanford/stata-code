@@ -1,8 +1,8 @@
 {
   "name": "stata-code-vscode",
-  "displayName": "stata_code",
-  "description": "Run Stata code from VSCode through the agent-native stata_code MCP server.",
-  "version": "0.1.0",
+  "displayName": "stata-code",
+  "description": "Run Stata code from VSCode through the agent-native stata-code MCP server.",
+  "version": "0.3.0",
   "publisher": "brycewang-stanford",
   "license": "MIT",
   "repository": {
@@ -16,9 +16,7 @@
   "categories": ["Programming Languages", "Data Science", "Notebooks"],
   "keywords": ["stata", "pystata", "mcp", "causal-inference"],
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onLanguage:stata"
-  ],
+  "activationEvents": ["onLanguage:stata"],
   "contributes": {
     "languages": [
       {
@@ -31,22 +29,109 @@
       {
         "command": "stataCode.runSelection",
         "title": "Stata: Run Selection",
-        "category": "stata_code"
+        "category": "stata-code",
+        "icon": "$(play)"
       },
       {
         "command": "stataCode.runFile",
         "title": "Stata: Run Active File",
-        "category": "stata_code"
+        "category": "stata-code",
+        "icon": "$(play)"
+      },
+      {
+        "command": "stataCode.runCell",
+        "title": "Stata: Run Cell",
+        "category": "stata-code"
       },
       {
         "command": "stataCode.showLastResult",
         "title": "Stata: Show Last Result (JSON)",
-        "category": "stata_code"
+        "category": "stata-code"
       },
       {
         "command": "stataCode.showGraphs",
         "title": "Stata: Show Graphs",
-        "category": "stata_code"
+        "category": "stata-code",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "stataCode.showOutput",
+        "title": "Stata: Show Output",
+        "category": "stata-code",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "stataCode.statusBarMenu",
+        "title": "Stata: Status Bar Actions...",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.switchSession",
+        "title": "Stata: Switch Tab/Session...",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.newSession",
+        "title": "Stata: New Tab/Session...",
+        "category": "stata-code",
+        "icon": "$(add)"
+      },
+      {
+        "command": "stataCode.closeSession",
+        "title": "Stata: Close Tab/Session",
+        "category": "stata-code",
+        "icon": "$(close)"
+      },
+      {
+        "command": "stataCode.cancelSession",
+        "title": "Stata: Cancel Current Session",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.resetSession",
+        "title": "Stata: Reset Current Session",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.refreshSessions",
+        "title": "Stata: Refresh Sessions",
+        "category": "stata-code",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "stataCode.openLog",
+        "title": "Stata: Open Last Log",
+        "category": "stata-code",
+        "icon": "$(output)"
+      },
+      {
+        "command": "stataCode.saveLog",
+        "title": "Stata: Save Last Log As...",
+        "category": "stata-code",
+        "icon": "$(save)"
+      },
+      {
+        "command": "stataCode.clearLogs",
+        "title": "Stata: Clear Log History",
+        "category": "stata-code",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "stataCode.openGraph",
+        "title": "Stata: Open Graph",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.saveGraph",
+        "title": "Stata: Save Graph As...",
+        "category": "stata-code",
+        "icon": "$(save)"
+      },
+      {
+        "command": "stataCode.clearGraphs",
+        "title": "Stata: Clear Graph History",
+        "category": "stata-code",
+        "icon": "$(trash)"
       }
     ],
     "keybindings": [
@@ -57,8 +142,172 @@
         "when": "editorTextFocus && editorLangId == stata"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "stataCode",
+          "title": "stata-code",
+          "icon": "resources/stata-code.svg"
+        }
+      ]
+    },
+    "views": {
+      "stataCode": [
+        {
+          "id": "stataCode.sessions",
+          "name": "Sessions",
+          "icon": "$(database)",
+          "contextualTitle": "stata-code"
+        },
+        {
+          "id": "stataCode.lastResult",
+          "name": "Last Result",
+          "icon": "$(output)",
+          "contextualTitle": "stata-code"
+        },
+        {
+          "id": "stataCode.logsHistory",
+          "name": "Logs",
+          "icon": "$(output)",
+          "contextualTitle": "stata-code"
+        },
+        {
+          "id": "stataCode.graphsHistory",
+          "name": "Graphs",
+          "icon": "$(graph)",
+          "contextualTitle": "stata-code"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "stataCode.lastResult",
+        "contents": "No run yet. Open a Stata file and press Cmd/Ctrl+Enter to run a selection."
+      },
+      {
+        "view": "stataCode.logsHistory",
+        "contents": "No logs yet. Run Stata code to collect output logs."
+      },
+      {
+        "view": "stataCode.graphsHistory",
+        "contents": "No graphs captured yet."
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "stataCode.runFile",
+          "when": "resourceLangId == stata",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "stataCode.runSelection",
+          "when": "editorLangId == stata",
+          "group": "stataCode@1"
+        },
+        {
+          "command": "stataCode.runFile",
+          "when": "editorLangId == stata",
+          "group": "stataCode@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "stataCode.newSession",
+          "when": "view == stataCode.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.refreshSessions",
+          "when": "view == stataCode.sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "stataCode.openLog",
+          "when": "view == stataCode.logsHistory",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.clearLogs",
+          "when": "view == stataCode.logsHistory",
+          "group": "navigation@2"
+        },
+        {
+          "command": "stataCode.showGraphs",
+          "when": "view == stataCode.graphsHistory",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.clearGraphs",
+          "when": "view == stataCode.graphsHistory",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "stataCode.switchSession",
+          "when": "view == stataCode.sessions && viewItem =~ /stataCode.session/",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.cancelSession",
+          "when": "view == stataCode.sessions && viewItem =~ /stataCode.session/",
+          "group": "inline@2"
+        },
+        {
+          "command": "stataCode.resetSession",
+          "when": "view == stataCode.sessions && viewItem =~ /stataCode.session/",
+          "group": "inline@3"
+        },
+        {
+          "command": "stataCode.closeSession",
+          "when": "view == stataCode.sessions && viewItem =~ /closable/",
+          "group": "inline@4"
+        },
+        {
+          "command": "stataCode.openLog",
+          "when": "view == stataCode.logsHistory && viewItem == stataCode.logHistoryItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.saveLog",
+          "when": "view == stataCode.logsHistory && viewItem == stataCode.logHistoryItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "stataCode.openGraph",
+          "when": "view == stataCode.graphsHistory && viewItem == stataCode.graphHistoryItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.saveGraph",
+          "when": "view == stataCode.graphsHistory && viewItem == stataCode.graphHistoryItem",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "stataCode.openGraph",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.saveGraph",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.statusBarMenu",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.runCell",
+          "when": "false"
+        }
+      ]
+    },
     "configuration": {
-      "title": "stata_code",
+      "title": "stata-code",
       "properties": {
         "stataCode.serverCommand": {
           "type": "string",
