@@ -6,6 +6,22 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Added
+
+- **Matrix size cap + `get_matrix(ref)`.** Matrices larger than
+  `MATRIX_INLINE_CELL_CAP` (default 10,000 cells) now drop their
+  `values` from the envelope and surface a `matrix://<request_id>/<r|e>/
+  <name>` ref instead. Callers fetch the values via `get_matrix(ref)`,
+  which mirrors the existing `get_log` / `get_graph` pattern. The MCP
+  server gains a seventh tool, `get_matrix`, returning JSON
+  `{rows, cols, values}`. Closes the last open §3.4 todo from
+  SCHEMA.md and prevents pathological commands (e.g., `correlate` over
+  hundreds of variables) from blowing up the result envelope.
+
+### Changed
+
+- **MCP server tool count is now 7** (added `get_matrix`).
+
 ## [0.2.0] — 2026-05-07
 
 The first release that actually ships an end-to-end Stata pipeline. The v1.0

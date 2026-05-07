@@ -38,6 +38,7 @@ from stata_code.core.runner import (
     execute,
     get_graph,
     get_log,
+    get_matrix,
     list_sessions,
     reset_session,
 )
@@ -142,6 +143,20 @@ def _tool_definitions() -> list[Tool]:
             },
         ),
         Tool(
+            name="get_matrix",
+            description=(
+                "Fetch a matrix's values, rows, and cols behind a matrix:// "
+                "ref. Producers emit a ref instead of inlining values when "
+                "the matrix exceeds ~10,000 cells. Returns JSON {rows, cols, "
+                "values}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        ),
+        Tool(
             name="list_sessions",
             description=(
                 "Enumerate live sessions. Each entry has session_id, frame "
@@ -206,6 +221,9 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
                     type="image", data=payload["bytes_b64"], mimeType=mime
                 )
             ]
+        if name == "get_matrix":
+            payload = get_matrix(arguments["ref"])
+            return [TextContent(type="text", text=json.dumps(payload))]
         if name == "list_sessions":
             return [TextContent(type="text", text=json.dumps(list_sessions()))]
         if name == "reset_session":

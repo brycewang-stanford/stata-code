@@ -104,7 +104,7 @@ Or run as a module:
 python -m stata_code.mcp
 ```
 
-Six tools are registered:
+Seven tools are registered:
 
 | Tool | Purpose |
 | --- | --- |
@@ -112,6 +112,7 @@ Six tools are registered:
 | `stata_info` | Report installed Stata edition / version / capabilities |
 | `get_log` | Fetch full log behind a `log://` ref |
 | `get_graph` | Fetch graph bytes (`ImageContent`) behind a `graph://` ref |
+| `get_matrix` | Fetch matrix `{rows, cols, values}` behind a `matrix://` ref |
 | `list_sessions` | Enumerate live sessions |
 | `reset_session` | Drop a session's data |
 
@@ -212,8 +213,11 @@ The runner is the only place that touches Stata. Both the Jupyter kernel and the
 - Log truncation with ref store
 - Warning extraction (5 categories + generic notes)
 - 32-kind error taxonomy with canonical suggestions
-- MCP server (6 tools)
+- MCP server (7 tools)
 - Jupyter kernel (rewired to v1.0 pipeline)
+- Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
+- JSON Schema artifact auto-generated from `schema.py`
+  ([`schema/run_result.schema.json`](schema/run_result.schema.json))
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next up
@@ -222,7 +226,6 @@ The runner is the only place that touches Stata. Both the Jupyter kernel and the
 - **v0.3** — Cooperative cancellation (`cancel(session_id)`)
 - **v0.3** — Hard timeout enforcement (subprocess-based)
 - **v0.4** — Native VSCode extension (TypeScript), launches the MCP server
-- **v0.4** — JSON Schema artifact auto-generated from `schema.py`
 - **v1.0** — Stable schema, published to PyPI / VSCode Marketplace
 
 See [SCHEMA.md §7](SCHEMA.md) for explicitly-out-of-scope items.

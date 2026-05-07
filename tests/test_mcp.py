@@ -31,6 +31,7 @@ class TestToolRegistry:
             "stata_info",
             "get_log",
             "get_graph",
+            "get_matrix",
             "list_sessions",
             "reset_session",
         }.issubset(names)
@@ -82,6 +83,36 @@ class TestDispatch:
         out = asyncio.run(_dispatch("get_graph", {"ref": "graph://no/0"}))
         assert len(out) == 1
         assert "Unknown ref" in out[0].text
+
+    def test_get_matrix_unknown_ref_returns_error_text(self):
+        from stata_code.mcp.server import _dispatch
+
+        out = asyncio.run(_dispatch("get_matrix", {"ref": "matrix://no/r/M"}))
+        assert len(out) == 1
+        assert "Unknown ref" in out[0].text
+
+    def test_get_matrix_known_ref_returns_payload(self):
+        """Roundtrip: stash a payload via _refs and let dispatch deliver it."""
+        from stata_code.core import _refs
+        from stata_code.mcp.server import _dispatch
+
+        ref = "matrix://test-fake/e/M"
+        _refs.put(
+            ref,
+            {"rows": ["y1"], "cols": ["x1", "_cons"], "values": [[0.5, 1.0]]},
+        )
+        try:
+            out = asyncio.run(_dispatch("get_matrix", {"ref": ref}))
+        finally:
+            _refs.discard(ref)
+        assert len(out) == 1
+        assert isinstance(out[0], TextContent)
+        body = json.loads(out[0].text)
+        assert body == {
+            "rows": ["y1"],
+            "cols": ["x1", "_cons"],
+            "values": [[0.5, 1.0]],
+        }
 
     def test_stata_run_missing_code_returns_error_json(self):
         from stata_code.mcp.server import _dispatch

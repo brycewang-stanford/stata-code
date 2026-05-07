@@ -523,7 +523,10 @@ This section tracks how much of the schema is wired up in code. Not normative
 - `results.r` / `results.e` separation, with native-typed scalars (via
   `sfi.Scalar.getValue`), macros (via `sfi.Macro.getGlobal`), and
   matrices with `rows` / `cols` / `values` populated from
-  `sfi.Matrix.get` + `getRowNames` / `getColNames`.
+  `sfi.Matrix.get` + `getRowNames` / `getColNames`. Matrices larger than
+  `MATRIX_INLINE_CELL_CAP` (default 10,000 cells) drop `values` and
+  emit a `matrix://<request_id>/<r|e>/<name>` ref instead, retrievable
+  via `get_matrix(ref)`.
 - `results.last_estimation_cmd` (mirrors `e(cmd)`).
 - `dataset` block — `n_obs`, `n_vars`, `frame`, `changed`, `filename`,
   and `variables` (capped at 200 entries).
@@ -546,16 +549,13 @@ This section tracks how much of the schema is wired up in code. Not normative
   `include_full_log`, `include_graphs`, `graph_format`,
   `include_dataset_variables`, `session_id`.
 - Auxiliary tools: `get_log(ref)`, `get_graph(ref)`,
-  `list_sessions()`, `reset_session(session_id?)`, plus
-  the MCP-level `stata_info`.
+  `get_matrix(ref)`, `list_sessions()`, `reset_session(session_id?)`,
+  plus the MCP-level `stata_info`.
 - LRU eviction on the ref store (default cap 256) keeps long-running
   producers from growing unboundedly.
 
 ### Still deferred (post-v0.2)
 
-- **`get_matrix(ref)` + matrix size cap.** All matrices are currently
-  inlined; large matrices (e.g., 10k×10k correlate) still risk
-  blow-up. Cap + ref-mode are spec'd in §3.4 and will land in v0.3.
 - **Hard timeout enforcement.** `timeout_ms` is accepted by `execute()`
   but not yet enforced — pystata's in-process model has no clean cancel
   primitive. v0.3 will move long calls into a subprocess pool with

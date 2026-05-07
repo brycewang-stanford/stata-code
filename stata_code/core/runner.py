@@ -69,6 +69,12 @@ _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
 # Cap on `dataset.variables` to avoid pathological return sizes (per SCHEMA §3.5).
 _DATASET_VAR_CAP = 200
 
+# Cap on inlined matrix cells (rows × cols). Above this, `values` is omitted
+# from the envelope and a `matrix://...` ref is stored instead, retrievable
+# via `get_matrix(ref)`. Per SCHEMA.md §3.4: "Producers SHOULD do this when
+# a matrix would inline more than ~10,000 cells."
+MATRIX_INLINE_CELL_CAP = 10_000
+
 
 def _utc_iso_ms() -> str:
     now = datetime.now(timezone.utc)
@@ -191,8 +197,13 @@ def _list_returns(rt: Any, prefix: str) -> dict[str, list[str]]:
     return _parse_return_list(buf.getvalue())
 
 
-def _collect_returns(rt: Any, prefix: str) -> StataReturns:
-    """Build a StataReturns for r() or e() using sfi for typed access."""
+def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
+    """Build a StataReturns for r() or e() using sfi for typed access.
+
+    Matrices larger than ``MATRIX_INLINE_CELL_CAP`` cells are emitted with
+    ``values=None`` and a ``matrix://<request_id>/<prefix>/<name>`` ref;
+    callers fetch the values via :func:`get_matrix`.
+    """
     names = _list_returns(rt, prefix)
     sfi = rt.sfi
 
@@ -217,16 +228,27 @@ def _collect_returns(rt: Any, prefix: str) -> StataReturns:
         key = f"{prefix}({name})"
         try:
             values = sfi.Matrix.get(key)
-            rows = sfi.Matrix.getRowNames(key) or []
-            cols = sfi.Matrix.getColNames(key) or []
-            # Normalize to list of list of (float | None)
+            rows = list(sfi.Matrix.getRowNames(key) or [])
+            cols = list(sfi.Matrix.getColNames(key) or [])
             norm_values: list[list[float | None]] = [
                 [None if v is None else float(v) for v in row]
                 for row in values
             ]
-            matrices[name] = Matrix(
-                rows=list(rows), cols=list(cols), values=norm_values, ref=None
-            )
+            n_rows = len(norm_values)
+            n_cols = len(norm_values[0]) if n_rows else 0
+            if n_rows * n_cols > MATRIX_INLINE_CELL_CAP:
+                ref = f"matrix://{request_id}/{prefix}/{name}"
+                _refs.put(
+                    ref,
+                    {"rows": rows, "cols": cols, "values": norm_values},
+                )
+                matrices[name] = Matrix(
+                    rows=rows, cols=cols, values=None, ref=ref
+                )
+            else:
+                matrices[name] = Matrix(
+                    rows=rows, cols=cols, values=norm_values, ref=None
+                )
         except Exception:  # noqa: BLE001
             continue
 
@@ -538,8 +560,8 @@ def execute(
     # whatever state existed before the failing command (per SCHEMA §3.7
     # commands_executed semantics).
     results = ResultsInfo(
-        r=_collect_returns(rt, "r"),
-        e=_collect_returns(rt, "e"),
+        r=_collect_returns(rt, "r", request_id),
+        e=_collect_returns(rt, "e", request_id),
         last_estimation_cmd=_last_estimation_cmd(rt),
     )
     dataset = _collect_dataset(rt, include_dataset_variables)
@@ -915,4 +937,23 @@ def get_graph(ref: str, format: str | None = None) -> dict[str, Any]:
         "bytes_b64": _b64(payload["bytes"]),
         "width": payload["width"],
         "height": payload["height"],
+    }
+
+
+def get_matrix(ref: str) -> dict[str, Any]:
+    """Auxiliary tool: fetch a matrix's values, rows, cols by ref.
+
+    Per SCHEMA.md §5. Used when ``run()`` returns a Matrix with ``values=None``
+    and a ``matrix://...`` ref because the matrix exceeded the inline cell
+    cap (``MATRIX_INLINE_CELL_CAP`` = 10,000 cells by default). Returns a
+    dict with ``rows``, ``cols``, ``values``. Raises ``KeyError`` if the
+    ref is unknown (expired, never existed, or session reset).
+    """
+    payload = _refs.get(ref)
+    if payload is None:
+        raise KeyError(f"unknown matrix ref: {ref!r}")
+    return {
+        "rows": payload["rows"],
+        "cols": payload["cols"],
+        "values": payload["values"],
     }

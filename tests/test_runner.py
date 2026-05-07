@@ -417,6 +417,78 @@ class TestWarnings:
         assert len(omitted) <= 1
 
 
+class TestMatrices:
+    """Matrix collection: small ones inline; large ones go through `_refs`."""
+
+    def test_small_matrix_inlined_with_no_ref(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        r = execute("regress mpg weight")
+        assert r.ok
+        # e(b) is 1×2 for `regress mpg weight` (intercept + 1 slope).
+        b = r.results.e.matrices.get("b")
+        assert b is not None
+        assert b.values is not None  # inline
+        assert b.ref is None
+        assert len(b.values) == 1
+        assert len(b.values[0]) == 2
+
+    def test_large_matrix_emits_ref_and_drops_values(
+        self, loaded_auto, monkeypatch
+    ):
+        """When a matrix exceeds the cell cap, values is None and a ref is set."""
+        from stata_code.core import runner
+
+        # Lower the cap so a normal-size auto.dta matrix triggers ref mode.
+        # `regress mpg weight length` produces e(V) = 3×3 = 9 cells; setting
+        # the cap to 4 forces ref mode for that matrix while leaving e(b)
+        # (1×3 = 3 cells) inline.
+        monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 4)
+
+        r = runner.execute("regress mpg weight length")
+        assert r.ok
+
+        v = r.results.e.matrices.get("V")
+        assert v is not None, f"expected e(V); got {list(r.results.e.matrices)}"
+        assert v.values is None
+        assert v.ref is not None
+        assert v.ref.startswith("matrix://")
+        # Row/col labels remain visible inline (cheap, useful for the agent).
+        assert v.rows
+        assert v.cols
+
+        # Small matrix in the same result is still inlined (smoke test).
+        b = r.results.e.matrices.get("b")
+        assert b is not None
+        assert b.values is not None
+        assert b.ref is None
+
+    def test_get_matrix_returns_full_payload(self, loaded_auto, monkeypatch):
+        from stata_code.core import runner
+
+        monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 4)
+        r = runner.execute("regress mpg weight length")
+        assert r.ok
+        v = r.results.e.matrices["V"]
+        assert v.ref is not None
+
+        payload = runner.get_matrix(v.ref)
+        assert payload["rows"] == v.rows
+        assert payload["cols"] == v.cols
+        # 3×3, every cell is a finite float.
+        assert len(payload["values"]) == len(v.rows)
+        for row in payload["values"]:
+            assert len(row) == len(v.cols)
+            for cell in row:
+                assert cell is None or isinstance(cell, float)
+
+    def test_get_matrix_unknown_ref_raises(self):
+        from stata_code.core.runner import get_matrix
+
+        with pytest.raises(KeyError):
+            get_matrix("matrix://does-not-exist/r/M")
+
+
 class TestMultiSession:
     def setup_method(self):
         # Ensure clean state — drop any non-default frames left over.

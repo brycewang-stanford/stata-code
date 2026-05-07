@@ -26,6 +26,7 @@ from stata_code.core.runner import (
     execute,
     get_graph,
     get_log,
+    get_matrix,
     list_sessions,
     reset_session,
 )
@@ -63,6 +64,7 @@ __all__ = [
     # Auxiliary tools
     "get_log",
     "get_graph",
+    "get_matrix",
     "list_sessions",
     "reset_session",
     # Availability check
