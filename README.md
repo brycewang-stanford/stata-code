@@ -19,8 +19,8 @@
                     └────────────────────────────────────────┘
                        ↑              ↑              ↑
               ┌────────┴────┐  ┌──────┴─────┐  ┌────┴────────────┐
-              │  Jupyter    │  │  MCP       │  │  VS Code glue   │
-              │  kernel     │  │  server    │  │  (planned)      │
+              │  Jupyter    │  │  MCP       │  │  VS Code        │
+              │  kernel     │  │  server    │  │  extension      │
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
@@ -128,23 +128,71 @@ else:
 
 ### As an MCP Server / 作为 MCP server
 
-After install, `stata-code-mcp` is on your `PATH`. Add this to Claude Code (`~/.claude/mcp.json` or the Claude Code settings UI), Cursor, Claude Desktop, or another MCP-compatible client:
+After `pip install stata-code`, the `stata-code-mcp` binary is on your `PATH`. You can wire it into Claude Code, Cursor, Claude Desktop, or any other MCP-compatible client.
 
-安装后，`stata-code-mcp` 会出现在你的 `PATH` 中。把下面的配置加到 Claude Code（`~/.claude/mcp.json` 或 Claude Code settings UI）、Cursor、Claude Desktop 等支持 MCP 的客户端里：
+`pip install stata-code` 之后，`stata-code-mcp` 会出现在你的 `PATH` 中。可以接到 Claude Code、Cursor、Claude Desktop 等任何兼容 MCP 的客户端里。
+
+#### Claude Code via `claude mcp add` (recommended) / 用 `claude mcp add` 接入 Claude Code（推荐）
+
+If you have not installed Claude Code yet, see [anthropics/claude-code](https://github.com/anthropics/claude-code).
+
+如果你还没有安装 Claude Code，请先看 [anthropics/claude-code](https://github.com/anthropics/claude-code)。
+
+The fastest way is the `claude mcp add` CLI. Pick a scope based on how widely you want `stata-code` available:
+
+最快的方式是 `claude mcp add` 命令。根据想要的可见范围选 scope：
+
+```bash
+# user scope — install once, available in every Claude Code workspace on this machine
+# user scope —— 一次安装，本机所有 Claude Code workspace 全局可用
+claude mcp add stata-code --scope user -- stata-code-mcp
+
+# local scope — only for the current workspace (your local Claude config, not committed)
+# local scope —— 仅当前 workspace（本地 Claude 配置，不会提交到仓库）
+claude mcp add stata-code --scope local -- stata-code-mcp
+
+# project scope — written into ./.mcp.json so collaborators on this repo share it
+# project scope —— 写入仓库内的 ./.mcp.json，和协作者共享
+claude mcp add stata-code --scope project -- stata-code-mcp
+```
+
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 8 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`).
+
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 8 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`）。
+
+#### `uvx` (no global pip install) / 用 `uvx`（不必全局 pip install）
+
+If you prefer not to `pip install stata-code` globally, run it ephemerally through [`uv`](https://github.com/astral-sh/uv):
+
+如果不想全局 `pip install stata-code`，可以用 [`uv`](https://github.com/astral-sh/uv) 临时运行：
+
+```bash
+claude mcp add stata-code --scope user -- uvx --from stata-code stata-code-mcp
+```
+
+`uvx` will resolve and cache `stata-code` on first launch. Note: `pystata` is **not** on PyPI, so it still has to be locatable on the host. The runner adds the standard Stata install path (e.g. `/Applications/Stata/utilities/pystata` on macOS) to `sys.path` automatically; if your Stata lives elsewhere, set `PYTHONPATH` in the env block.
+
+`uvx` 会在首次启动时下载并缓存 `stata-code`。注意：`pystata` **不在 PyPI 上**，仍需要在宿主机上能找到。runner 会自动把标准 Stata 安装路径（macOS 上的 `/Applications/Stata/utilities/pystata` 等）加到 `sys.path`；如果你的 Stata 在别处，请用 env 设置 `PYTHONPATH`。
+
+#### Manual JSON config (Cursor / Claude Desktop / fallback) / 手动 JSON 配置
+
+For clients without a `mcp add` CLI, edit the config file directly (`~/.claude/mcp.json`, Cursor settings, Claude Desktop `claude_desktop_config.json`, etc.):
+
+对于没有 `mcp add` CLI 的客户端，直接编辑配置文件即可（`~/.claude/mcp.json`、Cursor settings、Claude Desktop 的 `claude_desktop_config.json` 等）：
 
 ```json
 {
   "mcpServers": {
-    "stata": {
+    "stata-code": {
       "command": "stata-code-mcp"
     }
   }
 }
 ```
 
-Or run it as a module:
+Or run it as a module if the binary is not on `PATH`:
 
-也可以直接以 module 方式运行：
+如果 `stata-code-mcp` 不在 `PATH` 上，也可以以 module 方式运行：
 
 ```bash
 python -m stata_code.mcp
@@ -182,6 +230,26 @@ python -m stata_code.kernel install --user
 Then open a notebook and select the **Stata** kernel. Stata commands run in cells; logs, graphs, and warnings render inline.
 
 然后打开 notebook，选择 **Stata** kernel。Stata 命令会在 cell 中运行，日志、图形和 warnings 会以内联方式显示。
+
+### As a VS Code Extension / 作为 VS Code 扩展
+
+The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds a sidebar (sessions / last result / run history / logs / graphs), code-lens "Run cell" actions on `.do` files, status-bar indicators, and inline diagnostics from the v1.0 typed errors.
+
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供侧边栏（sessions / last result / run history / logs / graphs）、`.do` 文件的 code-lens "Run cell"、状态栏指示器，以及来自 v1.0 typed errors 的内联诊断。
+
+```bash
+# from the VS Code CLI
+# 从 VS Code 命令行
+code --install-extension brycewang-stanford.stata-code-vscode
+```
+
+Or open the **Extensions** sidebar in VS Code and search `stata-code`.
+
+或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。
+
+The extension still requires `stata-code` itself to be importable on your system Python (`pip install stata-code`), so that `stata-code-mcp` resolves on `PATH`. Stata 17+ and a valid Stata license are required as for any other frontend.
+
+扩展仍然依赖系统 Python 上能导入 `stata-code`（`pip install stata-code`），从而保证 `stata-code-mcp` 在 `PATH` 上可用。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
 
 ---
 
@@ -288,14 +356,14 @@ stata_code/
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Cooperative cancellation: `cancel(session_id)` / MCP `cancel_session`
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code extension scaffold ([`vscode/`](vscode/)): `Run Selection`, graph webview, MCP child-process spawn
+- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): sidebar (sessions / last result / run history / logs / graphs), code-lens cell runner, status bar, diagnostics, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next Up / 下一步
 
 - **v0.3** - Console fallback for Stata 11-16, re-implemented against the v1.0 schema
 - **v0.3** - Hard timeout / mid-Stata interrupt; design and tradeoffs in [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md)
-- **v0.4** - VS Code Marketplace publishing; the scaffold and graph webview already work in dev host
+- **v0.4** - extra VS Code polish (esbuild bundle, lighter VSIX, command palette UX)
 - **v1.0** - Stable schema, PyPI / VS Code Marketplace publishing
 
 See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
