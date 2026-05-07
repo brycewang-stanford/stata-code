@@ -58,6 +58,23 @@ Changelog = "https://github.com/brycewang-stanford/stata-code/blob/main/CHANGELO
 [tool.hatch.build.targets.wheel]
 packages = ["stata_code"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/stata_code",
+  "/tests",
+  "/schema",
+  "/scripts",
+  "/examples",
+  "/docs",
+  "/README.md",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/LICENSE-POLICY.md",
+  "/PUBLISHING.md",
+  "/SCHEMA.md",
+  "/pyproject.toml",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
