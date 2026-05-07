@@ -1,16 +1,73 @@
-"""stata_code core — pystata-first adapter with console fallback."""
+"""stata_code core — schema, errors, runner.
 
-from stata_code.core.version import detect_stata, StataEdition, StataVersion
-from stata_code.core.result import StataResult, StataGraph
-from stata_code.core.pystata_adapter import PystataAdapter
-from stata_code.core.console_fallback import ConsoleFallback
+Most consumers import from ``stata_code`` directly. This module exposes the
+internals for advanced use (e.g., type-only imports, custom adapters).
+"""
+
+from stata_code.core._runtime import (
+    PystataNotAvailable,
+    PystataRuntime,
+    get_runtime,
+    is_available,
+)
+from stata_code.core.errors import RC_TO_KIND, classify_rc, suggestions_for
+from stata_code.core.runner import (
+    execute,
+    get_graph,
+    get_log,
+    list_sessions,
+    reset_session,
+)
+from stata_code.core.schema import (
+    Backend,
+    DatasetInfo,
+    ErrorContext,
+    ErrorInfo,
+    ErrorKind,
+    GraphFormat,
+    GraphInfo,
+    IncludeGraphs,
+    LogInfo,
+    Matrix,
+    ResultsInfo,
+    RunResult,
+    StataEdition,
+    StataInfo,
+    StataReturns,
+    StataWarning,
+    Suggestion,
+    VariableInfo,
+)
 
 __all__ = [
-    "detect_stata",
+    "execute",
+    "get_graph",
+    "get_log",
+    "list_sessions",
+    "reset_session",
+    "PystataRuntime",
+    "PystataNotAvailable",
+    "is_available",
+    "get_runtime",
+    "RC_TO_KIND",
+    "classify_rc",
+    "suggestions_for",
+    "RunResult",
+    "ErrorKind",
+    "ErrorInfo",
+    "ErrorContext",
+    "Suggestion",
+    "LogInfo",
+    "ResultsInfo",
+    "StataReturns",
+    "Matrix",
+    "DatasetInfo",
+    "VariableInfo",
+    "GraphInfo",
+    "GraphFormat",
+    "IncludeGraphs",
+    "StataInfo",
     "StataEdition",
-    "StataVersion",
-    "StataResult",
-    "StataGraph",
-    "PystataAdapter",
-    "ConsoleFallback",
+    "Backend",
+    "StataWarning",
 ]

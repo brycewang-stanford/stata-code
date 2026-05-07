@@ -1,22 +1,57 @@
-"""Integration tests for the Stata Jupyter kernel."""
+"""Tests for the Stata Jupyter kernel (rewired to v1.0 runner pipeline)."""
 
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from stata_code.core.result import StataResult, StataGraph
+from stata_code.core.schema import (
+    Backend,
+    ErrorContext,
+    ErrorInfo,
+    ErrorKind,
+    LogInfo,
+    RunResult,
+    StataEdition,
+    StataInfo,
+    Suggestion,
+)
+
+
+def _make_run_result(*, ok: bool = True, **overrides) -> RunResult:
+    base: dict = {
+        "ok": ok,
+        "rc": 0 if ok else 111,
+        "session_id": "main",
+        "request_id": "test-req",
+        "started_at": "2026-04-30T00:00:00.000Z",
+        "elapsed_ms": 1,
+        "stata": StataInfo(
+            version="18.0", edition=StataEdition.MP, backend=Backend.PYSTATA
+        ),
+    }
+    base.update(overrides)
+    if not ok and base.get("error") is None:
+        base["error"] = ErrorInfo(
+            kind=ErrorKind.VARNAME_NOT_FOUND,
+            rc=base["rc"],
+            message="variable mpgg not found",
+            varname="mpgg",
+            line=1,
+            context=ErrorContext(before=[], failing="summarize mpgg", after=[]),
+            suggestions=[Suggestion(action="Did you mean `mpg`?", command="describe")],
+        )
+    return RunResult(**base)
 
 
 class TestStataKernelClass:
     """Test StataKernel without requiring a live Jupyter connection."""
 
     def test_kernel_has_correct_language_info(self):
-        """Kernel language_info declares Stata correctly."""
         from stata_code.kernel import StataKernel
 
         ki = StataKernel.language_info
@@ -25,20 +60,16 @@ class TestStataKernelClass:
         assert ki["mimetype"] == "text/x-stata"
 
     def test_kernel_protocol_version(self):
-        """Kernel announces correct protocol version."""
         from stata_code.kernel import StataKernel
 
         assert StataKernel.protocol_version == "5.3"
         assert StataKernel.implementation == "stata_code.kernel"
 
     def test_do_execute_returns_error_on_missing_ipykernel(self):
-        """When ipykernel is absent, do_execute returns an error reply."""
         from stata_code.kernel import kernel
 
-        # Simulate ipykernel unavailable by patching the flag
         original = kernel._HAS_IPYKERNEL
         kernel._HAS_IPYKERNEL = False
-
         try:
             from stata_code.kernel import StataKernel
 
@@ -49,59 +80,53 @@ class TestStataKernelClass:
         finally:
             kernel._HAS_IPYKERNEL = original
 
-    def test_do_execute_calls_stata_run(self):
-        """do_execute should call run() and route results to the shell."""
+    def test_do_execute_calls_runner_and_routes_ok(self):
+        """do_execute uses runner.execute and reports status=ok on success."""
         from stata_code.kernel import kernel as kernel_module
 
         original = kernel_module._HAS_IPYKERNEL
         kernel_module._HAS_IPYKERNEL = True
-
-        mock_result = StataResult(
-            stdout="",
-            log="summarize mpg\n\n    Variable |        Obs        Mean    Std. Dev.       Min        Max\n-------------+--------------------------------------------------------\n         mpg |         74     21.2973    5.785503        12         41",
-            return_code=0,
-            results={"r(mean)": "21.2973", "e(cmd)": "summarize"},
+        mock_result = _make_run_result(
+            ok=True,
+            log=LogInfo(head="summarize mpg\n", tail="", lines_total=1, bytes_total=15),
         )
-
         try:
             from stata_code.kernel import StataKernel
 
             kb = StataKernel()
-
-            with patch("stata_code.kernel.kernel.run", return_value=mock_result) as mock_run:
-                reply = kb.do_execute("summarize mpg", silent=False)
-                mock_run.assert_called_once()
-                call_args = mock_run.call_args
-                # code is passed positionally, not as keyword arg
-                assert "summarize mpg" in call_args.args[0]
-                assert call_args.kwargs["capture_graphs"] is True
-                assert call_args.kwargs["capture_log"] is True
-
+            with patch(
+                "stata_code.kernel.kernel.execute", return_value=mock_result
+            ) as mock_exec:
+                reply = kb.do_execute("summarize mpg", silent=True)
+            mock_exec.assert_called_once()
+            # code is positional; defaults are tuned for Jupyter
+            assert "summarize mpg" in mock_exec.call_args.args[0]
+            assert mock_exec.call_args.kwargs["include_full_log"] is True
+            assert mock_exec.call_args.kwargs["include_graphs"] == "inline"
             assert reply["status"] == "ok"
-            # execution_count starts at 0 in ipykernel; increment_execution_count()
-            # is called by the full Jupyter machinery, not by do_execute directly
-            assert reply["execution_count"] == 0
         finally:
             kernel_module._HAS_IPYKERNEL = original
 
     def test_do_execute_handles_error_result(self):
-        """When Stata returns an error, do_execute reports status=error."""
+        """When runner reports an error, do_execute returns status=error with the typed kind."""
         from stata_code.kernel import kernel as kernel_module
 
         original = kernel_module._HAS_IPYKERNEL
         kernel_module._HAS_IPYKERNEL = True
-
-        error_result = StataResult(error="variable not found", return_code=198, log="variable not found")
-
+        mock_result = _make_run_result(ok=False)
         try:
             from stata_code.kernel import StataKernel
 
             kb = StataKernel()
-            with patch("stata_code.kernel.kernel.run", return_value=error_result):
-                reply = kb.do_execute("summarize not_a_var", silent=False)
+            with patch(
+                "stata_code.kernel.kernel.execute", return_value=mock_result
+            ):
+                reply = kb.do_execute("summarize mpgg", silent=True)
             assert reply["status"] == "error"
-            assert reply["ename"] == "StataError"
-            assert "variable not found" in reply["traceback"][0]
+            assert "varname_not_found" in reply["ename"]
+            assert "mpgg" in reply["evalue"]
+            # Suggestion surfaces in the traceback
+            assert any("Did you mean" in line for line in reply["traceback"])
         finally:
             kernel_module._HAS_IPYKERNEL = original
 

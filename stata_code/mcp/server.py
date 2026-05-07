@@ -1,185 +1,275 @@
-"""MCP server for stata_code — exposes the core adapter via the Model Context Protocol."""
+"""MCP server exposing the stata_code v1.0 pipeline.
+
+Tools registered:
+- stata_run        — execute Stata code, return a v1.0 RunResult JSON
+- stata_info       — report Stata edition / version / capabilities
+- get_log          — fetch full log behind a `log://` ref
+- get_graph        — fetch graph bytes behind a `graph://` ref (ImageContent)
+- list_sessions    — enumerate live sessions (frames)
+- reset_session    — drop a session's data
+
+The result envelope, token-economy defaults (log head+tail+ref, graph refs
+not inline), session model, and error taxonomy follow SCHEMA.md.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from typing import Any
 
-# MCP protocol types — install via: pip install mcp
 try:
     from mcp.server import Server
-    from mcp.types import Tool, TextContent
-    from mcp.server.stdio import serve_stdio
-except ImportError:
-    Server = None
-    Tool = None
-    TextContent = None
+    from mcp.server.stdio import stdio_server
+    from mcp.types import ImageContent, TextContent, Tool
 
-from stata_code import run, StataResult
-from stata_code.core.version import detect_stata
+    _MCP_AVAILABLE = True
+except ImportError:  # pragma: no cover - environment without mcp installed
+    Server = None  # type: ignore[assignment,misc]
+    Tool = None  # type: ignore[assignment,misc]
+    TextContent = None  # type: ignore[assignment,misc]
+    ImageContent = None  # type: ignore[assignment,misc]
+    stdio_server = None  # type: ignore[assignment]
+    _MCP_AVAILABLE = False
 
-__version__ = "0.1.0"
+from stata_code.core._runtime import PystataNotAvailable, is_available
+from stata_code.core.runner import (
+    execute,
+    get_graph,
+    get_log,
+    list_sessions,
+    reset_session,
+)
+
+__version__ = "0.2.0"
+
+APP: Any = Server("stata_code") if _MCP_AVAILABLE else None
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Server setup
+# Tool registry
 # ─────────────────────────────────────────────────────────────────────────────
 
-APP = Server("stata_code")
 
-
-@APP.list_tools()
-async def list_tools() -> list[Tool]:
-    """
-    Declare the tools this MCP server exposes to LLM agents.
-
-    Currently defined tools:
-    - ``stata_run`` — execute Stata code and return structured results
-    - ``stata_version`` — return installed Stata edition and version
-    """
+def _tool_definitions() -> list[Tool]:
     return [
         Tool(
             name="stata_run",
             description=(
-                "Execute Stata code and return structured results. "
-                "Use this tool to run any Stata command or .do file content. "
-                "Returns stdout log, e()/r() scalars, graphs as base64 data URIs, "
-                "and any error messages. Best for: regression, data manipulation, "
-                "summary statistics, estimation results, graph generation."
+                "Execute Stata code and return a v1.0 stata_code RunResult "
+                "(see SCHEMA.md). The result is a JSON object with ok, rc, "
+                "error (typed), log (head+tail+ref by default), results.r/e "
+                "(scalars/macros/matrices, native types), dataset metadata, "
+                "graphs, warnings, and capabilities. Use the structured "
+                "fields rather than parsing the log."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "Stata command(s) to execute. Can include newlines.",
+                        "description": "Stata code to execute. Multi-line OK.",
                     },
-                    "capture_graphs": {
+                    "session_id": {
+                        "type": "string",
+                        "default": "main",
+                        "description": (
+                            "Session name. 'main' is the master frame; "
+                            "other names create/route to that Stata frame "
+                            "(data isolation only; r()/e() remain global)."
+                        ),
+                    },
+                    "include_graphs": {
+                        "type": "string",
+                        "enum": ["ref", "inline", "none"],
+                        "default": "ref",
+                    },
+                    "graph_format": {
+                        "type": "string",
+                        "enum": ["png", "svg", "pdf"],
+                        "default": "png",
+                    },
+                    "log_lines_head": {"type": "integer", "default": 20},
+                    "log_lines_tail": {"type": "integer", "default": 20},
+                    "include_full_log": {"type": "boolean", "default": False},
+                    "include_dataset_variables": {
                         "type": "boolean",
-                        "description": "If true, capture graph files as base64 data URIs.",
                         "default": True,
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "description": "Timeout in seconds (default 120).",
-                        "default": 120,
                     },
                 },
                 "required": ["code"],
             },
         ),
         Tool(
-            name="stata_version",
+            name="stata_info",
             description=(
-                "Return the detected Stata installation info: "
-                "edition (MP/SE/IC/BE), version string (e.g. '18.0'), "
-                "and whether pystata is available."
+                "Report installed Stata edition, version, backend, and "
+                "whether the runtime is initialized."
             ),
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="get_log",
+            description=(
+                "Fetch the full log text behind a log:// ref returned by a "
+                "prior stata_run call. Returns JSON {text, lines_total, "
+                "bytes_total}."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"ref": {"type": "string"}},
+                "required": ["ref"],
+            },
+        ),
+        Tool(
+            name="get_graph",
+            description=(
+                "Fetch graph bytes behind a graph:// ref. Returns an "
+                "ImageContent (base64 bytes + mimeType) suitable for direct "
+                "display by vision-capable clients."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ref": {"type": "string"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["png", "svg", "pdf"],
+                    },
+                },
+                "required": ["ref"],
+            },
+        ),
+        Tool(
+            name="list_sessions",
+            description=(
+                "Enumerate live sessions. Each entry has session_id, frame "
+                "(Stata frame name), and n_obs."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reset_session",
+            description=(
+                "Drop a session's data. session_id='main' performs `clear "
+                "all` in place (default frame cannot be dropped); other "
+                "names drop the corresponding Stata frame."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "default": "main"},
+                },
+            },
         ),
     ]
 
 
-@APP.call_tool()
-async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    """Handle tool invocation requests from the MCP client."""
-    if name == "stata_run":
-        return await _stata_run(arguments)
-    elif name == "stata_version":
-        return await _stata_version(arguments)
-    else:
-        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+if _MCP_AVAILABLE:
+
+    @APP.list_tools()
+    async def list_tools() -> list[Tool]:
+        return _tool_definitions()
+
+    @APP.call_tool()
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[Any]:
+        return await _dispatch(name, arguments)
 
 
-async def _stata_run(args: dict[str, Any]) -> list[TextContent]:
-    """Run Stata code and return results as structured text."""
-    code = args.get("code", "")
-    capture_graphs = args.get("capture_graphs", True)
-    timeout = args.get("timeout", 120.0)
+# ─────────────────────────────────────────────────────────────────────────────
+# Dispatch (kept module-level for testability)
+# ─────────────────────────────────────────────────────────────────────────────
 
+
+_GRAPH_MIME = {
+    "png": "image/png",
+    "svg": "image/svg+xml",
+    "pdf": "application/pdf",
+}
+
+
+async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
     try:
-        result: StataResult = run(
-            code,
-            capture_graphs=capture_graphs,
-            timeout=timeout,
-        )
-        return [_result_to_text(result)]
-    except Exception as exc:
-        return [TextContent(type="text", text=f"Error: {exc}")]
+        if name == "stata_run":
+            return _run_tool(arguments)
+        if name == "stata_info":
+            return [TextContent(type="text", text=_info_payload())]
+        if name == "get_log":
+            payload = get_log(arguments["ref"])
+            return [TextContent(type="text", text=json.dumps(payload))]
+        if name == "get_graph":
+            payload = get_graph(arguments["ref"])
+            mime = _GRAPH_MIME.get(payload["format"], "image/png")
+            return [
+                ImageContent(
+                    type="image", data=payload["bytes_b64"], mimeType=mime
+                )
+            ]
+        if name == "list_sessions":
+            return [TextContent(type="text", text=json.dumps(list_sessions()))]
+        if name == "reset_session":
+            sid = arguments.get("session_id", "main")
+            return [TextContent(type="text", text=json.dumps(reset_session(sid)))]
+        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    except KeyError as exc:
+        return [TextContent(type="text", text=f"Unknown ref: {exc}")]
+    except PystataNotAvailable as exc:
+        return [TextContent(type="text", text=f"Stata not available: {exc}")]
+    except (ValueError, NotImplementedError) as exc:
+        return [TextContent(type="text", text=f"{type(exc).__name__}: {exc}")]
+    except Exception as exc:  # noqa: BLE001 - last-resort safety net
+        return [TextContent(type="text", text=f"Error: {type(exc).__name__}: {exc}")]
 
 
-async def _stata_version(_args: dict[str, Any]) -> list[TextContent]:
-    """Return Stata version info."""
-    info = detect_stata()
-    text = (
-        f"edition={info.edition.value}, "
-        f"version={info.version}, "
-        f"pystata_available={info.supports_pystata}"
+def _run_tool(arguments: dict[str, Any]) -> list[Any]:
+    args = dict(arguments)
+    code = args.pop("code", None)
+    if not code:
+        return [TextContent(type="text", text='{"error": "code is required"}')]
+    try:
+        result = execute(code, **args)
+    except (ValueError, NotImplementedError) as exc:
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps({"error": f"{type(exc).__name__}: {exc}"}),
+            )
+        ]
+    return [TextContent(type="text", text=result.model_dump_json())]
+
+
+def _info_payload() -> str:
+    if not is_available():
+        return json.dumps({"available": False})
+    from stata_code.core._runtime import get_runtime
+
+    rt = get_runtime()
+    return json.dumps(
+        {
+            "available": True,
+            "edition": rt.edition,
+            "backend": "pystata",
+            "schema_version": "1.0",
+        }
     )
-    return [TextContent(type="text", text=text)]
-
-
-def _result_to_text(result: StataResult) -> TextContent:
-    """
-    Convert a StataResult into a human-readable TextContent for MCP transport.
-
-    Graphs are included as base64 data URIs so agents can render them inline.
-    """
-    parts = []
-
-    # Status line
-    status = "OK" if result.success else f"ERR({result.return_code})"
-    parts.append(f"[stata_code] {status}  elapsed={result.elapsed_seconds:.2f}s")
-
-    if result.log:
-        parts.append(f"\n--- STATA LOG ---\n{result.log}")
-
-    if result.results:
-        parts.append(f"\n--- RETURN VALUES ---\n{_format_results(result.results)}")
-
-    if result.graphs:
-        for g in result.graphs:
-            parts.append(f"\n--- GRAPH ({g.format}) ---\n{g.to_data_uri()}")
-
-    if result.error:
-        parts.append(f"\n!!! ERROR: {result.error}")
-
-    if result.warnings:
-        parts.append(f"\nwarnings: {', '.join(result.warnings)}")
-
-    return TextContent(type="text", text="\n".join(parts))
-
-
-def _format_results(results: dict[str, Any]) -> str:
-    """Format r()/e() dict as a readable string."""
-    lines = []
-    for key, val in results.items():
-        if isinstance(val, list) and len(val) > 5:
-            val_str = f"list[{len(val)}]"
-        elif isinstance(val, str) and len(val) > 80:
-            val_str = val[:80] + "..."
-        else:
-            val_str = str(val)
-        lines.append(f"  {key} = {val_str}")
-    return "\n".join(lines) if lines else "(no return values)"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Entrypoint
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def main() -> None:
-    """Serve the MCP server on stdio."""
-    if Server is None:
+    if not _MCP_AVAILABLE:
         print(
-            "ERROR: mcp package not installed. "
-            "Install with: pip install mcp",
+            "ERROR: mcp package not installed. Install with: pip install mcp",
             file=sys.stderr,
         )
         sys.exit(1)
-    await serve_stdio(APP)
+    async with stdio_server() as (read, write):
+        await APP.run(read, write, APP.create_initialization_options())
 
 
-if __name__ == "__main__":
-    import asyncio
+if __name__ == "__main__":  # pragma: no cover
     asyncio.run(main())
