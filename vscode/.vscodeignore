@@ -1,5 +1,6 @@
 .vscode/**
 .vscode-test/**
+.git/**
 src/**
 .gitignore
 .eslintrc.json
@@ -7,3 +8,5 @@ src/**
 **/*.map
 **/*.ts
 scripts/**
+*.vsix
+.npmignore

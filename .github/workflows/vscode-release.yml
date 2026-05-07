@@ -1,0 +1,113 @@
+name: vscode-release
+
+# Builds and publishes the VSCode extension to the Visual Studio Marketplace.
+#
+# Triggers:
+#   - push tag matching vscode-v*  → package + publish + attach to GH release
+#   - workflow_dispatch            → package only (sanity build, no publish)
+#
+# One-time setup:
+#   1. Create a publisher at https://marketplace.visualstudio.com/manage
+#      whose ID matches `publisher` in vscode/package.json (brycewang-stanford).
+#   2. Create an Azure DevOps PAT with Organization=All accessible organizations
+#      and Scope=Marketplace → Manage.
+#   3. Add it as repo secret VSCE_PAT.
+#
+# Release flow:
+#   - bump vscode/package.json version
+#   - git tag vscode-v0.3.1 && git push --tags
+
+on:
+  push:
+    tags:
+      - "vscode-v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to Marketplace (otherwise package only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: vscode-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: package + publish vsix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/vscode-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#vscode-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "tag=$TAG_VERSION pkg=$PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag $TAG_VERSION does not match package.json $PKG_VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Compile TypeScript
+        run: npm run compile
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension
+        run: vsce package --out stata-code.vsix
+
+      - name: Upload vsix as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stata-code-vsix
+          path: vscode/stata-code.vsix
+          if-no-files-found: error
+
+      - name: Publish to VS Code Marketplace
+        if: |
+          startsWith(github.ref, 'refs/tags/vscode-v')
+          || (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: vsce publish --pat "$VSCE_PAT" --packagePath stata-code.vsix
+
+      - name: Attach vsix to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/vscode-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" stata-code.vsix --clobber
+
+      # Optional: also publish to Open VSX (for Cursor / VSCodium / Codespaces).
+      # Uncomment after creating https://open-vsx.org/ account + OVSX_PAT secret.
+      # - name: Publish to Open VSX
+      #   if: startsWith(github.ref, 'refs/tags/vscode-v')
+      #   env:
+      #     OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      #   run: |
+      #     npm install -g ovsx
+      #     ovsx publish stata-code.vsix --pat "$OVSX_PAT"

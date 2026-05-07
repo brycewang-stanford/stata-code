@@ -263,6 +263,8 @@ function recordRun(result: RunResult, code: string, origin: SubmitOrigin): void 
     runId: result.request_id,
     ts: Date.now(),
     code,
+    originUri: origin.uri,
+    baseLine: origin.baseLine,
     originLabel: formatOriginLabel(origin),
     result,
   });
@@ -356,8 +358,9 @@ async function openSingleGraph(target?: unknown): Promise<void> {
     vscode.window.showInformationMessage("stata-code: no graph selected");
     return;
   }
-  const baseResult =
-    lastResult ?? logsHistory.find((logEntry) => logEntry.runId === entry?.runId)?.result;
+  const baseResult = entry?.runId
+    ? findResultForRun(entry.runId) ?? lastResult
+    : lastResult;
   if (!baseResult) {
     vscode.window.showInformationMessage("stata-code: graph history is empty");
     return;
@@ -468,7 +471,7 @@ async function rerunHistory(target?: unknown): Promise<void> {
   }
   rememberSessionId(entry.result.session_id);
   await setCurrentSession(entry.result.session_id);
-  await submitCode(entry.code, fallbackOrigin());
+  await submitCode(entry.code, { uri: entry.originUri, baseLine: entry.baseLine });
 }
 
 async function copyRunCode(target?: unknown): Promise<void> {
@@ -506,6 +509,7 @@ async function exportRunBundle(target?: unknown): Promise<void> {
 
   const dir = vscode.Uri.joinPath(parent, bundleDirectoryName(entry));
   const graphFiles: Array<{ name: string; ref: string; ok: boolean; error?: string }> = [];
+  const exportedGraphFiles: string[] = [];
 
   await vscode.workspace.fs.createDirectory(dir);
   await vscode.workspace.fs.writeFile(
@@ -535,7 +539,9 @@ async function exportRunBundle(target?: unknown): Promise<void> {
           vscode.Uri.joinPath(graphsDir, fileName),
           Buffer.from(data, "base64"),
         );
-        graphFiles.push({ name: `graphs/${fileName}`, ref: graph.ref, ok: true });
+        const manifestName = `graphs/${fileName}`;
+        exportedGraphFiles.push(manifestName);
+        graphFiles.push({ name: manifestName, ref: graph.ref, ok: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         graphFiles.push({
@@ -555,7 +561,7 @@ async function exportRunBundle(target?: unknown): Promise<void> {
     session_id: entry.result.session_id,
     ok: entry.result.ok,
     rc: entry.result.rc,
-    files: ["code.do", "log.txt", "result.json", ...graphFiles.map((g) => g.name)],
+    files: ["code.do", "log.txt", "result.json", ...exportedGraphFiles],
     graphs: graphFiles,
   };
   await vscode.workspace.fs.writeFile(
@@ -1031,6 +1037,13 @@ function sessionSortKey(sessionId: string, current: string): string {
   return `2-${sessionId.toLocaleLowerCase()}`;
 }
 
+function findResultForRun(runId: string): RunResult | undefined {
+  return (
+    runHistory.find((entry) => entry.runId === runId)?.result ??
+    logsHistory.find((entry) => entry.runId === runId)?.result
+  );
+}
+
 function resolveLogResult(target?: unknown): RunResult | undefined {
   if (!target) return lastResult;
   if (isRunResult(target)) return target;
@@ -1158,12 +1171,6 @@ function formatOriginLabel(origin: SubmitOrigin): string {
       ? vscode.workspace.asRelativePath(origin.uri)
       : origin.uri.toString();
   return `${label}:${origin.baseLine + 1}`;
-}
-
-function fallbackOrigin(): SubmitOrigin {
-  const editor = vscode.window.activeTextEditor;
-  if (editor) return { uri: editor.document.uri, baseLine: editor.selection.active.line };
-  return { uri: vscode.Uri.parse("untitled:stata-code-history.do"), baseLine: 0 };
 }
 
 function bundleDirectoryName(entry: RunHistoryEntry): string {

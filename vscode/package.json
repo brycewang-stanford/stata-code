@@ -374,12 +374,12 @@
         {
           "command": "stataCode.copyRunCode",
           "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
-          "group": "inline@3"
+          "group": "run@1"
         },
         {
           "command": "stataCode.openRunResult",
           "when": "view == stataCode.runHistory && viewItem == stataCode.runHistoryItem",
-          "group": "inline@4"
+          "group": "run@2"
         },
         {
           "command": "stataCode.openGraph",

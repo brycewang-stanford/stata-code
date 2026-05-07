@@ -43,6 +43,8 @@ export interface RunHistoryEntry {
   runId: string;
   ts: number;
   code: string;
+  originUri: vscode.Uri;
+  baseLine: number;
   originLabel: string;
   result: RunResult;
 }
