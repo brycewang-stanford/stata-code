@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "stata_code"
-version = "0.2.0"
+name = "stata-code"
+version = "0.3.0"
 description = "Agent-native Stata bridge — one core, multiple frontends (MCP, Jupyter, VSCode)"
 readme = "README.md"
 license = "MIT"
@@ -43,17 +43,17 @@ dev = [
 ]
 mcp = ["mcp>=1.0"]
 kernel = ["ipykernel>=6.0"]
-all = ["stata_code[mcp,kernel]"]
+all = ["stata-code[mcp,kernel]"]
 
 [project.scripts]
 stata-code-kernel = "stata_code.kernel.kernel:run_main"
 stata-code-mcp = "stata_code.mcp.server:run_main"
 
 [project.urls]
-Homepage = "https://github.com/brycewang-stanford/stata_code"
-Repository = "https://github.com/brycewang-stanford/stata_code"
-Issues = "https://github.com/brycewang-stanford/stata_code/issues"
-Changelog = "https://github.com/brycewang-stanford/stata_code/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/brycewang-stanford/stata-code"
+Repository = "https://github.com/brycewang-stanford/stata-code"
+Issues = "https://github.com/brycewang-stanford/stata-code/issues"
+Changelog = "https://github.com/brycewang-stanford/stata-code/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["stata_code"]

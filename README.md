@@ -78,16 +78,22 @@ Requirements: **Stata 17+** (with `pystata` shipped by Stata) and **Python 3.10+
 
 ```bash
 # from PyPI
-pip install stata_code
+pip install stata-code
 
 # with the MCP server and Jupyter kernel extras
-pip install "stata_code[mcp,kernel]"
+pip install "stata-code[mcp,kernel]"
 
 # or from source (editable install for development)
 git clone https://github.com/brycewang-stanford/stata-code.git
 cd stata-code
 pip install -e ".[mcp,kernel]"
 ```
+
+> **Naming note.** The PyPI distribution is `stata-code` (hyphen), but
+> the Python import is `stata_code` (underscore — Python identifiers
+> can't contain hyphens). Same convention as `scikit-learn` →
+> `import sklearn`. So: `pip install stata-code`,
+> `from stata_code import run`.
 
 注意：`pystata` **不在 PyPI 上**，它随 Stata 一起安装。`stata_code` 会自动在 macOS 的 `/Applications/Stata/utilities/pystata` 以及 Linux / Windows 的对应位置寻找它。如果你的 Stata 安装在其他位置，请在导入前把 `pystata` 加到 `PYTHONPATH`。
 
