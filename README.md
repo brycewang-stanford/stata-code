@@ -163,17 +163,30 @@ The MCP server registers 8 tools:
 
 ### As a Jupyter Kernel
 
+`stata-code` ships a Jupyter kernel as part of the Python package — there is no separate "Jupyter plugin" in the JupyterLab extension marketplace. Installation is two steps: `pip install` the package with the `kernel` extra, then register the kernelspec with Jupyter.
+
+**Prerequisites**: Stata 17+ installed locally with a valid license (the kernel calls Stata via `pystata`), and Python 3.10+ with `jupyter`/`jupyterlab` already on the same environment.
+
 ```bash
+# 1. Install stata-code with the kernel extra (pulls in ipykernel)
+pip install "stata-code[kernel]"
+
+# 2. Register the kernelspec into Jupyter's user data dir
 stata-code-kernel install --user
+# Or, equivalently:
+# python -m stata_code.kernel install --user
 ```
 
-Or install it as a module:
+Verify the kernel is registered:
 
 ```bash
-python -m stata_code.kernel install --user
+jupyter kernelspec list
+# should include an entry named `stata`
 ```
 
-Then open a notebook and select the **Stata** kernel. Stata commands run in cells; logs, graphs, and warnings render inline.
+Then open Jupyter Notebook / JupyterLab (or a `.ipynb` in VS Code), pick **Stata** in the kernel selector, and run Stata commands in cells. Logs, graphs, and warnings render inline.
+
+> JupyterLab's Extension Manager only installs front-end JS extensions, so it cannot install a kernel — `pip install` plus the `install --user` step above is the only supported path.
 
 ### As a VS Code Extension
 
@@ -492,17 +505,30 @@ MCP server 注册了 8 个工具：
 
 ### 作为 Jupyter kernel
 
+`stata-code` 的 Jupyter 支持是以 **kernel** 形式打包在 Python 包里的 —— JupyterLab 插件市场里**没有**独立的 "stata-code 插件"。安装分两步：先 `pip install` 安装带 `kernel` extra 的包，再把 kernelspec 注册到 Jupyter。
+
+**前置条件**：本机已经安装 Stata 17+ 且持有合法许可证（kernel 通过 `pystata` 调用本地 Stata），同一个 Python 环境里已经装好 `jupyter`/`jupyterlab`，Python 版本 ≥ 3.10。
+
 ```bash
+# 1. 安装带 kernel extra 的 stata-code（会同时装上 ipykernel）
+pip install "stata-code[kernel]"
+
+# 2. 把 kernelspec 注册到当前用户的 Jupyter data dir
 stata-code-kernel install --user
+# 等价命令：
+# python -m stata_code.kernel install --user
 ```
 
-也可以直接以 module 方式安装：
+检查 kernel 是否注册成功：
 
 ```bash
-python -m stata_code.kernel install --user
+jupyter kernelspec list
+# 输出里应该能看到名为 `stata` 的条目
 ```
 
-然后打开 notebook，选择 **Stata** kernel。Stata 命令会在 cell 中运行，日志、图形和 warnings 会以内联方式显示。
+然后打开 Jupyter Notebook / JupyterLab（或 VS Code 中的 `.ipynb`），在 kernel 选择器里挑 **Stata**，cell 里直接写 Stata 命令即可，日志、graphs 和 warnings 会以内联方式显示。
+
+> JupyterLab 的 Extension Manager 只能安装前端 JS 扩展，**装不了 kernel**。所以上面的 `pip install` + `install --user` 是唯一支持的安装路径。
 
 ### 作为 VS Code 扩展
 
