@@ -1,5 +1,17 @@
 # stata-code
 
+[![PyPI](https://img.shields.io/pypi/v/stata-code.svg)](https://pypi.org/project/stata-code/)
+[![Python](https://img.shields.io/pypi/pyversions/stata-code.svg)](https://pypi.org/project/stata-code/)
+[![License](https://img.shields.io/pypi/l/stata-code.svg)](https://github.com/brycewang-stanford/stata-code/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/brycewang-stanford/stata-code/test.yml?branch=main&label=tests)](https://github.com/brycewang-stanford/stata-code/actions/workflows/test.yml)
+[![Downloads](https://static.pepy.tech/badge/stata-code/month)](https://pepy.tech/project/stata-code)
+[![VS Code](https://img.shields.io/visual-studio-marketplace/v/brycewang-stanford.stata-code-vscode.svg?label=vscode)](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)
+[![VS Code Installs](https://img.shields.io/visual-studio-marketplace/i/brycewang-stanford.stata-code-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)
+[![VS Code Downloads](https://img.shields.io/visual-studio-marketplace/d/brycewang-stanford.stata-code-vscode.svg?label=vscode%20downloads)](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/brycewang-stanford.stata-code-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)
+[![GitHub release](https://img.shields.io/github/v/release/brycewang-stanford/stata-code)](https://github.com/brycewang-stanford/stata-code/releases)
+[![GitHub stars](https://img.shields.io/github/stars/brycewang-stanford/stata-code?style=social)](https://github.com/brycewang-stanford/stata-code)
+
 > Agent-native Stata bridge — **one Python core, multiple frontends**.
 
 `stata-code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
@@ -121,7 +133,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 8 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 10 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`).
 
 #### Error Recovery in Agent Workflows
 
@@ -162,7 +174,7 @@ Or run it as a module if the binary is not on `PATH`:
 python -m stata_code.mcp
 ```
 
-The MCP server registers 8 tools:
+The MCP server registers 10 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -174,6 +186,27 @@ The MCP server registers 8 tools:
 | `list_sessions` | Enumerate live sessions |
 | `cancel_session` | Cooperatively cancel the next `stata_run` for a session |
 | `reset_session` | Drop a session's data |
+| `notebook_outline` | Compact per-cell index of a `.ipynb` (cell_id, type, preview) |
+| `notebook_get_cell` | One cell's full source plus a token-economic outputs summary |
+
+For modern MCP clients, these tools now return structured results through
+`structuredContent` with `outputSchema` metadata, while still keeping the
+serialized JSON text block for older clients. The server also exposes MCP
+resources:
+
+| Resource | Purpose |
+| --- | --- |
+| `stata://schema/run-result` | JSON Schema for `stata_run` structured output |
+| `stata://server/capabilities` | Server instructions, tools, and resource templates |
+| `stata://sessions` | Current subprocess-backed Stata sessions |
+| `log://...` | Full log text from a truncated `stata_run` result |
+| `graph://...` | Captured graph image bytes |
+| `matrix://...` | Deferred large matrix payloads |
+
+MCP prompts are available for common agent workflows:
+`run_do_file_and_report`, `debug_stata_error`,
+`fix_and_rerun_until_passes`, `replication_audit`, and
+`summarize_estimation_results`.
 
 ### As a Jupyter Kernel
 
@@ -262,7 +295,7 @@ stata_code/
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
 │   └── runner.py      # the one execute(); collects everything via sfi
 ├── mcp/
-│   └── server.py      # MCP server (8 tools)
+│   └── server.py      # MCP server (10 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -300,7 +333,7 @@ stata_code/
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 32-kind error taxonomy with canonical suggestions
-- MCP server: 8 tools
+- MCP server: 10 tools
 - Jupyter kernel: rewired to the v1.0 pipeline
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Cooperative cancellation: `cancel(session_id)` / MCP `cancel_session`
@@ -477,7 +510,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 8 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`）。
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 10 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`）。
 
 #### Agent 工作流里的报错恢复
 
@@ -518,7 +551,7 @@ claude mcp add stata-code --scope user -- uvx --from stata-code stata-code-mcp
 python -m stata_code.mcp
 ```
 
-MCP server 注册了 8 个工具：
+MCP server 注册了 10 个工具：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -530,6 +563,25 @@ MCP server 注册了 8 个工具：
 | `list_sessions` | 列出 live sessions |
 | `cancel_session` | 协作式取消某个 session 的下一次 `stata_run` |
 | `reset_session` | 清空某个 session 的数据 |
+| `notebook_outline` | `.ipynb` 的 cell 索引（cell_id、类型、源代码预览） |
+| `notebook_get_cell` | 单个 cell 的完整源代码 + 节流版输出摘要 |
+
+对于新版 MCP 客户端，这些工具会返回 `structuredContent`，并在 tool
+metadata 里声明 `outputSchema`；同时仍保留序列化 JSON text block，兼容旧客户端。
+server 还暴露 MCP resources：
+
+| Resource | 用途 |
+| --- | --- |
+| `stata://schema/run-result` | `stata_run` 结构化输出的 JSON Schema |
+| `stata://server/capabilities` | server instructions、tools、resource templates |
+| `stata://sessions` | 当前 subprocess-backed Stata sessions |
+| `log://...` | 被截断运行结果背后的完整日志 |
+| `graph://...` | 捕获到的 graph image bytes |
+| `matrix://...` | 延迟获取的大矩阵 payload |
+
+同时提供 MCP prompts：`run_do_file_and_report`、`debug_stata_error`、
+`fix_and_rerun_until_passes`、`replication_audit` 和
+`summarize_estimation_results`，用于常见 agent 工作流。
 
 ### 作为 Jupyter kernel
 
@@ -618,7 +670,7 @@ stata_code/
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
 │   └── runner.py      # the one execute(); collects everything via sfi
 ├── mcp/
-│   └── server.py      # MCP server (8 tools)
+│   └── server.py      # MCP server (10 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -656,7 +708,7 @@ stata_code/
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 32 类错误分类法 + 标准化建议
-- MCP server：8 个工具
+- MCP server：10 个工具
 - Jupyter kernel：接入 v1.0 pipeline
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 协作式取消：`cancel(session_id)` / MCP `cancel_session`
