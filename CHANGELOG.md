@@ -6,6 +6,17 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Changed
+
+- **VSCode MCP startup.** The extension now expands common macOS Python
+  script directories before spawning `stata-code-mcp`, tries workspace
+  `.venv` and `python -m stata_code.mcp` fallbacks for the default command,
+  and writes child-process stderr to the `stata-code` output channel so
+  missing PATH / missing dependency failures are actionable.
+- **VSCode toolbar ordering.** Run-all and run-selection now share the same
+  ordinary `editor/title` toolbar sequence, with ordering moved later in the
+  `navigation` group to reduce interleaving from other extensions.
+
 ## [0.3.2] — 2026-05-08
 
 ### Changed

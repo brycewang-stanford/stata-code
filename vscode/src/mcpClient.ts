@@ -11,6 +11,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import type { RunResult } from "./types/runResult";
 
+export interface StataServerLaunch {
+  command: string;
+  args: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
 export interface RunStataOptions {
   sessionId?: string;
   includeFullLog?: boolean;
@@ -23,8 +30,7 @@ export class StataMcpClient implements vscode.Disposable {
   private startPromise: Promise<void> | null = null;
 
   constructor(
-    private readonly command: string,
-    private readonly args: string[],
+    private readonly launchCandidates: StataServerLaunch[],
     private readonly output: vscode.OutputChannel,
   ) {}
 
@@ -32,21 +38,7 @@ export class StataMcpClient implements vscode.Disposable {
     if (this.client) return;
     if (this.startPromise) return this.startPromise;
 
-    this.startPromise = (async () => {
-      this.transport = new StdioClientTransport({
-        command: this.command,
-        args: this.args,
-      });
-      this.client = new Client(
-        { name: "stata-code-vscode", version: "0.3.2" },
-        { capabilities: {} },
-      );
-      this.output.appendLine(
-        `[stata-code] launching MCP server: ${this.command} ${this.args.join(" ")}`,
-      );
-      await this.client.connect(this.transport);
-      this.output.appendLine("[stata-code] MCP server connected");
-    })();
+    this.startPromise = this.startWithFallbacks();
 
     try {
       await this.startPromise;
@@ -56,6 +48,68 @@ export class StataMcpClient implements vscode.Disposable {
       this.transport = null;
       throw err;
     }
+  }
+
+  private async startWithFallbacks(): Promise<void> {
+    const failures: string[] = [];
+
+    for (const candidate of this.launchCandidates) {
+      try {
+        await this.connectCandidate(candidate);
+        return;
+      } catch (err) {
+        const message = formatStartupFailure(candidate, err);
+        failures.push(message);
+        this.output.appendLine(`[stata-code] MCP startup failed: ${message}`);
+      }
+    }
+
+    this.output.appendLine("[stata-code] all MCP startup attempts failed");
+    throw new Error(
+      [
+        "MCP server failed to start.",
+        `Tried: ${this.launchCandidates.map(formatLaunch).join("; ")}.`,
+        "Install with `python3 -m pip install \"stata-code[mcp]\"` or set `stataCode.serverCommand` and `stataCode.serverArgs`.",
+        "See the stata-code output panel for startup details.",
+      ].join(" "),
+    );
+  }
+
+  private async connectCandidate(candidate: StataServerLaunch): Promise<void> {
+    let stderr = "";
+    const transport = new StdioClientTransport({
+      command: candidate.command,
+      args: candidate.args,
+      cwd: candidate.cwd,
+      env: candidate.env,
+      stderr: "pipe",
+    });
+    transport.stderr?.on("data", (chunk: Buffer | string) => {
+      const text = chunk.toString();
+      stderr += text;
+      for (const line of text.split(/\r?\n/)) {
+        if (line.trim()) {
+          this.output.appendLine(`[stata-code:mcp stderr] ${line}`);
+        }
+      }
+    });
+
+    const client = new Client(
+      { name: "stata-code-vscode", version: "0.3.2" },
+      { capabilities: {} },
+    );
+    this.output.appendLine(`[stata-code] launching MCP server: ${formatLaunch(candidate)}`);
+
+    try {
+      await client.connect(transport);
+    } catch (err) {
+      await transport.close().catch(() => undefined);
+      throw addStderrToError(err, stderr);
+    }
+
+    this.client = client;
+    this.transport = transport;
+    this.output.appendLine("[stata-code] MCP server connected");
   }
 
   async runStata(code: string, opts: RunStataOptions = {}): Promise<RunResult> {
@@ -141,6 +195,26 @@ export class StataMcpClient implements vscode.Disposable {
     this.client = null;
     this.startPromise = null;
   }
+}
+
+function formatLaunch(candidate: StataServerLaunch): string {
+  return [candidate.command, ...candidate.args].map(quoteCommandPart).join(" ");
+}
+
+function quoteCommandPart(value: string): string {
+  return /^[\w@%+=:,./-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+function formatStartupFailure(candidate: StataServerLaunch, err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return `${formatLaunch(candidate)} -> ${message}`;
+}
+
+function addStderrToError(err: unknown, stderr: string): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const tail = stderr.trim().split(/\r?\n/).slice(-8).join("\n");
+  if (!tail) return new Error(message);
+  return new Error(`${message}\n${tail}`);
 }
 
 function parseTextResult<T>(

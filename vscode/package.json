@@ -305,54 +305,54 @@
     "menus": {
       "editor/title": [
         {
-          "command": "stataCode.runSelection",
-          "when": "resourceLangId == stata",
-          "group": "navigation@100"
-        },
-        {
           "command": "stataCode.runFile",
           "when": "resourceLangId == stata",
-          "group": "navigation@101"
+          "group": "navigation@1000"
+        },
+        {
+          "command": "stataCode.runSelection",
+          "when": "resourceLangId == stata",
+          "group": "navigation@1001"
         },
         {
           "command": "stataCode.viewDataPreview",
           "when": "resourceLangId == stata",
-          "group": "navigation@102"
+          "group": "navigation@1002"
         },
         {
           "command": "stataCode.showOutput",
           "when": "resourceLangId == stata",
-          "group": "navigation@103"
+          "group": "navigation@1003"
         },
         {
           "command": "stataCode.showGraphs",
           "when": "resourceLangId == stata",
-          "group": "navigation@104"
+          "group": "navigation@1004"
         },
         {
           "command": "stataCode.newSession",
           "when": "resourceLangId == stata",
-          "group": "navigation@105"
+          "group": "navigation@1005"
         },
         {
           "command": "stataCode.switchSession",
           "when": "resourceLangId == stata",
-          "group": "navigation@106"
+          "group": "navigation@1006"
         },
         {
           "command": "stataCode.cancelSession",
           "when": "resourceLangId == stata",
-          "group": "navigation@107"
+          "group": "navigation@1007"
         },
         {
           "command": "stataCode.resetSession",
           "when": "resourceLangId == stata",
-          "group": "navigation@108"
+          "group": "navigation@1008"
         },
         {
           "command": "stataCode.workingDirectoryMenu",
           "when": "resourceLangId == stata",
-          "group": "navigation@109"
+          "group": "navigation@1009"
         }
       ],
       "editor/context": [
@@ -538,7 +538,7 @@
         "stataCode.serverCommand": {
           "type": "string",
           "default": "stata-code-mcp",
-          "description": "Command used to launch the stata-code MCP server. Must be on PATH or an absolute path. Override if you installed the package into a non-default Python environment."
+          "description": "Command used to launch the stata-code MCP server. Must be on PATH or an absolute path. Override if you installed the package into a non-default Python environment. For module launch, set this to the Python executable and put -m stata_code.mcp in serverArgs."
         },
         "stataCode.serverArgs": {
           "type": "array",

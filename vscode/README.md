@@ -133,12 +133,17 @@ npm run compile
 For local development, open this `vscode/` folder in VSCode and `F5` to
 launch an Extension Development Host. The first command invocation
 spawns `stata-code-mcp` lazily (one process per workspace). Make sure
-`stata-code-mcp` is on `PATH` or override:
+`stata-code-mcp` is on `PATH` or override. The extension also expands
+common macOS Python script directories (`~/.local/bin`, Homebrew, and
+`~/Library/Python/*/bin`) before spawning, and falls back to
+`python -m stata_code.mcp` when the default console script cannot be
+found.
 
 ```jsonc
 // settings.json
 {
-  "stataCode.serverCommand": "/abs/path/to/python -m stata_code.mcp"
+  "stataCode.serverCommand": "/abs/path/to/python",
+  "stataCode.serverArgs": ["-m", "stata_code.mcp"]
 }
 ```
 

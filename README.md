@@ -97,7 +97,7 @@ else:
 
 ### As an MCP Server
 
-After `pip install stata-code`, the `stata-code-mcp` binary is on your `PATH`. You can wire it into Claude Code, Cursor, Claude Desktop, or any other MCP-compatible client.
+After `pip install "stata-code[mcp]"`, the `stata-code-mcp` binary is on your `PATH`. You can wire it into Claude Code, Cursor, Claude Desktop, or any other MCP-compatible client.
 
 #### Claude Code via `claude mcp add` (recommended)
 
@@ -186,7 +186,7 @@ code --install-extension brycewang-stanford.stata-code-vscode
 
 Or open the **Extensions** sidebar in VS Code and search `stata-code`.
 
-The extension still requires `stata-code` itself to be importable on your system Python (`pip install stata-code`), so that `stata-code-mcp` resolves on `PATH`. Stata 17+ and a valid Stata license are required as for any other frontend.
+The extension still requires the MCP extra on your system Python (`pip install "stata-code[mcp]"`), so that `stata-code-mcp` resolves on `PATH` and can import the MCP SDK. Stata 17+ and a valid Stata license are required as for any other frontend.
 
 ---
 
@@ -426,7 +426,7 @@ else:
 
 ### 作为 MCP server
 
-`pip install stata-code` 之后，`stata-code-mcp` 会出现在你的 `PATH` 中。可以接到 Claude Code、Cursor、Claude Desktop 等任何兼容 MCP 的客户端里。
+`pip install "stata-code[mcp]"` 之后，`stata-code-mcp` 会出现在你的 `PATH` 中。可以接到 Claude Code、Cursor、Claude Desktop 等任何兼容 MCP 的客户端里。
 
 #### 用 `claude mcp add` 接入 Claude Code（推荐）
 
@@ -515,7 +515,7 @@ code --install-extension brycewang-stanford.stata-code-vscode
 
 或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。
 
-扩展仍然依赖系统 Python 上能导入 `stata-code`（`pip install stata-code`），从而保证 `stata-code-mcp` 在 `PATH` 上可用。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
+扩展仍然依赖系统 Python 上安装了 MCP extra（`pip install "stata-code[mcp]"`），从而保证 `stata-code-mcp` 在 `PATH` 上可用，并且能导入 MCP SDK。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
 
 ---
 
