@@ -67,7 +67,7 @@ def _tool_definitions() -> list[Tool]:
                 "error.kind/message/line/suggestions. Use suggestions for "
                 "iterative debug/fix loops only when the user asked for that "
                 "or approved changes; for run/validate-only requests, report "
-                "diagnostics without modifying user files."
+                "diagnostics without rewriting source code."
             ),
             inputSchema={
                 "type": "object",

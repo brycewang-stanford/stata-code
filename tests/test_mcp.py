@@ -47,6 +47,7 @@ class TestToolRegistry:
         assert "ok=false" in run.description
         assert "iterative debug/fix loops" in run.description
         assert "run/validate-only requests" in run.description
+        assert "without rewriting source code" in run.description
         # Token-economy options are exposed
         assert "include_graphs" in schema["properties"]
         assert "include_full_log" in schema["properties"]
