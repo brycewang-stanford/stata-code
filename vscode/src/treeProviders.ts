@@ -248,8 +248,12 @@ function rootNodesFor(r: RunResult): LastNode[] {
     nodes.push({
       kind: "leaf",
       label: "log",
-      description: `${r.log.lines_total} lines${r.log.truncated ? " · truncated" : ""}`,
-      tooltip: r.log.ref ?? "inline log",
+      description: `${r.log.lines_total} lines${r.log.truncated ? " · truncated" : ""}${
+        r.log.files ? " · saved" : ""
+      }${
+        r.log.files?.output_paths?.length ? ` · ${r.log.files.output_paths.length} outputs` : ""
+      }`,
+      tooltip: r.log.files?.directory ?? r.log.ref ?? "inline log",
       icon: "output",
       command: {
         command: "stataCode.openLog",

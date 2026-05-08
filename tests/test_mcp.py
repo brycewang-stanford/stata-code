@@ -47,6 +47,11 @@ class TestToolRegistry:
         # Token-economy options are exposed
         assert "include_graphs" in schema["properties"]
         assert "include_full_log" in schema["properties"]
+        assert "persist_log_files" in schema["properties"]
+        assert "persist_generated_files" in schema["properties"]
+        assert "origin_path" in schema["properties"]
+        assert "use_origin_workdir" in schema["properties"]
+        assert "working_dir" in schema["properties"]
 
     def test_get_graph_schema_requires_ref(self):
         from stata_code.mcp.server import _tool_definitions

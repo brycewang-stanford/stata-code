@@ -55,6 +55,22 @@ export interface LogInfo {
   complete: boolean;
   error_window: string | null;
   ref: string | null;
+  files?: LogFileInfo | null;
+}
+
+export interface LogFileInfo {
+  directory: string;
+  log_path: string;
+  smcl_path: string;
+  manifest_path: string;
+  code_path: string | null;
+  working_dir?: string | null;
+  graphs_dir?: string | null;
+  outputs_dir?: string | null;
+  graph_paths?: string[];
+  output_paths?: string[];
+  policy: "per_run_directory";
+  append: boolean;
 }
 
 export interface Matrix {
@@ -100,6 +116,7 @@ export interface GraphInfo {
   source_command: string | null;
   source_line: number | null;
   inline: string | null; // base64 when include_graphs="inline"
+  file_path?: string | null;
 }
 
 export interface Suggestion {

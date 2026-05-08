@@ -555,6 +555,21 @@
           "type": "boolean",
           "default": false,
           "description": "Whether to ask the runner for the full log inline. When false (the default) the extension fetches the log on demand via get_log(ref)."
+        },
+        "stataCode.persistLogFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save each file-backed run as immutable .log and .smcl artifacts under a log-files folder next to the source .do file."
+        },
+        "stataCode.persistGeneratedFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "When persistLogFiles is enabled, copy newly created or modified table/export files from the run working directory into the run bundle's outputs folder and save captured graphs into graphs."
+        },
+        "stataCode.useDoFileDirectory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Before running file-backed Stata code, cd Stata to the source .do file's directory so relative table and graph exports land next to the .do file by default."
         }
       }
     }

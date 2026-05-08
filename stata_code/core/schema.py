@@ -94,6 +94,23 @@ class StataInfo(_Base):
     backend: Backend
 
 
+class LogFileInfo(_Base):
+    """Persistent on-disk artifacts written for file-backed runs."""
+
+    directory: str
+    log_path: str
+    smcl_path: str
+    manifest_path: str
+    code_path: str | None = None
+    working_dir: str | None = None
+    graphs_dir: str | None = None
+    outputs_dir: str | None = None
+    graph_paths: list[str] = Field(default_factory=list)
+    output_paths: list[str] = Field(default_factory=list)
+    policy: Literal["per_run_directory"] = "per_run_directory"
+    append: bool = False
+
+
 class LogInfo(_Base):
     head: str = ""
     tail: str = ""
@@ -103,6 +120,7 @@ class LogInfo(_Base):
     complete: bool = True
     error_window: str | None = None
     ref: str | None = None
+    files: LogFileInfo | None = None
 
     @model_validator(mode="after")
     def _check_invariants(self) -> LogInfo:
@@ -182,6 +200,7 @@ class GraphInfo(_Base):
     source_command: str | None = None
     source_line: int | None = None
     inline: str | None = None  # base64 of the bytes when explicitly requested
+    file_path: str | None = None
 
 
 class Suggestion(_Base):

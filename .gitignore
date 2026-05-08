@@ -218,6 +218,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Stata-specific
+log-files/
 *.gph
 *.smcl
 *.dta

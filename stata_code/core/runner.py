@@ -30,6 +30,14 @@ from typing import Any
 from stata_code.core import _refs
 from stata_code.core._runtime import PystataNotAvailable, get_runtime
 from stata_code.core.errors import classify_rc, suggestions_for
+from stata_code.core.log_artifacts import (
+    FileSnapshot,
+    changed_output_files,
+    copy_output_artifacts,
+    persist_run_log_files,
+    snapshot_working_dir_files,
+    update_run_artifact_manifest,
+)
 from stata_code.core.schema import (
     Backend,
     DatasetInfo,
@@ -38,6 +46,7 @@ from stata_code.core.schema import (
     ErrorKind,
     GraphFormat,
     GraphInfo,
+    LogFileInfo,
     LogInfo,
     Matrix,
     ResultsInfo,
@@ -45,6 +54,7 @@ from stata_code.core.schema import (
     StataEdition,
     StataInfo,
     StataReturns,
+    StataWarning,
     VariableInfo,
 )
 
@@ -615,6 +625,60 @@ def _last_error_line(error_text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _resolve_working_dir(
+    *,
+    origin_path: str | None,
+    working_dir: str | None,
+    use_origin_workdir: bool,
+) -> Path | None:
+    if working_dir:
+        target = Path(working_dir).expanduser()
+    elif origin_path and use_origin_workdir:
+        target = Path(origin_path).expanduser().parent
+    else:
+        return None
+    if not target.is_absolute():
+        target = target.resolve()
+    if not target.is_dir():
+        raise ValueError(f"working directory does not exist: {target}")
+    return target
+
+
+def _change_stata_working_dir(rt: Any, directory: Path) -> None:
+    stata_path = str(directory).replace("\\", "/").replace('"', '""')
+    with redirect_stdout(io.StringIO()):
+        rt.stata.run(f'cd "{stata_path}"', quietly=True, echo=False)
+
+
+def _persist_graph_artifacts(
+    files: LogFileInfo,
+    graphs: list[GraphInfo],
+) -> tuple[list[GraphInfo], list[str]]:
+    if not graphs:
+        return graphs, []
+    graphs_dir = Path(files.directory) / "graphs"
+    graphs_dir.mkdir(parents=True, exist_ok=True)
+
+    updated: list[GraphInfo] = []
+    paths: list[str] = []
+    for idx, graph in enumerate(graphs, 1):
+        payload = _refs.get(graph.ref)
+        data = payload.get("bytes") if isinstance(payload, dict) else None
+        if not isinstance(data, (bytes, bytearray)):
+            updated.append(graph)
+            continue
+        stem = _safe_file_stem(graph.name) or f"graph-{idx:02d}"
+        target = graphs_dir / f"{idx:02d}-{stem}.{graph.format.value}"
+        target.write_bytes(bytes(data))
+        paths.append(str(target))
+        updated.append(graph.model_copy(update={"file_path": str(target)}))
+    return updated, paths
+
+
+def _safe_file_stem(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")[:64]
+
+
 def execute(
     code: str,
     *,
@@ -626,6 +690,13 @@ def execute(
     graph_format: str = "png",
     include_dataset_variables: bool = True,
     timeout_ms: int | None = 600_000,  # accepted but not yet enforced (v0.1)
+    persist_log_files: bool = False,
+    persist_generated_files: bool = True,
+    origin_path: str | None = None,
+    origin_kind: str | None = None,
+    origin_label: str | None = None,
+    use_origin_workdir: bool = True,
+    working_dir: str | None = None,
 ) -> RunResult:
     """Execute Stata code and return a v1.0 RunResult.
 
@@ -665,6 +736,19 @@ def execute(
             started=started,
             include_dataset_variables=include_dataset_variables,
         )
+
+    run_working_dir = _resolve_working_dir(
+        origin_path=origin_path,
+        working_dir=working_dir,
+        use_origin_workdir=use_origin_workdir,
+    )
+    output_snapshot: FileSnapshot | None = None
+    if persist_log_files and persist_generated_files and run_working_dir:
+        output_snapshot = snapshot_working_dir_files(
+            run_working_dir, origin_path=origin_path
+        )
+    if run_working_dir:
+        _change_stata_working_dir(rt, run_working_dir)
 
     # Snapshot existing graph names before user code so we can take a delta
     # afterward. This itself calls `graph dir`, which clobbers r(); user code
@@ -729,6 +813,8 @@ def execute(
     else:
         error = None
 
+    stata_info = _stata_info(rt)
+
     # Graph capture happens AFTER r/e collection so that `graph dir` /
     # `graph display` / `graph export` (all r-class) don't clobber user r().
     if include_graphs != "none":
@@ -748,20 +834,75 @@ def execute(
     if include_graphs == "inline":
         capabilities.append("inline_graphs")
 
+    top_rc = rc if error is not None else 0
+    ok = error is None and rc == 0
+    warnings = _extract_warnings(stdout_text)
+
+    if persist_log_files and origin_path:
+        try:
+            generated_files = (
+                changed_output_files(
+                    output_snapshot,
+                    run_working_dir,
+                    origin_path=origin_path,
+                )
+                if persist_generated_files and output_snapshot is not None and run_working_dir
+                else []
+            )
+            files = persist_run_log_files(
+                log_text=stdout_text,
+                code=code,
+                origin_path=origin_path,
+                origin_kind=origin_kind,
+                origin_label=origin_label,
+                request_id=request_id,
+                session_id=session_id,
+                started_at=started_at,
+                elapsed_ms=elapsed_total_ms,
+                rc=top_rc,
+                ok=ok,
+                stata=stata_info,
+                working_dir=str(run_working_dir) if run_working_dir else None,
+            )
+            graphs, graph_paths = _persist_graph_artifacts(files, graphs)
+            files = files.model_copy(update={"graph_paths": graph_paths})
+            if graph_paths:
+                files = files.model_copy(
+                    update={"graphs_dir": str(Path(files.directory) / "graphs")}
+                )
+            if generated_files and run_working_dir:
+                files = copy_output_artifacts(
+                    files,
+                    generated_files,
+                    working_dir=run_working_dir,
+                )
+            update_run_artifact_manifest(files)
+            log = log.model_copy(update={"files": files})
+            capabilities.append("log_files")
+            if graph_paths or files.output_paths:
+                capabilities.append("run_artifacts")
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(
+                StataWarning(
+                    kind="log_files",
+                    message=f"Could not write log-files artifacts: {exc}",
+                )
+            )
+
     return RunResult(
-        ok=(error is None and rc == 0),
-        rc=rc if error is not None else 0,
+        ok=ok,
+        rc=top_rc,
         session_id=session_id,
         request_id=request_id,
         started_at=started_at,
         elapsed_ms=elapsed_total_ms,
         stata_elapsed_ms=stata_elapsed_ms,
-        stata=_stata_info(rt),
+        stata=stata_info,
         log=log,
         results=results,
         dataset=dataset,
         graphs=graphs,
-        warnings=_extract_warnings(stdout_text),
+        warnings=warnings,
         error=error,
         capabilities=capabilities,
     )

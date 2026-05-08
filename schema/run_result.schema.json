@@ -247,6 +247,18 @@
     "GraphInfo": {
       "additionalProperties": true,
       "properties": {
+        "file_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File Path"
+        },
         "format": {
           "$ref": "#/$defs/GraphFormat",
           "default": "png"
@@ -327,6 +339,109 @@
       "title": "GraphInfo",
       "type": "object"
     },
+    "LogFileInfo": {
+      "additionalProperties": true,
+      "description": "Persistent on-disk artifacts written for file-backed runs.",
+      "properties": {
+        "append": {
+          "default": false,
+          "title": "Append",
+          "type": "boolean"
+        },
+        "code_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code Path"
+        },
+        "directory": {
+          "title": "Directory",
+          "type": "string"
+        },
+        "graph_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Graph Paths",
+          "type": "array"
+        },
+        "graphs_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Graphs Dir"
+        },
+        "log_path": {
+          "title": "Log Path",
+          "type": "string"
+        },
+        "manifest_path": {
+          "title": "Manifest Path",
+          "type": "string"
+        },
+        "output_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Output Paths",
+          "type": "array"
+        },
+        "outputs_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outputs Dir"
+        },
+        "policy": {
+          "const": "per_run_directory",
+          "default": "per_run_directory",
+          "title": "Policy",
+          "type": "string"
+        },
+        "smcl_path": {
+          "title": "Smcl Path",
+          "type": "string"
+        },
+        "working_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Working Dir"
+        }
+      },
+      "required": [
+        "directory",
+        "log_path",
+        "smcl_path",
+        "manifest_path"
+      ],
+      "title": "LogFileInfo",
+      "type": "object"
+    },
     "LogInfo": {
       "additionalProperties": true,
       "properties": {
@@ -351,6 +466,17 @@
           ],
           "default": null,
           "title": "Error Window"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogFileInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "head": {
           "default": "",

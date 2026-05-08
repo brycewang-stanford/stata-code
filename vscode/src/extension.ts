@@ -425,7 +425,11 @@ async function runSelection(wholeFile: boolean): Promise<void> {
     baseLine = editor.selection.start.line;
   }
 
-  await submitCode(code, { uri: editor.document.uri, baseLine });
+  await submitCode(code, {
+    uri: editor.document.uri,
+    baseLine,
+    kind: wholeFile ? "file" : editor.selection.isEmpty ? "line" : "selection",
+  });
 }
 
 async function runCell(uri: vscode.Uri, markerLine: number): Promise<void> {
@@ -440,7 +444,11 @@ async function runCell(uri: vscode.Uri, markerLine: number): Promise<void> {
     new vscode.Position(rangeInfo.startLine, 0),
     doc.lineAt(rangeInfo.endLine).range.end,
   );
-  await submitCode(doc.getText(range), { uri, baseLine: rangeInfo.startLine });
+  await submitCode(doc.getText(range), {
+    uri,
+    baseLine: rangeInfo.startLine,
+    kind: "cell",
+  });
 }
 
 async function submitCode(code: string, origin: SubmitOrigin): Promise<void> {
@@ -454,11 +462,16 @@ async function submitCode(code: string, origin: SubmitOrigin): Promise<void> {
   const cfg = vscode.workspace.getConfiguration("stataCode");
   const sessionId = cfg.get<string>("sessionId", "main");
   const includeFullLog = cfg.get<boolean>("includeFullLog", false);
+  const persistLogFiles = cfg.get<boolean>("persistLogFiles", true);
+  const persistGeneratedFiles = cfg.get<boolean>("persistGeneratedFiles", true);
+  const useOriginWorkdir = cfg.get<boolean>("useDoFileDirectory", true);
+  const originLabel = formatOriginLabel(origin);
+  const originPath = origin.uri.scheme === "file" ? origin.uri.fsPath : undefined;
 
   const c = getClient();
   output?.show(true);
   output?.appendLine(
-    `[stata-code] run (session=${sessionId}, lines=${code.split("\n").length})`,
+    `[stata-code] run (session=${sessionId}, lines=${code.split("\n").length}, origin=${originLabel})`,
   );
 
   statusBar?.setRunning(true);
@@ -476,7 +489,16 @@ async function submitCode(code: string, origin: SubmitOrigin): Promise<void> {
         });
       });
       try {
-        const result = await c.runStata(code, { sessionId, includeFullLog });
+        const result = await c.runStata(code, {
+          sessionId,
+          includeFullLog,
+          persistLogFiles: persistLogFiles && originPath !== undefined,
+          persistGeneratedFiles,
+          originPath,
+          originKind: origin.kind ?? "unknown",
+          originLabel,
+          useOriginWorkdir,
+        });
         lastResult = result;
         rememberSessionId(result.session_id);
         recordRun(result, code, origin);
@@ -572,6 +594,18 @@ function renderResult(r: RunResult): void {
   }
   if (r.log.ref) {
     output.appendLine("[stata-code] full log available from the Logs view.");
+  }
+  if (r.log.files) {
+    output.appendLine(`[stata-code] log files saved: ${r.log.files.directory}`);
+    if (r.log.files.working_dir) output.appendLine(`  pwd: ${r.log.files.working_dir}`);
+    output.appendLine(`  log: ${r.log.files.log_path}`);
+    output.appendLine(`  smcl: ${r.log.files.smcl_path}`);
+    if (r.log.files.graph_paths?.length) {
+      output.appendLine(`  graphs: ${r.log.files.graph_paths.length} saved`);
+    }
+    if (r.log.files.output_paths?.length) {
+      output.appendLine(`  outputs: ${r.log.files.output_paths.length} copied`);
+    }
   }
 
   for (const w of r.warnings) {
@@ -925,6 +959,19 @@ function formatLogDocument(result: RunResult, text: string): string {
     `started: ${result.started_at}`,
     `elapsed_ms: ${result.elapsed_ms}`,
     `lines: ${result.log.lines_total}`,
+    ...(result.log.files
+      ? [
+          ...(result.log.files.working_dir ? [`working_dir: ${result.log.files.working_dir}`] : []),
+          `log_file: ${result.log.files.log_path}`,
+          `smcl_file: ${result.log.files.smcl_path}`,
+          ...(result.log.files.graph_paths?.length
+            ? [`graphs_dir: ${result.log.files.graphs_dir ?? ""}`]
+            : []),
+          ...(result.log.files.output_paths?.length
+            ? [`outputs_dir: ${result.log.files.outputs_dir ?? ""}`]
+            : []),
+        ]
+      : []),
     "",
     "-".repeat(72),
     text,

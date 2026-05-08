@@ -22,6 +22,13 @@ export interface RunStataOptions {
   sessionId?: string;
   includeFullLog?: boolean;
   includeGraphs?: "ref" | "inline" | "none";
+  persistLogFiles?: boolean;
+  persistGeneratedFiles?: boolean;
+  originPath?: string;
+  originKind?: "file" | "selection" | "line" | "cell" | "code" | "unknown";
+  originLabel?: string;
+  useOriginWorkdir?: boolean;
+  workingDir?: string;
 }
 
 export class StataMcpClient implements vscode.Disposable {
@@ -123,6 +130,15 @@ export class StataMcpClient implements vscode.Disposable {
     if (opts.sessionId !== undefined) args.session_id = opts.sessionId;
     if (opts.includeFullLog !== undefined) args.include_full_log = opts.includeFullLog;
     if (opts.includeGraphs !== undefined) args.include_graphs = opts.includeGraphs;
+    if (opts.persistLogFiles !== undefined) args.persist_log_files = opts.persistLogFiles;
+    if (opts.persistGeneratedFiles !== undefined) {
+      args.persist_generated_files = opts.persistGeneratedFiles;
+    }
+    if (opts.originPath !== undefined) args.origin_path = opts.originPath;
+    if (opts.originKind !== undefined) args.origin_kind = opts.originKind;
+    if (opts.originLabel !== undefined) args.origin_label = opts.originLabel;
+    if (opts.useOriginWorkdir !== undefined) args.use_origin_workdir = opts.useOriginWorkdir;
+    if (opts.workingDir !== undefined) args.working_dir = opts.workingDir;
 
     const reply = await this.client.callTool({ name: "stata_run", arguments: args });
     return parseTextResult<RunResult>(reply, "stata_run");

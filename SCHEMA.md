@@ -228,6 +228,7 @@ The single biggest token-economy decision in the schema. Default response carrie
 | `complete` | `bool` | Reserved for v2 streaming. Always `true` in v1. v2 may emit interim results with `complete: false`. |
 | `error_window` | `string \| null` | When `error` is non-null, the ~10 log lines immediately surrounding the failing emission (regardless of `head`/`tail` window). Cheap for the producer to compute; saves agents from bumping `log_lines` or fetching the full log just to see "what did Stata say right when it broke." `null` on success or when not computable. |
 | `ref` | `string \| null` | Opaque reference for `get_log`. Required when `truncated: true`; may be set when `truncated: false` for caller convenience; `null` is allowed when full log is in `head`. |
+| `files` | `object \| null` | Persistent `.log` / `.smcl` artifacts written for file-backed runs when requested. `null` when no files were written. See "Persistent log files" below. |
 
 **ANSI handling.** All log views (`head`, `tail`, `error_window`, the payload returned by `get_log(ref)`) are ANSI-escape-stripped, consistently.
 
@@ -236,6 +237,37 @@ The single biggest token-economy decision in the schema. Default response carrie
 **Ref lifetime.** Refs are valid only within the same client/server connection (or process, for in-process backends). Producers MUST invalidate refs on `reset_session`, process exit, or after a documented TTL. Consumers MUST NOT persist refs across sessions.
 
 **Defaults.** `head=20`, `tail=20`. Configurable per call via `log_lines_head` / `log_lines_tail` (see §4). If `lines_total ≤ head+tail`, the producer MUST set `truncated: false`, place the full log in `head`, set `tail: ""`, and set `ref: null`.
+
+**Persistent log files.** When a frontend passes a source `.do` path and requests `persist_log_files`, producers write immutable run artifacts under:
+
+```text
+<do-file-dir>/log-files/<do-stem>__<UTC timestamp>__<session_id>__<request_id>/
+```
+
+`log.files` then has:
+
+```json
+{
+  "directory": "/abs/path/log-files/test1__20260508T012233123Z__main__abc123",
+  "log_path": "/abs/path/.../test1__20260508T012233123Z__main__abc123.log",
+  "smcl_path": "/abs/path/.../test1__20260508T012233123Z__main__abc123.smcl",
+  "manifest_path": "/abs/path/.../manifest.json",
+  "code_path": "/abs/path/.../submitted.do",
+  "working_dir": "/abs/path",
+  "graphs_dir": "/abs/path/.../graphs",
+  "outputs_dir": "/abs/path/.../outputs",
+  "graph_paths": ["/abs/path/.../graphs/01-Graph.png"],
+  "output_paths": ["/abs/path/.../outputs/table.xlsx"],
+  "policy": "per_run_directory",
+  "append": false
+}
+```
+
+The stable folder name is `log-files`; timestamps belong on child run directories, not on the root. Producers SHOULD NOT append different executions into one log file, because parallel sessions, reruns after a pause, and selection/cell executions become ambiguous. Each run directory SHOULD include a manifest and submitted-code snapshot so the log is attributable without relying on editor history.
+
+When `origin_path` is supplied, producers SHOULD default Stata's working directory to the source `.do` file's directory before running. This mirrors how users organize project-relative `graph export`, `putexcel`, `esttab using`, `collect export`, and similar output commands. Frontends may disable this with `use_origin_workdir: false` or override it with `working_dir`.
+
+When `persist_generated_files` is true, producers SHOULD copy newly created or modified common output files from the run working directory into `outputs/`, preserving relative paths where practical. Captured graph refs SHOULD also be materialized into `graphs/`, with the corresponding `GraphInfo.file_path` set.
 
 ### 3.4 `results`
 
@@ -317,6 +349,7 @@ Each entry describes one captured graph. By default the bytes are **not** inline
 | `source_command` | `string \| null` | The user-submitted command line that produced this graph, when isolatable. |
 | `source_line` | `int \| null` | 1-indexed line within the submitted code that produced this graph. |
 | `inline` | `string \| null` | Base64-encoded bytes when the caller explicitly asked for inline (`include_graphs: "inline"`); else `null`. |
+| `file_path` | `string \| null` | Persistent graph file path when the run bundle materialized captured graphs under `log.files.graphs_dir`; else `null`. |
 
 ### 3.7 `error`
 
@@ -426,6 +459,11 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | `graph_format` | `"png" \| "svg" \| "pdf"` | `"png"` | Render format. |
 | `include_dataset_variables` | `bool` | `true` | Set `false` to omit `dataset.variables`. |
 | `timeout_ms` | `int \| null` | `600000` (10 min) | Hard timeout. `null` disables. On expiry, returns `ok: false`, `error.kind: "timeout"`, `rc: -2`. Frontends MAY override the default if their use case demands. |
+| `persist_log_files` | `bool` | `false` | With `origin_path`, writes immutable `.log` / `.smcl` / manifest files under the source `.do` file's `log-files/` directory. |
+| `persist_generated_files` | `bool` | `true` | When log files are persisted, also copies newly created or modified table/export files into `outputs/` and captured graphs into `graphs/`. |
+| `origin_path` | `string \| null` | `null` | Absolute source `.do` path used for working-directory defaults and run-bundle placement. |
+| `use_origin_workdir` | `bool` | `true` | With `origin_path`, `cd` Stata to the source `.do` directory before running. |
+| `working_dir` | `string \| null` | `null` | Explicit Stata working directory; overrides the source `.do` directory. |
 
 Frontends translate their native idiom (MCP `inputSchema`, Jupyter kernel options, VSCode commands) into these names without renaming.
 
@@ -481,6 +519,8 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `matrix_ref` | Producer can emit large matrices as refs and supports `get_matrix`. |
 | `multi_session` | Producer supports `session_id != "main"` and `list_sessions`. |
 | `inline_graphs` | Producer supports `include_graphs: "inline"`. |
+| `log_files` | Producer can persist immutable per-run `.log` / `.smcl` bundles. |
+| `run_artifacts` | Producer can materialize captured graphs and copied table/export outputs into the run bundle. |
 
 Consumers detect optional features via `capabilities`, not by parsing `schema_version`. Producers may add entries; agents MUST treat unknown capability names as opaque.
 

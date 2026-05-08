@@ -98,6 +98,62 @@ def _tool_definitions() -> list[Tool]:
                         "type": "boolean",
                         "default": True,
                     },
+                    "persist_log_files": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "When true and origin_path is provided, write "
+                            "immutable .log/.smcl artifacts under "
+                            "<origin dir>/log-files/<run>/."
+                        ),
+                    },
+                    "persist_generated_files": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "When log files are persisted, also copy newly "
+                            "created or modified output files from the run "
+                            "working directory into the run bundle's outputs/ "
+                            "folder, and save captured graphs into graphs/."
+                        ),
+                    },
+                    "origin_path": {
+                        "type": "string",
+                        "description": (
+                            "Absolute path of the source .do file. Used for "
+                            "the default Stata working directory, run-bundle "
+                            "placement, and metadata."
+                        ),
+                    },
+                    "use_origin_workdir": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "When origin_path is provided, cd Stata to the "
+                            "source .do file's directory before running. This "
+                            "makes relative table/graph exports land next to "
+                            "the .do file by default."
+                        ),
+                    },
+                    "working_dir": {
+                        "type": "string",
+                        "description": (
+                            "Optional explicit Stata working directory. "
+                            "Overrides origin_path's directory."
+                        ),
+                    },
+                    "origin_kind": {
+                        "type": "string",
+                        "enum": ["file", "selection", "line", "cell", "code", "unknown"],
+                        "description": "Which editor surface produced the submitted code.",
+                    },
+                    "origin_label": {
+                        "type": "string",
+                        "description": (
+                            "Human-readable source label, for example "
+                            "demo/test1.do:1."
+                        ),
+                    },
                 },
                 "required": ["code"],
             },
