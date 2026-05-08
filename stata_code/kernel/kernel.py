@@ -262,7 +262,11 @@ def install_kernel(user: bool = True, system: bool = False) -> None:
     """
     from jupyter_client.kernelspec import KernelSpecManager
 
-    py_exec = Path(sys.executable).resolve()
+    # Do not .resolve() — on macOS Homebrew venvs, .venv/bin/python is a symlink
+    # to the underlying system Python; resolving it bypasses the venv and the
+    # kernel fails to find stata_code. sys.executable already points to the
+    # interpreter currently running this install command, which is what we want.
+    py_exec = Path(sys.executable)
     kernel_json = {
         "argv": [
             str(py_exec),

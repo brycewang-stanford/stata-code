@@ -221,7 +221,7 @@ class TestInstallKernel:
                 "replace": True,
                 "spec": {
                     "argv": [
-                        str((tmp_path / "python").resolve()),
+                        str(tmp_path / "python"),
                         "-m",
                         "stata_code.kernel",
                         "-f",
