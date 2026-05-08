@@ -9,7 +9,8 @@ name: release
 on:
   push:
     tags:
-      - "v*"
+      # Match v0.x.x but NOT vscode-v* (which has its own workflow).
+      - "v[0-9]*"
   workflow_dispatch:
 
 # Avoid two release runs racing for the same tag.
@@ -71,6 +72,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         # No `password:` — this uses OIDC against the trusted publisher
         # configured at https://pypi.org/manage/project/stata-code/settings/publishing/
+        with:
+          skip-existing: true
 
   github-release:
     name: create GitHub Release
