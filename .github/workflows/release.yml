@@ -53,6 +53,9 @@ jobs:
     name: publish to PyPI (Trusted Publishing)
     needs: build
     runs-on: ubuntu-latest
+    # Don't block github-release on a PyPI failure (e.g. Trusted Publisher
+    # not yet configured, or version already uploaded manually via twine).
+    continue-on-error: true
     # The GitHub Environment must match what is configured on PyPI under
     # "Trusted publishers". See PUBLISHING.md for setup.
     environment:
@@ -95,7 +98,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            dist/*
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
