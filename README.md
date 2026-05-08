@@ -12,6 +12,10 @@
 [![GitHub release](https://img.shields.io/github/v/release/brycewang-stanford/stata-code)](https://github.com/brycewang-stanford/stata-code/releases)
 [![GitHub stars](https://img.shields.io/github/stars/brycewang-stanford/stata-code?style=social)](https://github.com/brycewang-stanford/stata-code)
 
+<p align="center">
+  <img src="branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
+</p>
+
 > Agent-native Stata bridge — **one Python core, multiple frontends**.
 
 `stata-code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
@@ -33,7 +37,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.5 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 252 passing tests across schema, runner, MCP, kernel, and ref-store modules. License: **MIT**.
+**Status: v0.5 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 284 passing tests across schema, runner, MCP, kernel, and ref-store modules. License: **MIT**.
 
 Two workflows v0.5 explicitly supports for end users:
 
@@ -133,7 +137,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 10 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 14 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`).
 
 #### Error Recovery in Agent Workflows
 
@@ -174,7 +178,7 @@ Or run it as a module if the binary is not on `PATH`:
 python -m stata_code.mcp
 ```
 
-The MCP server registers 10 tools:
+The MCP server registers 14 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -188,6 +192,10 @@ The MCP server registers 10 tools:
 | `reset_session` | Drop a session's data |
 | `notebook_outline` | Compact per-cell index of a `.ipynb` (cell_id, type, preview) |
 | `notebook_get_cell` | One cell's full source plus a token-economic outputs summary |
+| `notebook_locate` | Find cells by snippet / regex / pasted error text |
+| `notebook_edit_cell` | Atomically replace one cell's source (preserves id, clears outputs) |
+| `notebook_insert_cell` | Insert a new cell with a fresh nbformat 4.5+ UUID |
+| `notebook_delete_cell` | Remove a cell by id |
 
 For modern MCP clients, these tools now return structured results through
 `structuredContent` with `outputSchema` metadata, while still keeping the
@@ -295,7 +303,7 @@ stata_code/
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
 │   └── runner.py      # the one execute(); collects everything via sfi
 ├── mcp/
-│   └── server.py      # MCP server (10 tools)
+│   └── server.py      # MCP server (14 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -333,7 +341,7 @@ stata_code/
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 32-kind error taxonomy with canonical suggestions
-- MCP server: 10 tools
+- MCP server: 14 tools
 - Jupyter kernel: rewired to the v1.0 pipeline
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Cooperative cancellation: `cancel(session_id)` / MCP `cancel_session`
@@ -510,7 +518,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 10 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`）。
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 14 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`）。
 
 #### Agent 工作流里的报错恢复
 
@@ -551,7 +559,7 @@ claude mcp add stata-code --scope user -- uvx --from stata-code stata-code-mcp
 python -m stata_code.mcp
 ```
 
-MCP server 注册了 10 个工具：
+MCP server 注册了 14 个工具：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -565,6 +573,10 @@ MCP server 注册了 10 个工具：
 | `reset_session` | 清空某个 session 的数据 |
 | `notebook_outline` | `.ipynb` 的 cell 索引（cell_id、类型、源代码预览） |
 | `notebook_get_cell` | 单个 cell 的完整源代码 + 节流版输出摘要 |
+| `notebook_locate` | 用 snippet / regex / 报错文本定位 cell |
+| `notebook_edit_cell` | 原子替换 cell 源代码（保留 id，清空 outputs） |
+| `notebook_insert_cell` | 插入新 cell，分配新的 nbformat 4.5+ UUID |
+| `notebook_delete_cell` | 按 id 删除 cell |
 
 对于新版 MCP 客户端，这些工具会返回 `structuredContent`，并在 tool
 metadata 里声明 `outputSchema`；同时仍保留序列化 JSON text block，兼容旧客户端。
@@ -670,7 +682,7 @@ stata_code/
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
 │   └── runner.py      # the one execute(); collects everything via sfi
 ├── mcp/
-│   └── server.py      # MCP server (10 tools)
+│   └── server.py      # MCP server (14 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -708,7 +720,7 @@ stata_code/
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 32 类错误分类法 + 标准化建议
-- MCP server：10 个工具
+- MCP server：14 个工具
 - Jupyter kernel：接入 v1.0 pipeline
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 协作式取消：`cancel(session_id)` / MCP `cancel_session`
