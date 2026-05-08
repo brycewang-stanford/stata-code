@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/logo/horizontal@1024.png" alt="stata-code logo" width="520" />
+  <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo/horizontal@1024.png" alt="stata-code logo" width="520" />
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/brycewang-stanford/stata-code?style=social)](https://github.com/brycewang-stanford/stata-code)
 
 <p align="center">
-  <img src="branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
+  <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
 </p>
 
 > Agent-native Stata bridge — **one Python core, multiple frontends**.
