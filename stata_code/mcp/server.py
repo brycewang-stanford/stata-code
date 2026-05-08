@@ -62,15 +62,29 @@ from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_inf
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.notebook import (
     NotebookError,
+)
+from stata_code.core.notebook import (
     delete_cell as _notebook_delete_cell,
+)
+from stata_code.core.notebook import (
     edit_cell as _notebook_edit_cell,
+)
+from stata_code.core.notebook import (
     get_cell as _notebook_get_cell,
+)
+from stata_code.core.notebook import (
     insert_cell as _notebook_insert_cell,
+)
+from stata_code.core.notebook import (
     locate_cells as _notebook_locate_cells,
+)
+from stata_code.core.notebook import (
     outline_notebook as _notebook_outline,
 )
 from stata_code.core.run_index import (
     RunIndexError,
+)
+from stata_code.core.run_index import (
     list_runs as _list_runs,
 )
 from stata_code.core.runner import (
