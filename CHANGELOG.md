@@ -6,6 +6,15 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-05-08
+
+### Changed
+
+- **VSCode toolbar ordering.** Editor title-bar actions now live in one
+  contiguous `navigation` group so `stata-code` buttons stay together. The
+  order prioritizes run commands first, then data/output views, session
+  controls, cancellation/reset, and working-directory actions.
+
 ## [0.3.1] — 2026-05-07
 
 ### Changed
