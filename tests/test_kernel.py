@@ -234,6 +234,37 @@ class TestInstallKernel:
             }
         ]
 
+    def test_install_kernel_copies_bundled_logos(self, tmp_path):
+        """install_kernel should copy bundled logo assets into the kernelspec."""
+        from stata_code.kernel.kernel import ASSETS_DIR, install_kernel
+
+        captured_files: dict[str, bytes] = {}
+
+        class DummyKernelSpecManager:
+            def install_kernel_spec(
+                self,
+                source_dir: str,
+                *,
+                kernel_name: str,
+                user: bool,
+                replace: bool,
+            ) -> str:
+                for child in Path(source_dir).iterdir():
+                    if child.is_file():
+                        captured_files[child.name] = child.read_bytes()
+                return str(tmp_path / "kernels" / kernel_name)
+
+        with patch(
+            "jupyter_client.kernelspec.KernelSpecManager",
+            return_value=DummyKernelSpecManager(),
+        ):
+            install_kernel(user=True)
+
+        for asset in ASSETS_DIR.iterdir():
+            if asset.is_file():
+                assert asset.name in captured_files, f"missing {asset.name}"
+                assert captured_files[asset.name] == asset.read_bytes()
+
     def test_install_kernel_system_not_user(self, tmp_path):
         """system=True should pass user=False to Jupyter's installer."""
         from stata_code.kernel.kernel import install_kernel

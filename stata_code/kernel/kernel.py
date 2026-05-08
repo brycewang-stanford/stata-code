@@ -13,11 +13,17 @@ Install via `python -m stata_code.kernel install --user`.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import traceback
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+
+# Bundled kernelspec resources (logo files) shipped alongside this module.
+# Copied into the kernelspec dir at install time so VS Code's Jupyter extension
+# lists the kernel in its picker — it filters out kernelspecs without logos.
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 try:
     from ipykernel.kernelbase import Kernel
@@ -284,6 +290,10 @@ def install_kernel(user: bool = True, system: bool = False) -> None:
     with TemporaryDirectory(prefix="stata_code_kernel_") as td:
         src_dir = Path(td)
         (src_dir / "kernel.json").write_text(json.dumps(kernel_json, indent=2))
+        if ASSETS_DIR.is_dir():
+            for asset in ASSETS_DIR.iterdir():
+                if asset.is_file():
+                    shutil.copy2(asset, src_dir / asset.name)
         dest = KernelSpecManager().install_kernel_spec(
             str(src_dir),
             kernel_name="stata",

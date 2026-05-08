@@ -389,7 +389,7 @@ Populated iff `ok: false`. The schema's most important contribution to agent UX:
 }
 ```
 
-Suggestions are best-effort; agents should treat them as hints, not directives. The `kind` enum below documents what suggestions are typically populated.
+Suggestions are best-effort; agents should treat them as hints, not directives. A suggestion is not consent to mutate source files or silently retry changed code; consumers should apply fixes automatically only in workflows where the user requested repair or approved iteration. The `kind` enum below documents what suggestions are typically populated.
 
 **`kind` enum (v1.0):**
 

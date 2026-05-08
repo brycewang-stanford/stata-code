@@ -44,6 +44,9 @@ class TestToolRegistry:
         assert schema["type"] == "object"
         assert "code" in schema["properties"]
         assert "code" in schema["required"]
+        assert "ok=false" in run.description
+        assert "iterative debug/fix loops" in run.description
+        assert "run/validate-only requests" in run.description
         # Token-economy options are exposed
         assert "include_graphs" in schema["properties"]
         assert "include_full_log" in schema["properties"]

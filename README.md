@@ -118,6 +118,15 @@ claude mcp add stata-code --scope project -- stata-code-mcp
 
 Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 8 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`).
 
+#### Error Recovery in Agent Workflows
+
+`stata_run` itself never edits files. When Stata fails, it returns typed diagnostics (`error.kind`, `error.message`, `error.line`, `error.context`) plus best-effort `suggestions`. That supports two distinct Claude Code workflows:
+
+- For "run this do-file" or "verify this code", Claude can report the failure and suggested next steps without changing source files.
+- For "fix this and rerun until it passes", Claude can use the same structured error fields to edit the `.do` file, call `stata_run` again, and iterate.
+
+If you want the repair loop, say so explicitly. Otherwise, treat failed runs as diagnostics first, not as automatic permission to rewrite code.
+
 #### `uvx` (no global pip install)
 
 If you prefer not to `pip install stata-code` globally, run it ephemerally through [`uv`](https://github.com/astral-sh/uv):
@@ -459,6 +468,15 @@ claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
 接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 8 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`）。
+
+#### Agent 工作流里的报错恢复
+
+`stata_run` 本身不会编辑文件。Stata 报错时，它返回结构化诊断（`error.kind`, `error.message`, `error.line`, `error.context`）和尽力生成的 `suggestions`。这支持两种不同的 Claude Code 工作流：
+
+- 如果你说的是「运行这个 do-file」或「验证这段代码」，Claude 可以只报告失败原因和建议的下一步，不修改源文件。
+- 如果你明确说「帮我修到跑通」或「修复并反复运行直到成功」，Claude 可以基于同一组结构化错误字段修改 `.do` 文件，再调用 `stata_run` 继续迭代。
+
+如果需要自动修复循环，请明确说出来。否则，失败的运行应先被视为诊断结果，而不是自动改写代码的授权。
 
 #### 用 `uvx`（不必全局 pip install）
 
