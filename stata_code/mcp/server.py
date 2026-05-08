@@ -43,7 +43,7 @@ from stata_code.core.runner import (
     is_cancel_pending,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 APP: Any = Server("stata-code") if _MCP_AVAILABLE else None
 

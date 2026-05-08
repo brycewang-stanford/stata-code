@@ -6,6 +6,33 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-07
+
+### Changed
+
+- **VSCode extension polish.** Custom SVG toolbar icons (sessions / output /
+  graphs / data / run / stop / reset / new-tab / switch-tab) replace the
+  generic codicons; toolbar buttons render in the editor title bar with
+  consistent visual weight. Adds `View Data Preview` command surfaced from
+  the command palette and the editor right-click menu for opening the
+  current `Last Result` dataset preview without re-running.
+- **Run history retains origin URI and base line** so reruns from the
+  Sessions / Last Result views replay the correct file/selection rather
+  than re-resolving against whatever editor happens to be focused.
+- **Marketplace publishing pipeline** (`.github/workflows/vscode-release.yml`).
+  Tagging `v*` now packages `vscode/` into a VSIX and publishes via `vsce`
+  using a stored `VSCE_PAT`. `vscode/.vscodeignore` tightened to exclude
+  `.git/`, stale `.vsix` artifacts, and `.npmignore`. `vscode/LICENSE`
+  vendored from the repo root so the VSIX ships its declared MIT license.
+- **README docs.** English-first / Chinese-second bilingual layout, with
+  expanded Claude Code MCP install instructions (`claude mcp add` patterns)
+  and VS Code Marketplace install steps now that the extension is live.
+
+### Fixed
+
+- **mcpClient handshake** version string aligned with `package.json` so
+  the VSCode client and MCP server announce matching versions.
+
 ## [0.3.0] — 2026-05-07
 
 ### Changed
