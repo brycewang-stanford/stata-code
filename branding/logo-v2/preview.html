@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>stata-code — logo concepts v2</title>
+<style>
+  :root {
+    --ink: #0F172A;
+    --muted: #64748B;
+    --line: #E2E8F0;
+    --bg: #F8FAFC;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 48px 32px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { max-width: 1080px; margin: 0 auto 40px; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.5px; }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .grid {
+    max-width: 1080px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .card .label {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .label strong { font-size: 14px; letter-spacing: -0.2px; }
+  .label span { color: var(--muted); font-size: 12px; }
+  .row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    align-items: center;
+    padding: 28px 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row.dark { background: #0F172A; }
+  .row.dark img { filter: invert(1); }
+  .cell-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .row.dark .cell-label { color: #94A3B8; }
+  .mark img { display: block; width: 64px; height: 64px; }
+  .lockup img { display: block; max-width: 100%; height: auto; }
+  .rationale {
+    padding: 16px 18px;
+    background: #F1F5F9;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.55;
+    border-top: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>stata-code — logo concepts v2</h1>
+  <p>Four directions. Ink: <code>#0F172A</code> &middot; accent: <code>#2563EB</code> &middot; wordmark: monospace.</p>
+</header>
+<div class="grid">
+
+  <div class="card">
+    <div class="label"><strong>C1 · Bracket-S</strong><span>code + Stata</span></div>
+    <div class="row"><div class="cell-label">Mark</div><div class="mark"><img src="concept-1-bracket-s/mark.svg" alt="C1 mark"/></div></div>
+    <div class="row"><div class="cell-label">Lockup</div><div class="lockup"><img src="concept-1-bracket-s/horizontal.svg" alt="C1 lockup"/></div></div>
+    <div class="row dark"><div class="cell-label">On dark</div><div class="lockup"><img src="concept-1-bracket-s/horizontal.svg" alt="C1 on dark"/></div></div>
+    <div class="rationale">Angle brackets evoke <code>&lt;/&gt;</code>; the inset S anchors the mark to <em>Stata</em>. Pure code-tool semiotics — no characters, no chrome.</div>
+  </div>
+
+  <div class="card">
+    <div class="label"><strong>C2 · Bridge</strong><span>agent ↔ Stata</span></div>
+    <div class="row"><div class="cell-label">Mark</div><div class="mark"><img src="concept-2-bridge/mark.svg" alt="C2 mark"/></div></div>
+    <div class="row"><div class="cell-label">Lockup</div><div class="lockup"><img src="concept-2-bridge/horizontal.svg" alt="C2 lockup"/></div></div>
+    <div class="row dark"><div class="cell-label">On dark</div><div class="lockup"><img src="concept-2-bridge/horizontal.svg" alt="C2 on dark"/></div></div>
+    <div class="rationale">Two anchored nodes joined by an arch — the <em>bridge</em> tagline made literal. Reads at favicon size.</div>
+  </div>
+
+  <div class="card">
+    <div class="label"><strong>C3 · Regression</strong><span>statistics</span></div>
+    <div class="row"><div class="cell-label">Mark</div><div class="mark"><img src="concept-3-regression/mark.svg" alt="C3 mark"/></div></div>
+    <div class="row"><div class="cell-label">Lockup</div><div class="lockup"><img src="concept-3-regression/horizontal.svg" alt="C3 lockup"/></div></div>
+    <div class="row dark"><div class="cell-label">On dark</div><div class="lockup"><img src="concept-3-regression/horizontal.svg" alt="C3 on dark"/></div></div>
+    <div class="rationale">Axis, three observations, fitted line. Earnest econ/stats vibe in scikit-learn / R-package territory.</div>
+  </div>
+
+  <div class="card">
+    <div class="label"><strong>C4 · Coef-plot</strong><span>econometrics</span></div>
+    <div class="row"><div class="cell-label">Mark</div><div class="mark"><img src="concept-4-coefplot/mark.svg" alt="C4 mark"/></div></div>
+    <div class="row"><div class="cell-label">Lockup</div><div class="lockup"><img src="concept-4-coefplot/horizontal.svg" alt="C4 lockup"/></div></div>
+    <div class="row dark"><div class="cell-label">On dark</div><div class="lockup"><img src="concept-4-coefplot/horizontal.svg" alt="C4 on dark"/></div></div>
+    <div class="rationale">A coefficient / forest plot — instantly readable to economists, abstract to everyone else. Strongest signal to the actual user base.</div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="stata-code mark">
+  <title>stata-code — coef-plot mark</title>
+  <line x1="32" y1="10" x2="32" y2="54" stroke="#0F172A" stroke-width="2" stroke-linecap="round" stroke-dasharray="2 3"/>
+  <line x1="22" y1="20" x2="50" y2="20" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="40" cy="20" r="4" fill="#2563EB"/>
+  <line x1="18" y1="32" x2="38" y2="32" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="24" cy="32" r="4" fill="#2563EB"/>
+  <line x1="26" y1="44" x2="48" y2="44" stroke="#0F172A" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="42" cy="44" r="4" fill="#2563EB"/>
+</svg>
