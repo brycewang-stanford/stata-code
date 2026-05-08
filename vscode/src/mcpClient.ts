@@ -38,7 +38,7 @@ export class StataMcpClient implements vscode.Disposable {
         args: this.args,
       });
       this.client = new Client(
-        { name: "stata-code-vscode", version: "0.3.0" },
+        { name: "stata-code-vscode", version: "0.3.1" },
         { capabilities: {} },
       );
       this.output.appendLine(
