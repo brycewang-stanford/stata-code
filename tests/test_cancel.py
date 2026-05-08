@@ -81,15 +81,13 @@ class TestMcpCancelTool:
     def test_dispatch_first_call_was_pending_false(self):
         import asyncio
 
-        from mcp.types import TextContent  # noqa: F401  (import gate)
+        from mcp.types import CallToolResult  # noqa: F401  (import gate)
 
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("cancel_session", {"session_id": "main"}))
-        assert len(out) == 1
-        import json
-
-        body = json.loads(out[0].text)
+        assert out.isError is False
+        body = out.structuredContent
         # killed_worker is False when no subprocess worker exists for this
         # session_id in the default pool (no prior `stata_run` for "main").
         assert body == {
@@ -101,13 +99,12 @@ class TestMcpCancelTool:
 
     def test_dispatch_second_call_was_pending_true(self):
         import asyncio
-        import json
 
         from stata_code.mcp.server import _dispatch
 
         asyncio.run(_dispatch("cancel_session", {"session_id": "main"}))
         out = asyncio.run(_dispatch("cancel_session", {"session_id": "main"}))
-        body = json.loads(out[0].text)
+        body = out.structuredContent
         assert body == {
             "session_id": "main",
             "was_pending": True,
@@ -117,12 +114,11 @@ class TestMcpCancelTool:
 
     def test_dispatch_default_session_id(self):
         import asyncio
-        import json
 
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("cancel_session", {}))
-        body = json.loads(out[0].text)
+        body = out.structuredContent
         assert body["session_id"] == "main"
 
 

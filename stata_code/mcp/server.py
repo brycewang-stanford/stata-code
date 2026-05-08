@@ -1,12 +1,13 @@
 """MCP server exposing the stata_code v1.0 pipeline.
 
-Tools registered:
-- stata_run        — execute Stata code, return a v1.0 RunResult JSON
-- stata_info       — report Stata edition / version / capabilities
-- get_log          — fetch full log behind a `log://` ref
-- get_graph        — fetch graph bytes behind a `graph://` ref (ImageContent)
-- list_sessions    — enumerate live sessions (frames)
-- reset_session    — drop a session's data
+Server features:
+- Tools: execute Stata, inspect runtime/session state, and fetch deferred
+  logs/graphs/matrices.
+- Structured tool results: `structuredContent` plus JSON text compatibility.
+- Resources: expose RunResult schema, server capabilities, live sessions, and
+  dynamic `log://`, `graph://`, and `matrix://` refs.
+- Prompts: provide user-controlled workflows for validation, debugging,
+  repair loops, replication audits, and estimation summaries.
 
 The result envelope, token-economy defaults (log head+tail+ref, graph refs
 not inline), session model, and error taxonomy follow SCHEMA.md.
@@ -15,14 +16,28 @@ not inline), session model, and error taxonomy follow SCHEMA.md.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sys
-from typing import Any
+from typing import Any, cast
 
 try:
     from mcp.server import Server
+    from mcp.server.lowlevel.helper_types import ReadResourceContents
     from mcp.server.stdio import stdio_server
-    from mcp.types import ImageContent, TextContent, Tool
+    from mcp.types import (
+        CallToolResult,
+        GetPromptResult,
+        ImageContent,
+        Prompt,
+        PromptArgument,
+        PromptMessage,
+        Resource,
+        ResourceTemplate,
+        TextContent,
+        Tool,
+        ToolAnnotations,
+    )
 
     _MCP_AVAILABLE = True
 except ImportError:  # pragma: no cover - environment without mcp installed
@@ -30,11 +45,26 @@ except ImportError:  # pragma: no cover - environment without mcp installed
     Tool = None  # type: ignore[assignment,misc]
     TextContent = None  # type: ignore[assignment,misc]
     ImageContent = None  # type: ignore[assignment,misc]
+    CallToolResult = None  # type: ignore[assignment,misc]
+    ToolAnnotations = None  # type: ignore[assignment,misc]
+    GetPromptResult = None  # type: ignore[assignment,misc]
+    Prompt = None  # type: ignore[assignment,misc]
+    PromptArgument = None  # type: ignore[assignment,misc]
+    PromptMessage = None  # type: ignore[assignment,misc]
+    Resource = None  # type: ignore[assignment,misc]
+    ResourceTemplate = None  # type: ignore[assignment,misc]
+    ReadResourceContents = None  # type: ignore[assignment,misc]
     stdio_server = None  # type: ignore[assignment]
     _MCP_AVAILABLE = False
 
+from stata_code.core import _refs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable, is_available
+from stata_code.core.notebook import (
+    NotebookError,
+    get_cell as _notebook_get_cell,
+    outline_notebook as _notebook_outline,
+)
 from stata_code.core.runner import (
     cancel,
     get_graph,
@@ -42,10 +72,181 @@ from stata_code.core.runner import (
     get_matrix,
     is_cancel_pending,
 )
+from stata_code.core.schema import RunResult
 
 __version__ = "0.5.0"
 
-APP: Any = Server("stata-code") if _MCP_AVAILABLE else None
+SERVER_INSTRUCTIONS = (
+    "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
+    "over parsing logs. Run code first for validation-only requests; edit source "
+    "files only when the user explicitly asks for repair or iteration. Large logs, "
+    "graphs, and matrices are returned by reference and can be fetched on demand."
+)
+
+APP: Any = (
+    Server("stata-code", version=__version__, instructions=SERVER_INSTRUCTIONS)
+    if _MCP_AVAILABLE
+    else None
+)
+
+
+def _object_schema(
+    properties: dict[str, Any],
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required or [],
+        "additionalProperties": True,
+    }
+
+
+_INFO_OUTPUT_SCHEMA = _object_schema(
+    {
+        "available": {"type": "boolean"},
+        "schema_version": {"type": "string"},
+        "capabilities": {"type": "array", "items": {"type": "string"}},
+        "stata": {"type": "object"},
+        "edition": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]},
+        "backend": {"type": "string"},
+        # Present only when an operational error (worker timeout / crash /
+        # broken pipe) prevented a successful query — distinguished from
+        # "Stata is not installed", which omits this field.
+        "error": {"type": "string"},
+    },
+    ["available", "schema_version", "capabilities"],
+)
+
+_LOG_OUTPUT_SCHEMA = _object_schema(
+    {
+        "text": {"type": "string"},
+        "lines_total": {"type": "integer"},
+        "bytes_total": {"type": "integer"},
+    },
+    ["text", "lines_total", "bytes_total"],
+)
+
+_GRAPH_OUTPUT_SCHEMA = _object_schema(
+    {
+        "ref": {"type": "string"},
+        "format": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "width": {"type": ["integer", "null"]},
+        "height": {"type": ["integer", "null"]},
+    },
+    ["ref", "format", "mimeType"],
+)
+
+_MATRIX_OUTPUT_SCHEMA = _object_schema(
+    {
+        "rows": {"type": "array", "items": {"type": "string"}},
+        "cols": {"type": "array", "items": {"type": "string"}},
+        "values": {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {"type": ["number", "null"]},
+            },
+        },
+    },
+    ["rows", "cols", "values"],
+)
+
+_SESSIONS_OUTPUT_SCHEMA = _object_schema(
+    {
+        "sessions": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "session_id": {"type": "string"},
+                    "frame": {"type": "string"},
+                    "n_obs": {"type": "integer"},
+                },
+                ["session_id", "frame", "n_obs"],
+            ),
+        }
+    },
+    ["sessions"],
+)
+
+_SESSION_MUTATION_OUTPUT_SCHEMA = _object_schema(
+    {
+        "session_id": {"type": "string"},
+        "was_pending": {"type": "boolean"},
+        "is_pending": {"type": "boolean"},
+        "killed_worker": {"type": "boolean"},
+        "dropped_frame": {"type": "boolean"},
+    },
+    ["session_id"],
+)
+
+_NOTEBOOK_CELL_OUTLINE_ITEM_SCHEMA = _object_schema(
+    {
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "source_preview": {"type": "string"},
+        "line_count": {"type": "integer"},
+        "char_count": {"type": "integer"},
+        "execution_count": {"type": ["integer", "null"]},
+        "has_outputs": {"type": "boolean"},
+        "has_error_output": {"type": "boolean"},
+    },
+    [
+        "cell_id",
+        "id_synthesized",
+        "index",
+        "cell_type",
+        "source_preview",
+        "line_count",
+        "char_count",
+        "has_outputs",
+        "has_error_output",
+    ],
+)
+
+_NOTEBOOK_OUTLINE_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "nbformat": {"type": ["integer", "null"]},
+        "kernelspec": {"type": ["object", "null"]},
+        "cell_count": {"type": "integer"},
+        "cells": {
+            "type": "array",
+            "items": _NOTEBOOK_CELL_OUTLINE_ITEM_SCHEMA,
+        },
+    },
+    ["path", "cell_count", "cells"],
+)
+
+_NOTEBOOK_GET_CELL_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "source": {"type": "string"},
+        "line_count": {"type": "integer"},
+        "char_count": {"type": "integer"},
+        "execution_count": {"type": ["integer", "null"]},
+        "metadata": {"type": "object"},
+        "outputs_summary": {"type": ["object", "null"]},
+    },
+    [
+        "path",
+        "cell_id",
+        "id_synthesized",
+        "index",
+        "cell_type",
+        "source",
+        "line_count",
+        "char_count",
+    ],
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +258,7 @@ def _tool_definitions() -> list[Tool]:
     return [
         Tool(
             name="stata_run",
+            title="Run Stata Code",
             description=(
                 "Execute Stata code and return a v1.0 stata_code RunResult "
                 "(see SCHEMA.md). The result is a JSON object with ok, rc, "
@@ -166,20 +368,49 @@ def _tool_definitions() -> list[Tool]:
                             "demo/test1.do:1."
                         ),
                     },
+                    "origin_cell_id": {
+                        "type": "string",
+                        "description": (
+                            "Stable nbformat 4.5+ cell id when the submitted "
+                            "code is one cell of a Jupyter notebook. The "
+                            "runner does not interpret this value — it is "
+                            "echoed in result.origin and recorded in the "
+                            "run-bundle manifest so notebook-aware agents "
+                            "can correlate runs with cells."
+                        ),
+                    },
                 },
                 "required": ["code"],
             },
+            outputSchema=RunResult.model_json_schema(),
+            annotations=ToolAnnotations(
+                title="Run Stata Code",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="stata_info",
+            title="Inspect Stata Runtime",
             description=(
                 "Report installed Stata edition, version, backend, and "
                 "whether the runtime is initialized."
             ),
             inputSchema={"type": "object", "properties": {}},
+            outputSchema=_INFO_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Inspect Stata Runtime",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="get_log",
+            title="Fetch Stata Log",
             description=(
                 "Fetch the full log text behind a log:// ref returned by a "
                 "prior stata_run call. Returns JSON {text, lines_total, "
@@ -190,9 +421,18 @@ def _tool_definitions() -> list[Tool]:
                 "properties": {"ref": {"type": "string"}},
                 "required": ["ref"],
             },
+            outputSchema=_LOG_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Fetch Stata Log",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="get_graph",
+            title="Fetch Stata Graph",
             description=(
                 "Fetch graph bytes behind a graph:// ref. Returns an "
                 "ImageContent (base64 bytes + mimeType) suitable for direct "
@@ -209,9 +449,18 @@ def _tool_definitions() -> list[Tool]:
                 },
                 "required": ["ref"],
             },
+            outputSchema=_GRAPH_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Fetch Stata Graph",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="get_matrix",
+            title="Fetch Stata Matrix",
             description=(
                 "Fetch a matrix's values, rows, and cols behind a matrix:// "
                 "ref. Producers emit a ref instead of inlining values when "
@@ -223,17 +472,35 @@ def _tool_definitions() -> list[Tool]:
                 "properties": {"ref": {"type": "string"}},
                 "required": ["ref"],
             },
+            outputSchema=_MATRIX_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Fetch Stata Matrix",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="list_sessions",
+            title="List Stata Sessions",
             description=(
                 "Enumerate live sessions. Each entry has session_id, frame "
                 "(Stata frame name), and n_obs."
             ),
             inputSchema={"type": "object", "properties": {}},
+            outputSchema=_SESSIONS_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="List Stata Sessions",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="cancel_session",
+            title="Cancel Stata Session",
             description=(
                 "Request cooperative cancellation of the next stata_run for "
                 "this session. The flag is consumed by the next call and "
@@ -248,9 +515,18 @@ def _tool_definitions() -> list[Tool]:
                     "session_id": {"type": "string", "default": "main"},
                 },
             },
+            outputSchema=_SESSION_MUTATION_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Cancel Stata Session",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="reset_session",
+            title="Reset Stata Session",
             description=(
                 "Drop a session's data. session_id='main' performs `clear "
                 "all` in place (default frame cannot be dropped); other "
@@ -262,8 +538,433 @@ def _tool_definitions() -> list[Tool]:
                     "session_id": {"type": "string", "default": "main"},
                 },
             },
+            outputSchema=_SESSION_MUTATION_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Reset Stata Session",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="notebook_outline",
+            title="Outline Jupyter Notebook",
+            description=(
+                "Read a .ipynb file and return a compact per-cell index: "
+                "cell_id (nbformat 4.5+ UUID, or a synthesized fallback for "
+                "older notebooks), index, cell_type, source preview, line/"
+                "char counts, execution_count, and whether outputs/error "
+                "outputs are present. Read-only; does not execute or modify "
+                "the notebook. Use this before notebook_get_cell to avoid "
+                "pulling the full notebook into context."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or workspace path to the .ipynb file.",
+                    },
+                    "preview_lines": {
+                        "type": "integer",
+                        "default": 2,
+                        "minimum": 0,
+                        "description": (
+                            "Number of leading source lines to include per "
+                            "cell as a preview. Long lines are truncated."
+                        ),
+                    },
+                },
+                "required": ["path"],
+            },
+            outputSchema=_NOTEBOOK_OUTLINE_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Outline Jupyter Notebook",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="notebook_get_cell",
+            title="Read Notebook Cell",
+            description=(
+                "Read one cell of a .ipynb by cell_id (preferred) or "
+                "cell_index. Returns the cell's full source plus a token-"
+                "economic outputs summary (count, types, whether an image "
+                "is present, head/tail of stream/text outputs, error ename/"
+                "evalue with truncated traceback). Read-only; does not "
+                "execute or modify the notebook."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or workspace path to the .ipynb file.",
+                    },
+                    "cell_id": {
+                        "type": "string",
+                        "description": (
+                            "Stable nbformat 4.5+ cell id, or a synthesized "
+                            "id from a prior notebook_outline call."
+                        ),
+                    },
+                    "cell_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "0-based array index. Use only when the notebook "
+                            "lacks cell ids; cell_id is more stable."
+                        ),
+                    },
+                },
+                "required": ["path"],
+            },
+            outputSchema=_NOTEBOOK_GET_CELL_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Read Notebook Cell",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
     ]
+
+
+def _resource_templates() -> list[ResourceTemplate]:
+    return [
+        ResourceTemplate(
+            name="stata_log_ref",
+            title="Stata Log Reference",
+            uriTemplate="log://{request_id}",
+            description="Full Stata log text captured from a truncated stata_run result.",
+            mimeType="text/plain",
+        ),
+        ResourceTemplate(
+            name="stata_graph_ref",
+            title="Stata Graph Reference",
+            uriTemplate="graph://{request_id}/{index}",
+            description="Graph image bytes captured from a stata_run result.",
+            mimeType="image/png",
+        ),
+        ResourceTemplate(
+            name="stata_matrix_ref",
+            title="Stata Matrix Reference",
+            uriTemplate="matrix://{request_id}/{scope}/{name}",
+            description="Large Stata r()/e() matrix payload captured by reference.",
+            mimeType="application/json",
+        ),
+    ]
+
+
+def _static_resources() -> list[Resource]:
+    return [
+        Resource(
+            uri=cast(Any, "stata://schema/run-result"),
+            name="run-result-schema",
+            title="stata-code RunResult JSON Schema",
+            description="JSON Schema for structuredContent returned by stata_run.",
+            mimeType="application/schema+json",
+        ),
+        Resource(
+            uri=cast(Any, "stata://server/capabilities"),
+            name="server-capabilities",
+            title="stata-code Server Capabilities",
+            description="Tools, schema version, server instructions, and feature hints.",
+            mimeType="application/json",
+        ),
+        Resource(
+            uri=cast(Any, "stata://sessions"),
+            name="stata-sessions",
+            title="Live Stata Sessions",
+            description="Current session/frame inventory from the subprocess pool.",
+            mimeType="application/json",
+        ),
+    ]
+
+
+def _resource_for_ref(ref: str, payload: Any) -> Resource | None:
+    if ref.startswith("log://"):
+        return Resource(
+            uri=cast(Any, ref),
+            name=ref,
+            title=f"Stata log {ref.removeprefix('log://')}",
+            description="Full Stata log text captured by reference.",
+            mimeType="text/plain",
+        )
+    if ref.startswith("graph://"):
+        fmt = payload.get("format", "png") if isinstance(payload, dict) else "png"
+        mime = _GRAPH_MIME.get(fmt, "image/png")
+        return Resource(
+            uri=cast(Any, ref),
+            name=ref,
+            title=f"Stata graph {ref.removeprefix('graph://')}",
+            description="Graph image captured by reference.",
+            mimeType=mime,
+        )
+    if ref.startswith("matrix://"):
+        return Resource(
+            uri=cast(Any, ref),
+            name=ref,
+            title=f"Stata matrix {ref.removeprefix('matrix://')}",
+            description="Large Stata matrix captured by reference.",
+            mimeType="application/json",
+        )
+    return None
+
+
+def _list_mcp_resources() -> list[Resource]:
+    resources = _static_resources()
+    for ref, payload in _refs.snapshot():
+        resource = _resource_for_ref(ref, payload)
+        if resource is not None:
+            resources.append(resource)
+    return resources
+
+
+def _read_resource_payload(uri: str) -> ReadResourceContents:
+    if uri == "stata://schema/run-result":
+        return ReadResourceContents(
+            content=json.dumps(RunResult.model_json_schema(), indent=2),
+            mime_type="application/schema+json",
+        )
+    if uri == "stata://server/capabilities":
+        payload = {
+            "name": "stata-code",
+            "version": __version__,
+            "schema_version": "1.0",
+            "instructions": SERVER_INSTRUCTIONS,
+            "tools": [
+                tool.model_dump(mode="json", by_alias=True)
+                for tool in _tool_definitions()
+            ],
+            "resource_templates": [
+                tmpl.model_dump(mode="json", by_alias=True)
+                for tmpl in _resource_templates()
+            ],
+        }
+        return ReadResourceContents(
+            content=json.dumps(payload),
+            mime_type="application/json",
+        )
+    if uri == "stata://sessions":
+        return ReadResourceContents(
+            content=json.dumps({"sessions": get_default_pool().list_session_info()}),
+            mime_type="application/json",
+        )
+    if uri.startswith("log://"):
+        payload = cast(dict[str, Any], get_log(uri))
+        return ReadResourceContents(
+            content=cast(str, payload["text"]),
+            mime_type="text/plain",
+            meta={
+                "lines_total": payload["lines_total"],
+                "bytes_total": payload["bytes_total"],
+            },
+        )
+    if uri.startswith("graph://"):
+        payload = cast(dict[str, Any], get_graph(uri))
+        graph_format = cast(str, payload["format"])
+        mime = _GRAPH_MIME.get(graph_format, "image/png")
+        return ReadResourceContents(
+            content=base64.b64decode(cast(str, payload["bytes_b64"])),
+            mime_type=mime,
+            meta={
+                "format": graph_format,
+                "width": payload["width"],
+                "height": payload["height"],
+            },
+        )
+    if uri.startswith("matrix://"):
+        return ReadResourceContents(
+            content=json.dumps(cast(dict[str, Any], get_matrix(uri))),
+            mime_type="application/json",
+        )
+    raise ValueError(f"Unknown resource URI: {uri}")
+
+
+def _prompt_definitions() -> list[Prompt]:
+    return [
+        Prompt(
+            name="run_do_file_and_report",
+            title="Run Do-file and Report",
+            description=(
+                "Run a Stata do-file through stata_run and report success, "
+                "typed errors, generated artifacts, and next steps without "
+                "editing source files."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="path",
+                    description="Absolute or workspace-relative path to the .do file.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to main.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="debug_stata_error",
+            title="Debug Stata Error",
+            description=(
+                "Use a RunResult error object and the relevant code to diagnose "
+                "a Stata failure without making edits unless the user asks."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="code_or_path",
+                    description="Failing Stata code or path to the source file.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="error_json",
+                    description="Optional RunResult.error JSON from stata_run.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="fix_and_rerun_until_passes",
+            title="Fix and Rerun Until Passes",
+            description=(
+                "Iteratively edit Stata source code, run it, use structured "
+                "diagnostics, and stop when the run passes or a blocker is clear."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="path",
+                    description="Path to the .do file or source file to repair.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to main.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="replication_audit",
+            title="Replication Audit",
+            description=(
+                "Run Stata analysis as a reproducibility check and summarize "
+                "data dependencies, outputs, warnings, and failures."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="path",
+                    description="Path to the primary .do file or replication entrypoint.",
+                    required=True,
+                ),
+            ],
+        ),
+        Prompt(
+            name="summarize_estimation_results",
+            title="Summarize Estimation Results",
+            description=(
+                "Turn a stata_run RunResult into a concise statistical summary "
+                "using structured r()/e() fields before consulting logs."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="run_result_json",
+                    description="JSON text from stata_run, or a resource/ref to inspect.",
+                    required=True,
+                ),
+            ],
+        ),
+    ]
+
+
+def _prompt_text(name: str, arguments: dict[str, str] | None) -> tuple[str, str]:
+    args = arguments or {}
+    if name == "run_do_file_and_report":
+        path = args.get("path", "<path>")
+        session_id = args.get("session_id", "main")
+        return (
+            "Run the Stata do-file and report",
+            (
+                f"Run `{path}` in Stata session `{session_id}` using stata-code. "
+                "Treat this as validation unless I explicitly ask for repairs: read "
+                "the file, call `stata_run` with `origin_path`, `origin_kind='file'`, "
+                "and `persist_log_files=true`, then report `ok`, `rc`, typed error "
+                "details, warnings, generated logs/graphs/outputs, and any concise "
+                "next steps. Prefer structuredContent fields over parsing the log; "
+                "fetch full logs or graphs only if needed."
+            ),
+        )
+    if name == "debug_stata_error":
+        code_or_path = args.get("code_or_path", "<code-or-path>")
+        error_json = args.get("error_json")
+        extra = f" The RunResult.error JSON is: {error_json}" if error_json else ""
+        return (
+            "Diagnose the Stata error",
+            (
+                f"Diagnose this Stata failure from `{code_or_path}`.{extra} Use "
+                "`stata_run` only if more evidence is needed. Explain the likely "
+                "cause using `error.kind`, `error.line`, `error.context`, and "
+                "`error.suggestions`. Do not edit source files unless I ask."
+            ),
+        )
+    if name == "fix_and_rerun_until_passes":
+        path = args.get("path", "<path>")
+        session_id = args.get("session_id", "main")
+        return (
+            "Fix and rerun the Stata code",
+            (
+                f"Repair `{path}` in Stata session `{session_id}`. Read the source, "
+                "make the smallest defensible edit, run it with `stata_run` using "
+                "`origin_path`, inspect structured errors and warnings, and iterate "
+                "until it passes or a concrete blocker remains. Preserve unrelated "
+                "user changes. Report changed files, final status, artifacts, and "
+                "any residual risk."
+            ),
+        )
+    if name == "replication_audit":
+        path = args.get("path", "<path>")
+        return (
+            "Audit Stata replication",
+            (
+                f"Audit the Stata replication entrypoint `{path}`. Run it with "
+                "`persist_log_files=true`, inspect structured results, logs, graphs, "
+                "and output artifacts, and summarize reproducibility risks: missing "
+                "data/packages, path assumptions, nondeterminism, warnings, and "
+                "failed commands. Do not rewrite source unless separately asked."
+            ),
+        )
+    if name == "summarize_estimation_results":
+        run_result_json = args.get("run_result_json", "<run-result-json-or-ref>")
+        return (
+            "Summarize Stata estimation results",
+            (
+                f"Summarize this stata-code RunResult: {run_result_json}. Use "
+                "`results.e`, `results.r`, `dataset`, `warnings`, and `graphs` "
+                "first; consult `log.ref` only for context missing from structured "
+                "fields. Keep statistical claims tied to available coefficients, "
+                "sample size, model command, and warnings."
+            ),
+        )
+    raise ValueError(f"Unknown prompt: {name}")
+
+
+def _get_mcp_prompt(name: str, arguments: dict[str, str] | None = None) -> GetPromptResult:
+    title, text = _prompt_text(name, arguments)
+    return GetPromptResult(
+        description=title,
+        messages=[
+            PromptMessage(
+                role="user",
+                content=TextContent(type="text", text=text),
+            )
+        ],
+    )
 
 
 if _MCP_AVAILABLE:
@@ -273,8 +974,31 @@ if _MCP_AVAILABLE:
         return _tool_definitions()
 
     @APP.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[Any]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> Any:
         return await _dispatch(name, arguments)
+
+    @APP.list_resources()
+    async def list_resources() -> list[Resource]:
+        return _list_mcp_resources()
+
+    @APP.list_resource_templates()
+    async def list_resource_templates() -> list[ResourceTemplate]:
+        return _resource_templates()
+
+    @APP.read_resource()
+    async def read_resource(uri: Any) -> list[ReadResourceContents]:
+        return [_read_resource_payload(str(uri))]
+
+    @APP.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        return _prompt_definitions()
+
+    @APP.get_prompt()
+    async def get_prompt(
+        name: str,
+        arguments: dict[str, str] | None,
+    ) -> GetPromptResult:
+        return _get_mcp_prompt(name, arguments)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,26 +1013,62 @@ _GRAPH_MIME = {
 }
 
 
-async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
+def _json_result(payload: dict[str, Any], text_payload: Any | None = None) -> Any:
+    """Return structured MCP content while preserving a JSON text block."""
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(payload if text_payload is None else text_payload),
+            )
+        ],
+        structuredContent=payload,
+        isError=False,
+    )
+
+
+def _error_result(message: str, *, kind: str = "tool_error") -> Any:
+    payload = {"error": message, "kind": kind}
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload))],
+        structuredContent=payload,
+        isError=True,
+    )
+
+
+async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
     try:
         if name == "stata_run":
             return _run_tool(arguments)
         if name == "stata_info":
-            return [TextContent(type="text", text=await _info_payload_async())]
+            return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
             payload = get_log(arguments["ref"])
-            return [TextContent(type="text", text=json.dumps(payload))]
+            return _json_result(payload)
         if name == "get_graph":
+            ref = arguments["ref"]
             payload = get_graph(arguments["ref"])
             mime = _GRAPH_MIME.get(payload["format"], "image/png")
-            return [
-                ImageContent(
-                    type="image", data=payload["bytes_b64"], mimeType=mime
-                )
-            ]
+            metadata = {
+                "ref": ref,
+                "format": payload["format"],
+                "mimeType": mime,
+                "width": payload["width"],
+                "height": payload["height"],
+            }
+            return CallToolResult(
+                content=[
+                    ImageContent(
+                        type="image", data=payload["bytes_b64"], mimeType=mime
+                    ),
+                    TextContent(type="text", text=json.dumps(metadata)),
+                ],
+                structuredContent=metadata,
+                isError=False,
+            )
         if name == "get_matrix":
             payload = get_matrix(arguments["ref"])
-            return [TextContent(type="text", text=json.dumps(payload))]
+            return _json_result(payload)
         if name == "list_sessions":
             # In subprocess-pool mode each session lives in its own worker
             # process, so the parent's `list_sessions()` (which queries the
@@ -318,7 +1078,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             # or unresponsive workers are skipped silently — partial info
             # beats failing the whole list call.
             sessions = get_default_pool().list_session_info()
-            return [TextContent(type="text", text=json.dumps(sessions))]
+            return _json_result({"sessions": sessions}, text_payload=sessions)
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
             was_pending = not cancel(sid)  # cancel() returns False if already pending
@@ -326,19 +1086,14 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             # call that's blocked inside Stata C-land actually terminates rather
             # than waiting for the next inter-command cooperative checkpoint.
             killed_worker = get_default_pool().kill_session(sid)
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "session_id": sid,
-                            "was_pending": was_pending,
-                            "is_pending": is_cancel_pending(sid),
-                            "killed_worker": killed_worker,
-                        }
-                    ),
-                )
-            ]
+            return _json_result(
+                {
+                    "session_id": sid,
+                    "was_pending": was_pending,
+                    "is_pending": is_cancel_pending(sid),
+                    "killed_worker": killed_worker,
+                }
+            )
         if name == "reset_session":
             sid = arguments.get("session_id", "main")
             # Pool-mode: killing the session's worker drops its data and
@@ -348,43 +1103,80 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
             # that ref-store entries this session produced stay valid in
             # the parent's `_refs` LRU until naturally evicted.
             dropped = get_default_pool().kill_session(sid)
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "session_id": sid,
-                            "dropped_frame": dropped,
-                        }
-                    ),
-                )
-            ]
-        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+            return _json_result(
+                {
+                    "session_id": sid,
+                    "dropped_frame": dropped,
+                }
+            )
+        if name == "notebook_outline":
+            return _notebook_outline_tool(arguments)
+        if name == "notebook_get_cell":
+            return _notebook_get_cell_tool(arguments)
+        return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
+    except NotebookError as exc:
+        # Message starts with a stable kind prefix like "notebook_not_found:".
+        msg = str(exc)
+        kind, _, _ = msg.partition(":")
+        return _error_result(msg, kind=kind or "notebook_error")
     except KeyError as exc:
-        return [TextContent(type="text", text=f"Unknown ref: {exc}")]
+        return _error_result(f"Unknown ref: {exc}", kind="unknown_ref")
     except PystataNotAvailable as exc:
-        return [TextContent(type="text", text=f"Stata not available: {exc}")]
+        return _error_result(f"Stata not available: {exc}", kind="stata_unavailable")
     except (ValueError, NotImplementedError) as exc:
-        return [TextContent(type="text", text=f"{type(exc).__name__}: {exc}")]
+        return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
     except Exception as exc:  # noqa: BLE001 - last-resort safety net
-        return [TextContent(type="text", text=f"Error: {type(exc).__name__}: {exc}")]
+        return _error_result(f"Error: {type(exc).__name__}: {exc}", kind="internal_error")
 
 
-def _run_tool(arguments: dict[str, Any]) -> list[Any]:
+def _run_tool(arguments: dict[str, Any]) -> Any:
     args = dict(arguments)
     code = args.pop("code", None)
     if not code:
-        return [TextContent(type="text", text='{"error": "code is required"}')]
+        return _error_result("code is required", kind="missing_argument")
     try:
         result = pool_execute(code, **args)
     except (ValueError, NotImplementedError) as exc:
-        return [
-            TextContent(
-                type="text",
-                text=json.dumps({"error": f"{type(exc).__name__}: {exc}"}),
-            )
-        ]
-    return [TextContent(type="text", text=result.model_dump_json())]
+        return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
+    payload = json.loads(result.model_dump_json())
+    return _json_result(payload)
+
+
+def _notebook_outline_tool(arguments: dict[str, Any]) -> Any:
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path:
+        return _error_result("path is required", kind="missing_argument")
+    preview_lines = arguments.get("preview_lines", 2)
+    if not isinstance(preview_lines, int) or preview_lines < 0:
+        return _error_result(
+            "preview_lines must be a non-negative integer",
+            kind="invalid_request",
+        )
+    payload = _notebook_outline(path, preview_lines=preview_lines)
+    return _json_result(payload)
+
+
+def _notebook_get_cell_tool(arguments: dict[str, Any]) -> Any:
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path:
+        return _error_result("path is required", kind="missing_argument")
+    cell_id = arguments.get("cell_id")
+    cell_index = arguments.get("cell_index")
+    if cell_id is None and cell_index is None:
+        return _error_result(
+            "either cell_id or cell_index is required",
+            kind="missing_argument",
+        )
+    if cell_id is not None and not isinstance(cell_id, str):
+        return _error_result("cell_id must be a string", kind="invalid_request")
+    if cell_index is not None and not isinstance(cell_index, int):
+        return _error_result("cell_index must be an integer", kind="invalid_request")
+    payload = _notebook_get_cell(
+        path,
+        cell_id=cell_id,
+        cell_index=cell_index,
+    )
+    return _json_result(payload)
 
 
 async def _info_payload_async() -> str:
@@ -394,18 +1186,41 @@ async def _info_payload_async() -> str:
 def _info_payload_from_pool() -> str:
     try:
         stata = pool_stata_info()
-    except Exception:  # noqa: BLE001 - unavailable Stata should be reported as data
-        return json.dumps(
-            {
-                "available": False,
-                "schema_version": "1.0",
-                "capabilities": [],
-            }
-        )
+    except Exception as exc:  # noqa: BLE001
+        # PystataNotAvailable from the worker is the legitimate "Stata not
+        # installed" case — report cleanly. Other failures (subprocess crash,
+        # timeout, broken pipe) also surface as available=false so existing
+        # clients keep their happy path, but we attach an `error` field so
+        # users can distinguish operational problems from "no Stata here".
+        payload: dict[str, Any] = {
+            "available": False,
+            "schema_version": "1.0",
+            "capabilities": [],
+        }
+        if not _is_pystata_unavailable_error(exc):
+            payload["error"] = f"{type(exc).__name__}: {exc}"
+        return json.dumps(payload)
 
     edition = stata.get("edition")
     edition_alias = edition.lower() if isinstance(edition, str) else None
     return _info_payload_from_stata(stata, edition_alias=edition_alias)
+
+
+def _is_pystata_unavailable_error(exc: BaseException) -> bool:
+    """Return True iff ``exc`` ultimately means "pystata couldn't be loaded".
+
+    The worker formats its errors as ``f"{type(exc).__name__}: {exc}"`` and
+    ``send_simple_op`` wraps that as ``"worker reported failure: <error>"``.
+    A ``PystataNotAvailable`` raised directly in the parent process matches
+    the same ``"PystataNotAvailable: …"`` pattern. We anchor on the exact
+    class-name prefix to avoid matching unrelated errors that happen to
+    mention the word in passing (e.g. a debug message).
+    """
+    if isinstance(exc, PystataNotAvailable):
+        return True
+    text = str(exc)
+    name = PystataNotAvailable.__name__
+    return f"{name}:" in text or text == name
 
 
 def _info_payload() -> str:

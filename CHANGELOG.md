@@ -16,18 +16,31 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   current heading to the next equal/higher heading. Existing `Cmd/Ctrl+Enter`
   also runs a section when the cursor is on a section heading.
 - **VSCode editing aids.** Added Stata command/function/variable completion,
-  configured custom command completions, conservative F2 variable rename,
+  configured custom command completions, conservative F2 variable rename
+  (skips line/block comments, string literals, and ``` `macro' ``` references),
   `Stata: Open Help for Selection`, and `Stata: Insert Line Continuation`
   for `///` blocks.
 - **Runtime discovery.** `pystata` discovery now honors
   `STATA_CODE_PYSTATA_PATH`, `PYSTATA_PATH`, `STATA_HOME`, `STATA_PATH`,
   and `STATA_CLI`, and includes Stata 19 / StataNow default locations.
+- **Capability advertising.** `stata_info` now lists `subprocess_timeout`
+  alongside the existing capability strings so clients can detect that the
+  server isolates Stata in a worker process and enforces hard wall-clock
+  timeouts.
+- **Agent-native MCP surface.** The MCP server now advertises tool
+  `outputSchema` metadata, returns `structuredContent` alongside JSON text for
+  compatibility, exposes RunResult/log/graph/matrix/session resources, and
+  ships workflow prompts for validation, debugging, repair loops, replication
+  audits, and estimation summaries.
 
 ### Changed
 
 - **`stata_info` payload is richer.** It now returns a nested `stata`
   object with version/edition/backend plus the supported capabilities list,
-  while retaining the older flat aliases for compatibility.
+  while retaining the older flat aliases for compatibility. Operational
+  failures (worker timeout / crash) now report `available: false` together
+  with an `error` field so callers can tell them apart from genuine
+  "Stata not installed".
 - **Jupyter completions inspect live context.** The kernel now completes
   variables from the last result's dataset and `do_inspect` reports variable
   type/label metadata when available.

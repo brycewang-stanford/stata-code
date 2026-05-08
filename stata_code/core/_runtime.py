@@ -221,31 +221,55 @@ def _candidate_pystata_paths() -> list[str]:
 
 
 def _normalize_pystata_candidate(raw: str) -> list[str]:
-    """Expand one user-supplied Stata/pystata path into utilities candidates."""
+    """Expand one user-supplied Stata/pystata path into ``utilities`` candidates.
+
+    Accepts any of:
+      - a direct ``utilities`` directory,
+      - a ``utilities/pystata`` package directory,
+      - a Stata install root (we append ``/utilities``),
+      - a macOS ``.app`` bundle (use its parent's ``utilities``),
+      - the Stata executable path (walk up a few levels to reach the root).
+
+    Junk inputs still expand into a few candidate strings; the caller filters
+    them by stat-checking ``<candidate>/pystata``. We deliberately do not walk
+    the entire ancestor chain — that produced bogus paths like ``/utilities``
+    on Linux and slowed discovery on network filesystems.
+    """
     value = raw.strip().strip('"').strip("'")
     if not value:
         return []
 
     path = Path(value).expanduser()
-    bases: list[Path] = [path]
-    if path.suffix.lower() == ".app":
-        bases.append(path.parent)
-    if path.name.lower() == "pystata":
-        bases.append(path.parent)
-    if path.name.lower() != "utilities":
-        bases.append(path / "utilities")
-    if path.is_file():
-        bases.append(path.parent)
-    bases.extend(path.parents)
-
+    name = path.name.lower()
     out: list[str] = []
-    for base in bases:
-        if base.name.lower() == "pystata":
-            out.append(str(base.parent))
-        elif base.name.lower() == "utilities":
-            out.append(str(base))
-        else:
-            out.append(str(base / "utilities"))
+
+    if name == "pystata":
+        out.append(str(path.parent))
+        return _dedupe(out)
+    if name == "utilities":
+        out.append(str(path))
+        return _dedupe(out)
+
+    # Treat as a Stata install root or .app bundle.
+    out.append(str(path / "utilities"))
+    if path.suffix.lower() == ".app":
+        out.append(str(path.parent / "utilities"))
+    # If the user supplied the Stata executable (e.g.
+    # ``…/Stata.app/Contents/MacOS/Stata``), climb a small, bounded number of
+    # parents — enough to escape the .app bundle and reach the install root.
+    # When we encounter a ``.app`` parent we also explicitly emit *its* parent
+    # ``/utilities`` (which is the canonical macOS layout) and stop, so we
+    # don't keep climbing into OS noise like ``/Applications``. We also stop
+    # at the filesystem root so we never emit ``/utilities``.
+    for parent in list(path.parents)[:4]:
+        if not parent.name:
+            break
+        out.append(str(parent / "utilities"))
+        if parent.suffix.lower() == ".app":
+            grandparent = parent.parent
+            if grandparent.name:
+                out.append(str(grandparent / "utilities"))
+            break
     return _dedupe(out)
 
 

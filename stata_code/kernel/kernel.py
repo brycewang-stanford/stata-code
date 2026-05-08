@@ -247,6 +247,8 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
         self, code: str, cursor_pos: int, detail_level: int = 0
     ) -> dict[str, Any]:
         word, word_start, word_end = _word_at_cursor(code, cursor_pos)
+        if not word:
+            return {"status": "ok", "found": False}
         if self._last_result and self._last_result.dataset.variables:
             for variable in self._last_result.dataset.variables:
                 if variable.name == word:

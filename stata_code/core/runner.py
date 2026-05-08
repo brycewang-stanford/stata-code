@@ -49,6 +49,7 @@ from stata_code.core.schema import (
     LogFileInfo,
     LogInfo,
     Matrix,
+    OriginInfo,
     ResultsInfo,
     RunResult,
     StataEdition,
@@ -695,6 +696,7 @@ def execute(
     origin_path: str | None = None,
     origin_kind: str | None = None,
     origin_label: str | None = None,
+    origin_cell_id: str | None = None,
     use_origin_workdir: bool = True,
     working_dir: str | None = None,
 ) -> RunResult:
@@ -708,6 +710,13 @@ def execute(
     observations), but `r()`, `e()`, scalars, and macros remain global
     across frames — agents needing full isolation should use separate
     processes.
+
+    Origin metadata (`origin_path`, `origin_kind`, `origin_label`,
+    `origin_cell_id`) is opaque to the execution path. Whatever the caller
+    supplies is echoed back in ``result.origin``. The on-disk run-bundle
+    manifest also records these fields, but **only when** ``persist_log_files``
+    is true *and* ``origin_path`` is provided — supplying ``origin_cell_id``
+    alone (no path) yields an echo on the result but no manifest entry.
     """
     if include_graphs not in ("ref", "inline", "none"):
         raise ValueError(
@@ -855,6 +864,7 @@ def execute(
                 origin_path=origin_path,
                 origin_kind=origin_kind,
                 origin_label=origin_label,
+                origin_cell_id=origin_cell_id,
                 request_id=request_id,
                 session_id=session_id,
                 started_at=started_at,
@@ -889,6 +899,17 @@ def execute(
                 )
             )
 
+    origin_echo = (
+        OriginInfo(
+            path=origin_path,
+            kind=origin_kind,
+            label=origin_label,
+            cell_id=origin_cell_id,
+        )
+        if any(v is not None for v in (origin_path, origin_kind, origin_label, origin_cell_id))
+        else None
+    )
+
     return RunResult(
         ok=ok,
         rc=top_rc,
@@ -904,6 +925,7 @@ def execute(
         graphs=graphs,
         warnings=warnings,
         error=error,
+        origin=origin_echo,
         capabilities=capabilities,
     )
 

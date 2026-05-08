@@ -114,3 +114,41 @@ The extension auto-discovers a Python interpreter for the MCP server in this ord
 
 The MCP client is reset whenever `stataCode.*` settings change so users don't have
 to reload the window.
+
+## Notebook cell repair loop (Phase 1)
+
+`stata_run` is intentionally cell-agnostic: it accepts a code string and a few
+optional `origin_*` fields, and returns a `RunResult`. Per-cell repair on
+`.ipynb` works by composing it with two read-only helpers and the new
+`origin_cell_id` echo:
+
+| Tool | Use |
+| --- | --- |
+| `notebook_outline(path)` | Compact per-cell index — `cell_id`, type, preview, line/char counts, has-error flag. Read this once; do not pull whole cells into context. |
+| `notebook_get_cell(path, cell_id=…)` | Full source of one cell + a token-economic outputs summary (count, types, error ename/evalue, head/tail of stream/text outputs, traceback head/tail). |
+| `stata_run(code=<source>, origin_path=<.ipynb>, origin_kind="cell", origin_cell_id=<cell_id>)` | Execute one cell. The runner does not interpret these origin fields — they are echoed in `result.origin` and recorded in the run-bundle manifest, so the agent's call history is traceable back to the cell without the protocol becoming notebook-aware. |
+
+Recommended loop (opt-in; never run without an explicit "fix and rerun" request):
+
+1. Identify the target cell — IDE selection > `cell_id` from `notebook_outline`
+   > snippet match the user pasted. If genuinely ambiguous, ask the user.
+2. `notebook_get_cell(path, cell_id)` → `source`.
+3. `stata_run(code=source, origin_path=path, origin_kind="cell", origin_cell_id=cell_id)`.
+4. On failure:
+   - `error.line` is **already cell-relative** because the agent submitted the
+     cell's source verbatim — no off-by-one math against the notebook file.
+   - `error.context.failing` is the failing command line; use it as a content
+     fingerprint when the user describes the failure later.
+5. If the user authorised repairs, propose an edit. Phase 1 has no
+   `notebook_edit_cell` tool yet — surface the patch and let the user apply it,
+   or use the IDE's notebook editor. Phase 2 will add atomic edit tools.
+6. Repeat from step 3 with a small retry budget (default 3). If still failing,
+   stop and recommend `restart kernel + run all from top` — repeated failure
+   on a single cell is usually upstream-state pollution, not a code bug.
+
+Non-goals for Phase 1:
+
+- No notebook-wide execution (`notebook_run_all`). Per-cell stays the unit.
+- No execution-count tracking in the protocol — that's a kernel/UI concern.
+- No new `error` schema fields. `error.line` and `error.context` already work
+  cell-relative when the agent submits one cell at a time.

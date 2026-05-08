@@ -576,6 +576,62 @@
       "title": "Matrix",
       "type": "object"
     },
+    "OriginInfo": {
+      "additionalProperties": true,
+      "description": "Echo of the editor-side origin metadata supplied with the request.\n\nPure round-trip \u2014 the runner does not interpret these fields beyond\nforwarding ``path``/``kind``/``label`` to the on-disk run-bundle manifest.\nNotebook-aware agents set ``cell_id`` to a stable nbformat 4.5+ UUID so\nthey can correlate ``stata_run`` calls with notebook cells without the\nMCP protocol itself becoming notebook-aware.",
+      "properties": {
+        "cell_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cell Id"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "title": "OriginInfo",
+      "type": "object"
+    },
     "ResultsInfo": {
       "additionalProperties": true,
       "properties": {
@@ -789,6 +845,17 @@
     "ok": {
       "title": "Ok",
       "type": "boolean"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OriginInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "rc": {
       "title": "Rc",

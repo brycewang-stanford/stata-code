@@ -263,6 +263,22 @@ class StataWarning(_Base):
         return _truncate(v, _WARNING_MAX)
 
 
+class OriginInfo(_Base):
+    """Echo of the editor-side origin metadata supplied with the request.
+
+    Pure round-trip — the runner does not interpret these fields beyond
+    forwarding ``path``/``kind``/``label`` to the on-disk run-bundle manifest.
+    Notebook-aware agents set ``cell_id`` to a stable nbformat 4.5+ UUID so
+    they can correlate ``stata_run`` calls with notebook cells without the
+    MCP protocol itself becoming notebook-aware.
+    """
+
+    path: str | None = None
+    kind: str | None = None
+    label: str | None = None
+    cell_id: str | None = None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Top-level
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,6 +305,7 @@ class RunResult(_Base):
     graphs: list[GraphInfo] = Field(default_factory=list)
     warnings: list[StataWarning] = Field(default_factory=list)
     error: ErrorInfo | None = None
+    origin: OriginInfo | None = None
 
     schema_version: Literal["1.0"] = "1.0"
     capabilities: list[str] = Field(default_factory=list)

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 
+import { computeRenameSkipMask, isCommentPrefix } from "./renameMask";
 import type { RunResult } from "./types/runResult";
 
 export const STATA_SECTION_RE = /^\s*\*{1,2}\s*(#{1,6})\s*(.*?)\s*$/;
@@ -285,16 +286,24 @@ export class StataRenameProvider implements vscode.RenameProvider {
 
     const edit = new vscode.WorkspaceEdit();
     const pattern = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, "g");
+    let blockOpen = false;
     for (let i = 0; i < document.lineCount; i++) {
       const line = document.lineAt(i);
-      if (isCommentPrefix(line.text)) continue;
+      const skip = computeRenameSkipMask(line.text, blockOpen);
+      blockOpen = skip.blockOpen;
+      if (skip.skipWholeLine) continue;
       for (const match of line.text.matchAll(pattern)) {
         if (match.index === undefined) continue;
+        const matchStart = match.index;
+        const matchEnd = matchStart + oldName.length;
+        if (skip.ranges.some(([s, e]) => matchStart < e && matchEnd > s)) {
+          continue;
+        }
         edit.replace(
           document.uri,
           new vscode.Range(
-            new vscode.Position(i, match.index),
-            new vscode.Position(i, match.index + oldName.length),
+            new vscode.Position(i, matchStart),
+            new vscode.Position(i, matchEnd),
           ),
           newName,
         );
@@ -441,8 +450,11 @@ function findSectionEnd(
 }
 
 function cleanSectionTitle(raw: string, line: number): string {
-  const withoutNumber = raw.trim().replace(/^\d+(?:\.\d+)*\s+/, "");
-  const withoutDecor = withoutNumber
+  // Strip decorative borders (e.g. ``=== Title ===``, ``--- Title ---``) but
+  // keep numeric prefixes like ``1.2 Title`` — users often number sections
+  // intentionally and the outline should preserve their hierarchy markers.
+  const withoutDecor = raw
+    .trim()
     .replace(/^[\s=*_#.-]+/, "")
     .replace(/[\s=*_#.-]+$/, "")
     .trim();
@@ -546,7 +558,3 @@ function identifierAtCursor(editor: vscode.TextEditor): string | undefined {
   return STATA_IDENTIFIER_RE.test(text) ? text : undefined;
 }
 
-function isCommentPrefix(text: string): boolean {
-  const trimmed = text.trimStart();
-  return trimmed.startsWith("*") || trimmed.startsWith("//");
-}

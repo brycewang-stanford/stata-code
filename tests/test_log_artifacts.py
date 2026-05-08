@@ -58,9 +58,39 @@ def test_persist_run_log_files_creates_immutable_run_bundle(tmp_path: Path) -> N
     manifest = json.loads(Path(info.manifest_path).read_text(encoding="utf-8"))
     assert manifest["source_path"] == str(do_file)
     assert manifest["origin_kind"] == "file"
+    assert manifest["origin_cell_id"] is None
     assert manifest["working_dir"] == str(tmp_path)
     assert manifest["request_id"] == "abcdef1234567890"
     assert manifest["files"]["log"] == info.log_path
+
+
+def test_persist_run_log_files_records_origin_cell_id(tmp_path: Path) -> None:
+    nb = tmp_path / "analysis.ipynb"
+    nb.write_text("{}", encoding="utf-8")  # placeholder; runner only uses the path
+
+    info = persist_run_log_files(
+        log_text=" 2\n",
+        code="di 1+1\n",
+        origin_path=str(nb),
+        origin_kind="cell",
+        origin_label="analysis.ipynb:cell-3",
+        origin_cell_id="8f2c1a40-1f3d-4b7e-9a1b-bd3a17a90c33",
+        request_id="cellrun01abcdef",
+        session_id="main",
+        started_at="2026-05-08T02:00:00.000Z",
+        elapsed_ms=5,
+        rc=0,
+        ok=True,
+        stata=_stata(),
+        working_dir=str(tmp_path),
+    )
+
+    manifest = json.loads(Path(info.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["origin_kind"] == "cell"
+    assert manifest["origin_cell_id"] == "8f2c1a40-1f3d-4b7e-9a1b-bd3a17a90c33"
+
+    log_text = Path(info.log_path).read_text(encoding="utf-8")
+    assert "origin_cell_id: 8f2c1a40-1f3d-4b7e-9a1b-bd3a17a90c33" in log_text
 
 
 def test_persist_run_log_files_does_not_overwrite_existing_bundle(tmp_path: Path) -> None:

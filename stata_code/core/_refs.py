@@ -90,6 +90,18 @@ def size() -> int:
         return len(_store)
 
 
+def keys() -> list[str]:
+    """Return current refs in LRU order, oldest first."""
+    with _lock:
+        return list(_store.keys())
+
+
+def snapshot() -> list[tuple[str, Any]]:
+    """Return current refs and payloads without touching LRU order."""
+    with _lock:
+        return list(_store.items())
+
+
 def _evict_to_capacity_locked() -> None:
     """Drop oldest entries until len(_store) <= _max_entries. Caller holds _lock."""
     while len(_store) > _max_entries:

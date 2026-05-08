@@ -197,6 +197,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | `graphs` | `array` | yes | Captured graphs; see §3.6. May be empty. |
 | `warnings` | `array<Warning>` | yes | Non-fatal advisories. See §3.8. De-duplicated by `(kind, message)`. |
 | `error` | `object \| null` | yes | `null` iff `ok: true`. See §3.7. |
+| `origin` | `object \| null` | no | Echo of the editor-side origin metadata supplied with the request (`origin_path`, `origin_kind`, `origin_label`, `origin_cell_id`). `null` when the caller provided none. See §3.9. |
 | `schema_version` | `string` | yes | Semver-major + minor. v1.0 producers emit `"1.0"`. See §6. |
 | `capabilities` | `array<string>` | yes | Optional features the producer supports beyond v1.0 baseline. See §6 for the registry. |
 
@@ -213,6 +214,13 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | `version` | `string \| null` | E.g. `"18.0"`, `"17.5"`. `null` when the producer cannot determine it. |
 | `edition` | `"MP" \| "SE" \| "IC" \| "BE" \| "unknown"` | Stata 17+ shipped `BE` in place of `IC`; both values may be observed depending on which Stata is installed. Agents reasoning about edition limits (e.g., `BE` = 2,048 vars) MUST also check `version`. |
 | `backend` | `"pystata" \| "console"` | Which adapter executed the code. Open enum: future backends may add values. |
+
+> **Edition casing in `stata_info`.** The MCP `stata_info` tool returns the
+> normalized form (`"MP"`, `"SE"`, `"IC"`, `"BE"`, `"unknown"`) inside the
+> nested `stata.edition` field. For backward compatibility it also exposes a
+> flat top-level `edition` field that mirrors the *raw* runtime value
+> (lower-case, e.g. `"mp"`). New clients should prefer `stata.edition`; the
+> flat alias is kept so older clients keep working.
 
 ### 3.3 `log`
 
@@ -442,6 +450,28 @@ The rc-to-kind table is approximate and lives in code (`stata_code.core.errors`)
 
 Warnings are de-duplicated by `(kind, message)`.
 
+### 3.9 `origin`
+
+```json
+{
+  "path": "/abs/path/to/notebook.ipynb",
+  "kind": "cell",
+  "label": "demo/analysis.ipynb:cell-3",
+  "cell_id": "8f2c1a40-1f3d-4b7e-9a1b-bd3a17a90c33"
+}
+```
+
+Pure round-trip echo of the editor-side origin metadata supplied with the request. The runner does not interpret these fields beyond forwarding them to the on-disk run-bundle manifest. Consumers MAY use them to correlate `stata_run` calls with editor surfaces (file, selection, notebook cell) without the protocol itself becoming notebook-aware.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `path` | `string \| null` | Absolute path of the source surface (`.do`, `.ipynb`, …). |
+| `kind` | `string \| null` | Open enum. Common values: `file`, `selection`, `line`, `cell`, `section`, `code`, `unknown`. |
+| `label` | `string \| null` | Human-readable label (e.g. `demo/test1.do:1`). |
+| `cell_id` | `string \| null` | Stable nbformat 4.5+ cell id when the code is one cell of a `.ipynb`. Producers do not assign or validate this — it round-trips whatever the caller supplied. |
+
+The whole `origin` object is `null` iff the caller supplied none of `origin_path`, `origin_kind`, `origin_label`, `origin_cell_id`. Older producers that don't populate `origin` MAY emit `null` here; consumers MUST tolerate both the `null` and the fully-populated cases.
+
 ---
 
 ## 4. Request-side options
@@ -461,9 +491,12 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | `timeout_ms` | `int \| null` | `600000` (10 min) | Hard timeout. `null` disables. On expiry, returns `ok: false`, `error.kind: "timeout"`, `rc: -2`. Frontends MAY override the default if their use case demands. |
 | `persist_log_files` | `bool` | `false` | With `origin_path`, writes immutable `.log` / `.smcl` / manifest files under the source `.do` file's `log-files/` directory. |
 | `persist_generated_files` | `bool` | `true` | When log files are persisted, also copies newly created or modified table/export files into `outputs/` and captured graphs into `graphs/`. |
-| `origin_path` | `string \| null` | `null` | Absolute source `.do` path used for working-directory defaults and run-bundle placement. |
-| `use_origin_workdir` | `bool` | `true` | With `origin_path`, `cd` Stata to the source `.do` directory before running. |
-| `working_dir` | `string \| null` | `null` | Explicit Stata working directory; overrides the source `.do` directory. |
+| `origin_path` | `string \| null` | `null` | Absolute source `.do` (or `.ipynb`) path used for working-directory defaults and run-bundle placement. |
+| `origin_kind` | `string \| null` | `null` | Editor surface that produced the code (`"file"`, `"selection"`, `"line"`, `"cell"`, `"section"`, `"code"`, `"unknown"`). Echoed in `result.origin` and the run-bundle manifest. |
+| `origin_label` | `string \| null` | `null` | Human-readable source label, e.g. `demo/test1.do:1`. Echoed in `result.origin` and the run-bundle manifest. |
+| `origin_cell_id` | `string \| null` | `null` | Stable nbformat 4.5+ cell id when the code is one cell of a `.ipynb`. Pure metadata: not interpreted by the runner; echoed in `result.origin` and recorded in the run-bundle manifest so notebook-aware agents can correlate runs with cells without the protocol becoming notebook-aware. |
+| `use_origin_workdir` | `bool` | `true` | With `origin_path`, `cd` Stata to the source directory before running. |
+| `working_dir` | `string \| null` | `null` | Explicit Stata working directory; overrides the source directory. |
 
 Frontends translate their native idiom (MCP `inputSchema`, Jupyter kernel options, VSCode commands) into these names without renaming.
 

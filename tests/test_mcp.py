@@ -10,11 +10,27 @@ import pytest
 
 pytest.importorskip("mcp", reason="mcp package not installed")
 
-from mcp.types import ImageContent, TextContent  # noqa: E402
+from mcp.types import CallToolResult, ImageContent, TextContent  # noqa: E402
 
 from stata_code.core._runtime import is_available  # noqa: E402
 
 _real_stata = is_available()
+
+
+def _text_items(result):
+    if isinstance(result, CallToolResult):
+        return [item for item in result.content if isinstance(item, TextContent)]
+    return [item for item in result if isinstance(item, TextContent)]
+
+
+def _image_items(result):
+    if isinstance(result, CallToolResult):
+        return [item for item in result.content if isinstance(item, ImageContent)]
+    return [item for item in result if isinstance(item, ImageContent)]
+
+
+def _json_body(result):
+    return json.loads(_text_items(result)[0].text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,12 +73,41 @@ class TestToolRegistry:
         assert "origin_path" in schema["properties"]
         assert "use_origin_workdir" in schema["properties"]
         assert "working_dir" in schema["properties"]
+        assert run.outputSchema is not None
+        assert run.annotations is not None
+        assert run.annotations.readOnlyHint is False
+        assert run.annotations.destructiveHint is True
 
     def test_get_graph_schema_requires_ref(self):
         from stata_code.mcp.server import _tool_definitions
 
         gg = next(t for t in _tool_definitions() if t.name == "get_graph")
         assert "ref" in gg.inputSchema["required"]
+        assert gg.outputSchema is not None
+        assert gg.annotations is not None
+        assert gg.annotations.readOnlyHint is True
+
+    def test_resource_templates_include_ref_shapes(self):
+        from stata_code.mcp.server import _resource_templates
+
+        templates = {tmpl.name: tmpl for tmpl in _resource_templates()}
+        assert templates["stata_log_ref"].uriTemplate == "log://{request_id}"
+        assert templates["stata_graph_ref"].uriTemplate == "graph://{request_id}/{index}"
+        assert (
+            templates["stata_matrix_ref"].uriTemplate
+            == "matrix://{request_id}/{scope}/{name}"
+        )
+
+    def test_prompts_include_agent_workflows(self):
+        from stata_code.mcp.server import _prompt_definitions
+
+        prompts = {prompt.name: prompt for prompt in _prompt_definitions()}
+        assert "run_do_file_and_report" in prompts
+        assert "debug_stata_error" in prompts
+        assert "fix_and_rerun_until_passes" in prompts
+        assert "replication_audit" in prompts
+        assert "summarize_estimation_results" in prompts
+        assert prompts["run_do_file_and_report"].arguments[0].name == "path"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,31 +120,29 @@ class TestDispatch:
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("nonexistent_tool", {}))
-        assert len(out) == 1
-        assert isinstance(out[0], TextContent)
-        assert "Unknown tool" in out[0].text
+        assert out.isError is True
+        assert "Unknown tool" in _text_items(out)[0].text
 
     def test_get_log_unknown_ref_returns_error_text(self):
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("get_log", {"ref": "log://does-not-exist"}))
-        assert len(out) == 1
-        assert isinstance(out[0], TextContent)
-        assert "Unknown ref" in out[0].text
+        assert out.isError is True
+        assert "Unknown ref" in _text_items(out)[0].text
 
     def test_get_graph_unknown_ref_returns_error_text(self):
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("get_graph", {"ref": "graph://no/0"}))
-        assert len(out) == 1
-        assert "Unknown ref" in out[0].text
+        assert out.isError is True
+        assert "Unknown ref" in _text_items(out)[0].text
 
     def test_get_matrix_unknown_ref_returns_error_text(self):
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("get_matrix", {"ref": "matrix://no/r/M"}))
-        assert len(out) == 1
-        assert "Unknown ref" in out[0].text
+        assert out.isError is True
+        assert "Unknown ref" in _text_items(out)[0].text
 
     def test_get_matrix_known_ref_returns_payload(self):
         """Roundtrip: stash a payload via _refs and let dispatch deliver it."""
@@ -115,21 +158,84 @@ class TestDispatch:
             out = asyncio.run(_dispatch("get_matrix", {"ref": ref}))
         finally:
             _refs.discard(ref)
-        assert len(out) == 1
-        assert isinstance(out[0], TextContent)
-        body = json.loads(out[0].text)
+        assert out.isError is False
+        body = _json_body(out)
+        assert out.structuredContent == body
         assert body == {
             "rows": ["y1"],
             "cols": ["x1", "_cons"],
             "values": [[0.5, 1.0]],
         }
 
+    def test_resources_list_static_and_dynamic_refs(self):
+        from stata_code.core import _refs
+        from stata_code.mcp.server import _list_mcp_resources
+
+        ref = "matrix://resource-test/e/M"
+        _refs.put(ref, {"rows": ["r"], "cols": ["c"], "values": [[1.0]]})
+        try:
+            by_uri = {str(resource.uri): resource for resource in _list_mcp_resources()}
+        finally:
+            _refs.discard(ref)
+
+        assert "stata://schema/run-result" in by_uri
+        assert "stata://server/capabilities" in by_uri
+        assert "stata://sessions" in by_uri
+        assert by_uri[ref].mimeType == "application/json"
+
+    def test_read_static_schema_resource(self):
+        from stata_code.mcp.server import _read_resource_payload
+
+        content = _read_resource_payload("stata://schema/run-result")
+        assert content.mime_type == "application/schema+json"
+        body = json.loads(content.content)
+        assert body["title"] == "RunResult"
+        assert body["properties"]["ok"]["type"] == "boolean"
+
+    def test_read_matrix_resource(self):
+        from stata_code.core import _refs
+        from stata_code.mcp.server import _read_resource_payload
+
+        ref = "matrix://resource-test/e/M"
+        _refs.put(ref, {"rows": ["r"], "cols": ["c"], "values": [[1.0]]})
+        try:
+            content = _read_resource_payload(ref)
+        finally:
+            _refs.discard(ref)
+
+        assert content.mime_type == "application/json"
+        assert json.loads(content.content) == {
+            "rows": ["r"],
+            "cols": ["c"],
+            "values": [[1.0]],
+        }
+
+    def test_get_prompt_renders_workflow_arguments(self):
+        from stata_code.mcp.server import _get_mcp_prompt
+
+        prompt = _get_mcp_prompt(
+            "run_do_file_and_report",
+            {"path": "analysis/main.do", "session_id": "audit"},
+        )
+        assert prompt.description == "Run the Stata do-file and report"
+        text = prompt.messages[0].content.text
+        assert "analysis/main.do" in text
+        assert "audit" in text
+        assert "stata_run" in text
+        assert "Do not edit" not in text
+
+    def test_get_prompt_rejects_unknown_prompt(self):
+        from stata_code.mcp.server import _get_mcp_prompt
+
+        with pytest.raises(ValueError, match="Unknown prompt"):
+            _get_mcp_prompt("nope", {})
+
     def test_stata_run_missing_code_returns_error_json(self):
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("stata_run", {}))
-        assert len(out) == 1
-        body = json.loads(out[0].text)
+        assert out.isError is True
+        body = _json_body(out)
         assert "error" in body
 
     def test_stata_info_unavailable_shape(self, monkeypatch):
@@ -190,17 +296,77 @@ class TestDispatch:
 
         monkeypatch.setattr(server, "_info_payload_from_pool", slow_info)
 
-        async def probe() -> list[TextContent]:
+        async def probe() -> CallToolResult:
             task = asyncio.create_task(_dispatch_stata_info())
             await asyncio.sleep(0.01)
             assert not task.done()
             return await task
 
-        async def _dispatch_stata_info() -> list[TextContent]:
+        async def _dispatch_stata_info() -> CallToolResult:
             return await server._dispatch("stata_info", {})
 
         out = asyncio.run(probe())
-        assert json.loads(out[0].text) == json.loads(payload)
+        assert _json_body(out) == json.loads(payload)
+        assert out.structuredContent == json.loads(payload)
+
+    def test_info_payload_from_pool_happy_path(self, monkeypatch):
+        """The production path returns the merged shape from a worker dict."""
+        from stata_code.mcp import server
+
+        monkeypatch.setattr(
+            server,
+            "pool_stata_info",
+            lambda: {"version": "19.0", "edition": "MP", "backend": "pystata"},
+        )
+        body = json.loads(server._info_payload_from_pool())
+
+        assert body["available"] is True
+        assert body["stata"] == {
+            "version": "19.0",
+            "edition": "MP",
+            "backend": "pystata",
+        }
+        # Backward-compatible flat aliases use the lower-cased edition (matches
+        # the legacy raw rt.edition value).
+        assert body["edition"] == "mp"
+        assert body["version"] == "19.0"
+        assert "matrix_ref" in body["capabilities"]
+        assert "subprocess_timeout" in body["capabilities"]
+        assert "error" not in body
+
+    def test_info_payload_from_pool_pystata_not_available_clean(self, monkeypatch):
+        """A worker-side PystataNotAvailable error reports unavailable cleanly."""
+        from stata_code.mcp import server
+
+        def boom() -> dict:
+            raise RuntimeError(
+                "worker reported failure: PystataNotAvailable: pystata is not importable"
+            )
+
+        monkeypatch.setattr(server, "pool_stata_info", boom)
+        body = json.loads(server._info_payload_from_pool())
+
+        assert body == {
+            "available": False,
+            "schema_version": "1.0",
+            "capabilities": [],
+        }
+
+    def test_info_payload_from_pool_other_errors_include_diagnostic(self, monkeypatch):
+        """Operational errors (timeout, crash) surface as available=false + error."""
+        from stata_code.mcp import server
+
+        def boom() -> dict:
+            raise TimeoutError("worker hung past deadline")
+
+        monkeypatch.setattr(server, "pool_stata_info", boom)
+        body = json.loads(server._info_payload_from_pool())
+
+        assert body["available"] is False
+        assert body["capabilities"] == []
+        assert "error" in body
+        assert "TimeoutError" in body["error"]
+        assert "worker hung past deadline" in body["error"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,9 +381,9 @@ class TestEndToEnd:
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("stata_run", {"code": 'display "hello mcp"'}))
-        assert len(out) == 1
-        assert isinstance(out[0], TextContent)
-        body = json.loads(out[0].text)
+        assert out.isError is False
+        body = _json_body(out)
+        assert out.structuredContent == body
         assert body["ok"] is True
         assert body["schema_version"] == "1.0"
         assert "hello mcp" in body["log"]["head"]
@@ -229,7 +395,7 @@ class TestEndToEnd:
         # than "no variables defined" (state-dependent across tests).
         asyncio.run(_dispatch("stata_run", {"code": "sysuse auto, clear"}))
         out = asyncio.run(_dispatch("stata_run", {"code": "summarize mpgg"}))
-        body = json.loads(out[0].text)
+        body = _json_body(out)
         assert body["ok"] is False
         assert body["error"]["kind"] == "varname_not_found"
         assert body["error"]["varname"] == "mpgg"
@@ -238,7 +404,7 @@ class TestEndToEnd:
         from stata_code.mcp.server import _dispatch
 
         out = asyncio.run(_dispatch("stata_info", {}))
-        body = json.loads(out[0].text)
+        body = _json_body(out)
         assert body["available"] is True
         assert body["schema_version"] == "1.0"
         assert body["backend"] == "pystata"
@@ -260,12 +426,13 @@ class TestEndToEnd:
                 },
             )
         )
-        body = json.loads(run[0].text)
+        body = _json_body(run)
         assert body["log"]["truncated"] is True
         ref = body["log"]["ref"]
 
         out = asyncio.run(_dispatch("get_log", {"ref": ref}))
-        full = json.loads(out[0].text)
+        full = _json_body(out)
+        assert out.structuredContent == full
         assert full["lines_total"] >= 50
         assert "row=1" in full["text"]
         assert "row=50" in full["text"]
@@ -282,18 +449,19 @@ class TestEndToEnd:
                 {"code": "scatter price mpg, name(g_mcp)"},
             )
         )
-        body = json.loads(run[0].text)
+        body = _json_body(run)
         assert len(body["graphs"]) == 1
         ref = body["graphs"][0]["ref"]
 
         out = asyncio.run(_dispatch("get_graph", {"ref": ref}))
-        assert len(out) == 1
-        assert isinstance(out[0], ImageContent)
-        assert out[0].mimeType == "image/png"
+        images = _image_items(out)
+        assert len(images) == 1
+        assert images[0].mimeType == "image/png"
+        assert out.structuredContent["ref"] == ref
         # b64 decodes to PNG header
         import base64
 
-        raw = base64.b64decode(out[0].data)
+        raw = base64.b64decode(images[0].data)
         assert raw[:4] == b"\x89PNG"
 
     def test_list_and_reset_sessions(self):
@@ -307,7 +475,8 @@ class TestEndToEnd:
             )
         )
         out = asyncio.run(_dispatch("list_sessions", {}))
-        sessions = json.loads(out[0].text)
+        sessions = _json_body(out)
+        assert out.structuredContent["sessions"] == sessions
         by_id = {s["session_id"]: s for s in sessions}
         assert "mcp_test" in by_id
         # Pool aggregator round-trips to the worker, so n_obs reflects the
@@ -320,10 +489,10 @@ class TestEndToEnd:
 
         # Reset
         out = asyncio.run(_dispatch("reset_session", {"session_id": "mcp_test"}))
-        result = json.loads(out[0].text)
+        result = _json_body(out)
         assert result["dropped_frame"] is True
 
         out = asyncio.run(_dispatch("list_sessions", {}))
-        sessions = json.loads(out[0].text)
+        sessions = _json_body(out)
         ids = {s["session_id"] for s in sessions}
         assert "mcp_test" not in ids

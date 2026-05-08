@@ -33,7 +33,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.5 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 218 passing tests across schema, runner, MCP, kernel, and ref-store modules. License: **MIT**.
+**Status: v0.5 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 252 passing tests across schema, runner, MCP, kernel, and ref-store modules. License: **MIT**.
 
 Two workflows v0.5 explicitly supports for end users:
 
@@ -356,7 +356,7 @@ See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite (218 tests)
+pytest                              # full suite (252 tests)
 pytest -m "not stata_required"      # CI subset; no Stata needed
 pytest -m "stata_required" -v       # Stata-only integration tests
 ```
@@ -411,7 +411,7 @@ The Stata tooling landscape that this project builds on and learns from is surve
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.5（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：218 个 passing tests，覆盖 schema、runner、MCP、kernel 和 ref-store。许可证：**MIT**。
+**当前状态：v0.5（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：252 个 passing tests，覆盖 schema、runner、MCP、kernel 和 ref-store。许可证：**MIT**。
 
 v0.5 明确支持的两种用户工作流：
 
