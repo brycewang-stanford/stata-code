@@ -2,8 +2,8 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.3 (May 2026).** Full UI surface — title-bar Run button,
-> editor context menu, status bar with session/cancel actions, activity-bar
+> **Status: v0.3 (May 2026).** Full UI surface — orange Stata title-bar
+> buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / run history / logs / graphs panels,
 > inline error squigglies, code-lens cells, graph webview Save/Open actions,
 > run-bundle export, and Stata working-directory helpers. Source-only —
@@ -23,12 +23,14 @@ everything goes through MCP `stata_run`, `get_log`, `get_graph`,
 
 | Affordance | What it does |
 | --- | --- |
-| ▶ button in editor title bar | Run the active file |
-| Right-click menu → *Stata: Run Selection / Run Active File* | Same, from the editor |
+| Orange toolbar buttons in editor title bar | Run selection/current line, view data preview, stop, new tab, switch tab, restart, show output, and working-directory actions |
+| Run button in editor title bar | Run all / active file |
+| Right-click menu → *Stata: Run Selection / Run Active File / View Data Preview* | Same, from the editor |
 | Right-click menu → *Stata: Working Directory...* | Show or change Stata's current directory |
 | `Cmd/Ctrl+Enter` | Run selection (or current line if no selection) |
 | Inline `▶ Run Cell` code-lens above any `* %%` line | Run that cell |
 | Red squiggle on the failing line | After a failed run; hover to see the typed-error message and suggestions |
+| *Stata: View Data Preview* | Opens the first 100 observations from the active session as a side text document, plus dataset metadata and variables |
 
 **Cell convention.** A line whose trimmed text is `* %%` (optionally
 followed by a title, e.g. `* %% setup`) marks the start of a cell. The
@@ -44,6 +46,7 @@ actions:
 
 - New Stata tab… / Switch tab… (live sessions + locally-known
   "not started" tabs, plus *New tab…*)
+- View data preview
 - Export latest run / Open latest log / Show latest graphs
 - Working directory… / Show output channel
 - Cancel `<sid>` / Reset `<sid>` / Close tab `<sid>`
@@ -193,7 +196,8 @@ UI modules:
 
 - Marketplace publishing
 - `.do` notebook editor (kept deliberately minimal in favor of code-lens cells)
-- Matrix / dataset table views (sidebar shows summary; full editor not yet)
+- Full paged/filterable dataset table view (the current button is a first-100-row preview)
+- Rich matrix / dataset table formatting beyond TSV/text preview
 - Rich matrix formatting beyond TSV
 - Extension-host tests (planned)
 
