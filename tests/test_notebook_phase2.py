@@ -573,7 +573,7 @@ def test_delete_cell_upgrades_remaining_synth_ids(tmp_path: Path) -> None:
         assert not cell["id"].startswith("synth-")
 
 
-def test_edit_cell_upgrades_remaining_synth_ids(tmp_path: Path) -> None:
+def test_edit_cell_upgrades_target_synth_id_only(tmp_path: Path) -> None:
     path = _write_nb(
         tmp_path,
         [
@@ -586,5 +586,28 @@ def test_edit_cell_upgrades_remaining_synth_ids(tmp_path: Path) -> None:
 
     edit_cell(path, cell_id=target, new_source="x=99")
     cells = _read(path)["cells"]
-    for cell in cells:
-        assert not cell["id"].startswith("synth-")
+    assert not cells[0]["id"].startswith("synth-")
+    assert "id" not in cells[1]
+
+
+def test_edit_cell_keeps_other_synth_ids_usable_for_same_outline(
+    tmp_path: Path,
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+        ],
+    )
+    out = outline_notebook(path)
+    first_id = out["cells"][0]["cell_id"]
+    second_id = out["cells"][1]["cell_id"]
+
+    edit_cell(path, cell_id=first_id, new_source="x=10")
+    edit_cell(path, cell_id=second_id, new_source="x=20")
+
+    cells = _read(path)["cells"]
+    assert [c["source"] for c in cells] == ["x=10", "x=20"]
+    assert not cells[0]["id"].startswith("synth-")
+    assert not cells[1]["id"].startswith("synth-")

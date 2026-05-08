@@ -836,11 +836,6 @@ def edit_cell(
         )
 
     actual_id = _ensure_native_id(cell, index, current_source)
-    # Stabilise every other synth-id cell too. edit_cell does not shift
-    # indices, but a later insert/delete will — and callers that read the
-    # outline once and edit several cells in a row should not have their
-    # later handles silently invalidated.
-    _upgrade_all_pre_45_ids(cells)
     ctype = _cell_type(cell)
     cell["source"] = new_source
     if ctype == "code":
