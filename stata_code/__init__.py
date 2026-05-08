@@ -58,7 +58,7 @@ from stata_code.core.schema import (
 # Convenience alias: `run(...)` == `execute(...)`.
 run = execute
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 __all__ = [
     # Primary entry points

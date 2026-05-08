@@ -4,7 +4,47 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
-## [Unreleased]
+## [0.4.0] — 2026-05-07
+
+### Added
+
+- **Persistent per-run log bundles.** When a `.do` file path is supplied as
+  `origin_path`, the runner writes an immutable `log-files/<run>/` directory
+  next to the source file containing:
+  - `<run>.log` and `<run>.smcl` — Stata's textual and SMCL logs
+  - `manifest.json` — run metadata (elapsed_ms, rc, session, Stata edition)
+  - `submitted.do` — a snapshot of the code that was executed
+  - `graphs/` — captured graph files materialized from graph refs
+  - `outputs/` — newly created or modified table/export files copied from
+    the run's working directory
+
+  The directory name encodes UTC timestamp, session, and request IDs so
+  parallel runs and reruns are never ambiguous.
+
+- **Working-directory defaults from `origin_path`.** Before running,
+  Stata `cd`s to the `.do` file's parent so relative `graph export`,
+  `putexcel`, `esttab using`, `collect export`, etc. output next to the
+  source. Toggle with `use_origin_workdir` / `useDoFileDirectory` setting.
+  Explicit `working_dir` overrides this.
+
+- **Schema extensions.** `LogInfo.files` (`LogFileInfo`) carries the
+  bundle paths and derived `graphs_dir`/`outputs_dir`; `GraphInfo.file_path`
+  records where a graph was materialized; two new capabilities
+  `log_files` and `run_artifacts` signal support.
+
+- **MCP tool options.** `stata_run` gains `persist_log_files`,
+  `persist_generated_files`, `origin_path`, `origin_kind`,
+  `origin_label`, `use_origin_workdir`, `working_dir`.
+
+- **VS Code settings.** Three new configuration options:
+  `stataCode.persistLogFiles` (default `true`),
+  `stataCode.persistGeneratedFiles` (default `true`),
+  `stataCode.useDoFileDirectory` (default `true`).
+
+- **VS Code tree views.** The Last Result tree now shows "saved" and
+  "N outputs" badges on the log node when artifacts are present; the
+  output log header prints `working_dir:`, `log_file:`, `smcl_file:`,
+  `graphs_dir:`, `outputs_dir:` for each run.
 
 ### Changed
 
