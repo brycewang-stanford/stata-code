@@ -28,15 +28,21 @@
     "commands": [
       {
         "command": "stataCode.runSelection",
-        "title": "Stata: Run Selection",
+        "title": "Stata: Run Selection / Current Line",
         "category": "stata-code",
-        "icon": "$(play)"
+        "icon": {
+          "light": "resources/icons/stata-run-selection.svg",
+          "dark": "resources/icons/stata-run-selection.svg"
+        }
       },
       {
         "command": "stataCode.runFile",
-        "title": "Stata: Run Active File",
+        "title": "Stata: Run All / Active File",
         "category": "stata-code",
-        "icon": "$(play)"
+        "icon": {
+          "light": "resources/icons/stata-run-all.svg",
+          "dark": "resources/icons/stata-run-all.svg"
+        }
       },
       {
         "command": "stataCode.runCell",
@@ -57,6 +63,15 @@
         "command": "stataCode.openMatrix",
         "title": "Stata: Open Matrix",
         "category": "stata-code"
+      },
+      {
+        "command": "stataCode.viewDataPreview",
+        "title": "Stata: View Data Preview",
+        "category": "stata-code",
+        "icon": {
+          "light": "resources/icons/stata-data.svg",
+          "dark": "resources/icons/stata-data.svg"
+        }
       },
       {
         "command": "stataCode.rerunHistory",
@@ -86,13 +101,19 @@
         "command": "stataCode.showGraphs",
         "title": "Stata: Show Graphs",
         "category": "stata-code",
-        "icon": "$(graph)"
+        "icon": {
+          "light": "resources/icons/stata-graphs.svg",
+          "dark": "resources/icons/stata-graphs.svg"
+        }
       },
       {
         "command": "stataCode.showOutput",
         "title": "Stata: Show Output",
         "category": "stata-code",
-        "icon": "$(terminal)"
+        "icon": {
+          "light": "resources/icons/stata-output.svg",
+          "dark": "resources/icons/stata-output.svg"
+        }
       },
       {
         "command": "stataCode.statusBarMenu",
@@ -102,13 +123,20 @@
       {
         "command": "stataCode.switchSession",
         "title": "Stata: Switch Tab/Session...",
-        "category": "stata-code"
+        "category": "stata-code",
+        "icon": {
+          "light": "resources/icons/stata-switch-tab.svg",
+          "dark": "resources/icons/stata-switch-tab.svg"
+        }
       },
       {
         "command": "stataCode.newSession",
         "title": "Stata: New Tab/Session...",
         "category": "stata-code",
-        "icon": "$(add)"
+        "icon": {
+          "light": "resources/icons/stata-new-tab.svg",
+          "dark": "resources/icons/stata-new-tab.svg"
+        }
       },
       {
         "command": "stataCode.closeSession",
@@ -118,19 +146,30 @@
       },
       {
         "command": "stataCode.cancelSession",
-        "title": "Stata: Cancel Current Session",
-        "category": "stata-code"
+        "title": "Stata: Stop / Cancel Current Session",
+        "category": "stata-code",
+        "icon": {
+          "light": "resources/icons/stata-stop.svg",
+          "dark": "resources/icons/stata-stop.svg"
+        }
       },
       {
         "command": "stataCode.resetSession",
-        "title": "Stata: Reset Current Session",
-        "category": "stata-code"
+        "title": "Stata: Restart / Reset Current Session",
+        "category": "stata-code",
+        "icon": {
+          "light": "resources/icons/stata-reset.svg",
+          "dark": "resources/icons/stata-reset.svg"
+        }
       },
       {
         "command": "stataCode.workingDirectoryMenu",
         "title": "Stata: Working Directory...",
         "category": "stata-code",
-        "icon": "$(folder-opened)"
+        "icon": {
+          "light": "resources/icons/stata-folder.svg",
+          "dark": "resources/icons/stata-folder.svg"
+        }
       },
       {
         "command": "stataCode.showStataPwd",
@@ -264,6 +303,48 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "stataCode.runSelection",
+          "when": "resourceLangId == stata",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.viewDataPreview",
+          "when": "resourceLangId == stata",
+          "group": "navigation@2"
+        },
+        {
+          "command": "stataCode.cancelSession",
+          "when": "resourceLangId == stata",
+          "group": "navigation@3"
+        },
+        {
+          "command": "stataCode.newSession",
+          "when": "resourceLangId == stata",
+          "group": "navigation@4"
+        },
+        {
+          "command": "stataCode.switchSession",
+          "when": "resourceLangId == stata",
+          "group": "navigation@5"
+        },
+        {
+          "command": "stataCode.resetSession",
+          "when": "resourceLangId == stata",
+          "group": "navigation@6"
+        },
+        {
+          "command": "stataCode.showOutput",
+          "when": "resourceLangId == stata",
+          "group": "navigation@7"
+        },
+        {
+          "command": "stataCode.workingDirectoryMenu",
+          "when": "resourceLangId == stata",
+          "group": "navigation@8"
+        }
+      ],
       "editor/title/run": [
         {
           "command": "stataCode.runFile",
@@ -283,9 +364,14 @@
           "group": "stataCode@2"
         },
         {
-          "command": "stataCode.workingDirectoryMenu",
+          "command": "stataCode.viewDataPreview",
           "when": "editorLangId == stata",
           "group": "stataCode@3"
+        },
+        {
+          "command": "stataCode.workingDirectoryMenu",
+          "when": "editorLangId == stata",
+          "group": "stataCode@4"
         }
       ],
       "view/title": [

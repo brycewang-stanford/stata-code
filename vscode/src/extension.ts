@@ -27,6 +27,7 @@ import {
 import type { GraphFormat, GraphInfo, Matrix, RunResult } from "./types/runResult";
 
 const HISTORY_CAP = 64;
+const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
 const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
 
@@ -114,6 +115,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.showLastResult", showLastResult),
     vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
     vscode.commands.registerCommand("stataCode.openMatrix", openMatrix),
+    vscode.commands.registerCommand("stataCode.viewDataPreview", viewDataPreview),
     vscode.commands.registerCommand("stataCode.rerunHistory", rerunHistory),
     vscode.commands.registerCommand("stataCode.copyRunCode", copyRunCode),
     vscode.commands.registerCommand("stataCode.exportRunBundle", exportRunBundle),
@@ -463,6 +465,23 @@ async function openMatrix(target?: unknown): Promise<void> {
   }
 }
 
+async function viewDataPreview(): Promise<void> {
+  const result = await runUtilityCode(
+    `list in 1/${DATA_PREVIEW_OBS}, clean noobs abbreviate(24)`,
+    "view data preview",
+  );
+  if (!result) return;
+
+  const doc = await vscode.workspace.openTextDocument({
+    language: "plaintext",
+    content: formatDataPreviewDocument(result, inlineLogText(result)),
+  });
+  await vscode.window.showTextDocument(doc, {
+    preview: false,
+    viewColumn: vscode.ViewColumn.Beside,
+  });
+}
+
 async function rerunHistory(target?: unknown): Promise<void> {
   const entry = resolveRunHistoryEntry(target);
   if (!entry) {
@@ -668,11 +687,39 @@ function formatLogDocument(result: RunResult, text: string): string {
   ].join("\n");
 }
 
+function formatDataPreviewDocument(result: RunResult, text: string): string {
+  const ds = result.dataset;
+  const status = result.ok ? "OK" : `FAIL rc=${result.rc}`;
+  const rowsShown = result.ok ? Math.min(ds.n_obs, DATA_PREVIEW_OBS) : 0;
+  const body = text.trim() || (ds.n_vars === 0 ? "(no variables in memory)" : "(no preview output)");
+  const variableLines = (ds.variables ?? []).map(
+    (v) => `  ${v.name}\t${v.type}${v.label ? `\t${v.label}` : ""}`,
+  );
+
+  return [
+    "stata-code data preview",
+    `status: ${status}`,
+    `session: ${result.session_id}`,
+    `request: ${result.request_id}`,
+    `dataset: ${ds.n_obs} obs · ${ds.n_vars} vars · frame ${ds.frame}`,
+    ds.filename ? `file: ${ds.filename}` : "file: (memory)",
+    `showing: ${rowsShown} of ${ds.n_obs} observations`,
+    "",
+    "-".repeat(72),
+    body,
+    "",
+    "-".repeat(72),
+    "variables",
+    variableLines.length ? variableLines.join("\n") : "  (none)",
+  ].join("\n");
+}
+
 async function statusBarMenu(): Promise<void> {
   const sid = currentSessionId();
   const items = [
     { label: "$(add) New Stata tab...", action: "new" as const },
     { label: "$(arrow-swap) Switch tab...", action: "switch" as const },
+    { label: "$(table) View data preview", action: "data" as const },
     { label: "$(archive) Export latest run", action: "export" as const },
     { label: "$(output) Open latest log", action: "log" as const },
     { label: "$(graph) Show latest graphs", action: "graphs" as const },
@@ -690,6 +737,7 @@ async function statusBarMenu(): Promise<void> {
 
   if (pick.action === "new") return newSession();
   if (pick.action === "switch") return switchSession();
+  if (pick.action === "data") return viewDataPreview();
   if (pick.action === "export") return exportRunBundle();
   if (pick.action === "log") return openLog();
   if (pick.action === "graphs") return showGraphs();
