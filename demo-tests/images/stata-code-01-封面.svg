@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1600" width="1080" height="1600">
+  <rect width="1080" height="1600" fill="#FFFFFF"/>
+
+  <!-- top accent bar -->
+  <rect x="0" y="0" width="1080" height="14" fill="#2563EB"/>
+
+  <!-- badge -->
+  <rect x="80" y="90" width="220" height="56" rx="12" fill="#DBEAFE"/>
+  <text x="190" y="128" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="600" fill="#2563EB" text-anchor="middle">知乎深度 · 工具</text>
+
+  <!-- main title -->
+  <text x="80" y="270" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="68" font-weight="700" fill="#0F172A">把 Stata 装进</text>
+  <text x="80" y="360" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="68" font-weight="700" fill="#2563EB">Claude Code</text>
+
+  <!-- subtitle -->
+  <text x="80" y="450" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="500" fill="#475569">让 AI 帮我改一百次</text>
+  <text x="80" y="500" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="500" fill="#475569">代码也不会累</text>
+
+  <!-- 3 stacked layer cards -->
+  <!-- card 1 -->
+  <rect x="120" y="620" width="840" height="180" rx="20" fill="#2563EB"/>
+  <text x="540" y="700" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">Claude Code / Codex</text>
+  <text x="540" y="755" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#DBEAFE" text-anchor="middle">AI Agent 写代码 · 读日志 · 改 bug</text>
+
+  <!-- arrow 1 -->
+  <line x1="540" y1="820" x2="540" y2="880" stroke="#94A3B8" stroke-width="6"/>
+  <polygon points="540,895 525,870 555,870" fill="#94A3B8"/>
+
+  <!-- card 2 -->
+  <rect x="120" y="910" width="840" height="180" rx="20" fill="#3B82F6"/>
+  <text x="540" y="990" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">stata-code MCP</text>
+  <text x="540" y="1045" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#DBEAFE" text-anchor="middle">常驻 worker · 结构化产物 · 会话隔离</text>
+
+  <!-- arrow 2 -->
+  <line x1="540" y1="1110" x2="540" y2="1170" stroke="#94A3B8" stroke-width="6"/>
+  <polygon points="540,1185 525,1160 555,1160" fill="#94A3B8"/>
+
+  <!-- card 3 -->
+  <rect x="120" y="1200" width="840" height="180" rx="20" fill="#60A5FA"/>
+  <text x="540" y="1280" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">Stata 18 (pystata)</text>
+  <text x="540" y="1335" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#FFFFFF" text-anchor="middle">真正在跑的计量引擎</text>
+
+  <!-- bottom -->
+  <text x="540" y="1500" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" font-weight="400" fill="#6B7280" text-anchor="middle">brycewang-stanford / stata-code · MIT 开源</text>
+  <rect x="0" y="1586" width="1080" height="14" fill="#2563EB"/>
+</svg>

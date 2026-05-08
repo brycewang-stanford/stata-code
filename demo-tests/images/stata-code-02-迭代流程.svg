@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1750" width="1080" height="1750">
+  <rect width="1080" height="1750" fill="#FFFFFF"/>
+
+  <!-- title -->
+  <text x="80" y="120" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="48" font-weight="700" fill="#0F172A">AI 自动迭代修代码</text>
+  <text x="80" y="180" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="400" fill="#6B7280">stata_run 一次调用，全闭环</text>
+
+  <!-- divider -->
+  <rect x="80" y="220" width="120" height="6" fill="#2563EB"/>
+
+  <!-- step 1 -->
+  <circle cx="140" cy="340" r="48" fill="#2563EB"/>
+  <text x="140" y="358" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+  <rect x="220" y="290" width="780" height="120" rx="16" fill="#F3F4F6"/>
+  <text x="250" y="340" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="700" fill="#0F172A">Agent 写 do 文件</text>
+  <text x="250" y="385" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#475569">Claude Code 生成 regress / reghdfe 等命令</text>
+
+  <!-- arrow -->
+  <line x1="140" y1="408" x2="140" y2="468" stroke="#94A3B8" stroke-width="6"/>
+  <polygon points="140,485 125,460 155,460" fill="#94A3B8"/>
+
+  <!-- step 2 -->
+  <circle cx="140" cy="555" r="48" fill="#3B82F6"/>
+  <text x="140" y="573" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+  <rect x="220" y="505" width="780" height="120" rx="16" fill="#F3F4F6"/>
+  <text x="250" y="555" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="700" fill="#0F172A">stata_run 执行</text>
+  <text x="250" y="600" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#475569">常驻 worker 复用 session，无冷启动开销</text>
+
+  <!-- arrow -->
+  <line x1="140" y1="623" x2="140" y2="683" stroke="#94A3B8" stroke-width="6"/>
+  <polygon points="140,700 125,675 155,675" fill="#94A3B8"/>
+
+  <!-- step 3 -->
+  <circle cx="140" cy="770" r="48" fill="#60A5FA"/>
+  <text x="140" y="788" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+  <rect x="220" y="720" width="780" height="120" rx="16" fill="#F3F4F6"/>
+  <text x="250" y="770" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="700" fill="#0F172A">返回结构化产物</text>
+  <text x="250" y="815" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#475569">log + manifest.json + rc + 耗时 + request_id</text>
+
+  <!-- arrow -->
+  <line x1="140" y1="838" x2="140" y2="898" stroke="#94A3B8" stroke-width="6"/>
+  <polygon points="140,915 125,890 155,890" fill="#94A3B8"/>
+
+  <!-- step 4 -->
+  <circle cx="140" cy="985" r="48" fill="#93C5FD"/>
+  <text x="140" y="1003" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+  <rect x="220" y="935" width="780" height="120" rx="16" fill="#F3F4F6"/>
+  <text x="250" y="985" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="700" fill="#0F172A">Agent 读 log 改 bug</text>
+  <text x="250" y="1030" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" font-weight="400" fill="#475569">报错码 r(111) 等 → 自动修代码再跑</text>
+
+  <!-- loop arrow back to step 1 -->
+  <path d="M 70 985 Q 30 985 30 670 Q 30 340 100 340" fill="none" stroke="#2563EB" stroke-width="6" stroke-dasharray="14,10"/>
+  <polygon points="100,340 78,328 78,352" fill="#2563EB"/>
+  <text x="50" y="660" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" font-weight="600" fill="#2563EB" text-anchor="middle" transform="rotate(-90 50 660)">循环</text>
+
+  <!-- highlight panel at bottom -->
+  <rect x="80" y="1130" width="920" height="500" rx="20" fill="#DBEAFE"/>
+  <text x="120" y="1200" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="40" font-weight="700" fill="#1E40AF">关键产物 manifest.json</text>
+
+  <text x="120" y="1265" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• rc：退出码（0 = 成功）</text>
+  <text x="120" y="1320" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• elapsed_ms：精确到毫秒</text>
+  <text x="120" y="1375" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• stata.edition / version：MP / 18</text>
+  <text x="120" y="1430" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• request_id：每次运行独立溯源</text>
+  <text x="120" y="1485" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• files：log / smcl / submitted.do 路径</text>
+  <text x="120" y="1540" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A">• per_run_directory 策略，互不污染</text>
+
+  <!-- footer source -->
+  <text x="540" y="1700" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="22" fill="#9CA3AF" text-anchor="middle">数据：stata-code 0.4.0 实测 manifest 字段</text>
+</svg>

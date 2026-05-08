@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1500" width="1080" height="1500">
+  <rect width="1080" height="1500" fill="#FFFFFF"/>
+
+  <!-- title -->
+  <text x="80" y="120" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="48" font-weight="700" fill="#0F172A">VS Code Notebook</text>
+  <text x="80" y="180" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="48" font-weight="700" fill="#2563EB">+ Stata kernel</text>
+  <text x="80" y="240" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="30" fill="#6B7280">像写 Python 一样写 Stata</text>
+
+  <!-- divider -->
+  <rect x="80" y="280" width="120" height="6" fill="#2563EB"/>
+
+  <!-- mock notebook frame -->
+  <rect x="80" y="340" width="920" height="900" rx="24" fill="#F3F4F6" stroke="#CBD5E1" stroke-width="2"/>
+
+  <!-- top bar -->
+  <rect x="80" y="340" width="920" height="80" rx="24" fill="#1E293B"/>
+  <rect x="80" y="380" width="920" height="40" fill="#1E293B"/>
+  <circle cx="120" cy="380" r="10" fill="#EF4444"/>
+  <circle cx="155" cy="380" r="10" fill="#F59E0B"/>
+  <circle cx="190" cy="380" r="10" fill="#10B981"/>
+  <text x="540" y="392" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" fill="#CBD5E1" text-anchor="middle">analysis.ipynb</text>
+  <!-- kernel badge -->
+  <rect x="820" y="362" width="160" height="40" rx="20" fill="#2563EB"/>
+  <text x="900" y="389" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="24" font-weight="600" fill="#FFFFFF" text-anchor="middle">Stata 18 MP</text>
+
+  <!-- cell 1 input -->
+  <rect x="120" y="460" width="840" height="180" rx="14" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="120" y="460" width="14" height="180" rx="7" fill="#2563EB"/>
+  <text x="160" y="510" font-family="'Menlo','Monaco',monospace" font-size="28" fill="#0F172A">In [1]:</text>
+  <text x="160" y="560" font-family="'Menlo','Monaco',monospace" font-size="28" fill="#1E40AF">sysuse auto, clear</text>
+  <text x="160" y="605" font-family="'Menlo','Monaco',monospace" font-size="28" fill="#1E40AF">regress price mpg weight</text>
+
+  <!-- cell 1 output -->
+  <rect x="120" y="660" width="840" height="180" rx="14" fill="#0F172A"/>
+  <text x="160" y="710" font-family="'Menlo','Monaco',monospace" font-size="26" fill="#94A3B8">Out [1]:</text>
+  <text x="160" y="755" font-family="'Menlo','Monaco',monospace" font-size="26" fill="#34D399">Number of obs = 74</text>
+  <text x="160" y="795" font-family="'Menlo','Monaco',monospace" font-size="26" fill="#34D399">F(2, 71)      = 14.74</text>
+  <text x="160" y="830" font-family="'Menlo','Monaco',monospace" font-size="26" fill="#34D399">R-squared     = 0.2934</text>
+
+  <!-- cell 2 input -->
+  <rect x="120" y="870" width="840" height="120" rx="14" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+  <rect x="120" y="870" width="14" height="120" rx="7" fill="#2563EB"/>
+  <text x="160" y="920" font-family="'Menlo','Monaco',monospace" font-size="28" fill="#0F172A">In [2]:</text>
+  <text x="160" y="965" font-family="'Menlo','Monaco',monospace" font-size="28" fill="#1E40AF">summarize price, detail</text>
+
+  <!-- session indicator -->
+  <rect x="120" y="1020" width="840" height="200" rx="14" fill="#DBEAFE"/>
+  <text x="160" y="1075" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#1E40AF">变量 / 数据集在 cell 间持久</text>
+  <text x="160" y="1125" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" fill="#1E3A8A">• 共享一个常驻 Stata session</text>
+  <text x="160" y="1170" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" fill="#1E3A8A">• 上一 cell 的变量下一 cell 直接用</text>
+  <text x="160" y="1210" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" fill="#1E3A8A">• 体验对齐 Python / R kernel</text>
+
+  <!-- bottom -->
+  <text x="540" y="1330" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="34" font-weight="700" fill="#0F172A" text-anchor="middle">pip install stata-code[kernel]</text>
+  <text x="540" y="1380" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#475569" text-anchor="middle">stata-code-kernel install --user</text>
+
+  <!-- footer source -->
+  <text x="540" y="1450" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="22" fill="#9CA3AF" text-anchor="middle">示意图：基于 stata-code 0.4.0 kernel 模块</text>
+</svg>

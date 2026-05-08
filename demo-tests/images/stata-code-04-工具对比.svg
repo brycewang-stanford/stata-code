@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1700" width="1080" height="1700">
+  <rect width="1080" height="1700" fill="#FFFFFF"/>
+
+  <!-- title -->
+  <text x="80" y="120" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="48" font-weight="700" fill="#0F172A">三款工具横向对比</text>
+  <text x="80" y="180" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="30" fill="#6B7280">谁最适合 AI agent 工作流？</text>
+  <rect x="80" y="220" width="120" height="6" fill="#2563EB"/>
+
+  <!-- column headers -->
+  <rect x="80" y="280" width="280" height="100" rx="14" fill="#F3F4F6"/>
+  <text x="220" y="315" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" font-weight="600" fill="#6B7280" text-anchor="middle">官方 Python API</text>
+  <text x="220" y="355" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A" text-anchor="middle">pystata</text>
+
+  <rect x="380" y="280" width="280" height="100" rx="14" fill="#F3F4F6"/>
+  <text x="520" y="315" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" font-weight="600" fill="#6B7280" text-anchor="middle">do-file 执行器</text>
+  <text x="520" y="355" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A" text-anchor="middle">stata-mcp</text>
+
+  <rect x="680" y="280" width="320" height="100" rx="14" fill="#2563EB"/>
+  <text x="840" y="315" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="26" font-weight="600" fill="#DBEAFE" text-anchor="middle">AI-native 工具链</text>
+  <text x="840" y="355" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#FFFFFF" text-anchor="middle">stata-code</text>
+
+  <!-- feature rows -->
+  <!-- row 1: MCP / Agent协议 -->
+  <text x="80" y="450" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A">① MCP / Agent 协议</text>
+  <rect x="80" y="475" width="280" height="100" rx="14" fill="#FEE2E2"/>
+  <text x="220" y="540" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#DC2626" text-anchor="middle">×</text>
+  <rect x="380" y="475" width="280" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="520" y="540" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+  <rect x="680" y="475" width="320" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="840" y="540" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+
+  <!-- row 2: 结构化日志 -->
+  <text x="80" y="640" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A">② 结构化日志 / manifest</text>
+  <rect x="80" y="665" width="280" height="100" rx="14" fill="#FEE2E2"/>
+  <text x="220" y="730" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#DC2626" text-anchor="middle">×</text>
+  <rect x="380" y="665" width="280" height="100" rx="14" fill="#FEF3C7"/>
+  <text x="520" y="730" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#B45309" text-anchor="middle">部分</text>
+  <rect x="680" y="665" width="320" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="840" y="730" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+
+  <!-- row 3: 常驻 session -->
+  <text x="80" y="830" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A">③ 常驻会话 / 变量持久</text>
+  <rect x="80" y="855" width="280" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="220" y="920" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+  <rect x="380" y="855" width="280" height="100" rx="14" fill="#FEE2E2"/>
+  <text x="520" y="920" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#DC2626" text-anchor="middle">×</text>
+  <rect x="680" y="855" width="320" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="840" y="920" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+
+  <!-- row 4: Notebook kernel -->
+  <text x="80" y="1020" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A">④ Jupyter / VS Code kernel</text>
+  <rect x="80" y="1045" width="280" height="100" rx="14" fill="#FEE2E2"/>
+  <text x="220" y="1110" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#DC2626" text-anchor="middle">×</text>
+  <rect x="380" y="1045" width="280" height="100" rx="14" fill="#FEE2E2"/>
+  <text x="520" y="1110" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#DC2626" text-anchor="middle">×</text>
+  <rect x="680" y="1045" width="320" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="840" y="1110" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+
+  <!-- row 5: 一键安装 -->
+  <text x="80" y="1210" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#0F172A">⑤ pip 一行安装</text>
+  <rect x="80" y="1235" width="280" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="220" y="1300" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+  <rect x="380" y="1235" width="280" height="100" rx="14" fill="#FEF3C7"/>
+  <text x="520" y="1300" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="32" font-weight="700" fill="#B45309" text-anchor="middle">npm</text>
+  <rect x="680" y="1235" width="320" height="100" rx="14" fill="#DCFCE7"/>
+  <text x="840" y="1300" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="44" font-weight="700" fill="#16A34A" text-anchor="middle">✓</text>
+
+  <!-- summary panel -->
+  <rect x="80" y="1390" width="920" height="240" rx="20" fill="#DBEAFE"/>
+  <text x="540" y="1455" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="36" font-weight="700" fill="#1E40AF" text-anchor="middle">stata-code = 三件套唯一交集</text>
+  <text x="540" y="1510" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A" text-anchor="middle">MCP 协议 + 常驻 worker + Notebook kernel</text>
+  <text x="540" y="1560" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="28" fill="#1E3A8A" text-anchor="middle">为 Claude Code / Codex 这一代 agent 而生</text>
+
+  <!-- footer source -->
+  <text x="540" y="1670" font-family="'PingFang SC','Noto Sans SC',sans-serif" font-size="22" fill="#9CA3AF" text-anchor="middle">数据：截至 2026-05 各项目公开仓库实测</text>
+</svg>
