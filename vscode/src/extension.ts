@@ -32,6 +32,7 @@ const HISTORY_CAP = 64;
 const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
 const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+const DEFAULT_SERVER_COMMAND = "stata-code-mcp";
 
 const EXT_BY_FORMAT: Record<GraphFormat, string> = {
   png: "png",
@@ -80,6 +81,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration("stataCode.sessionId")) {
         rememberSessionId(currentSessionId());
         statusBar?.refresh();
+        sessionsProvider?.refresh();
+      }
+      if (
+        e.affectsConfiguration("stataCode.serverCommand") ||
+        e.affectsConfiguration("stataCode.serverArgs")
+      ) {
+        client?.dispose();
+        client = undefined;
+        output?.appendLine("[stata-code] MCP client reset after server launch settings changed");
         sessionsProvider?.refresh();
       }
     }),
@@ -157,22 +167,28 @@ function getClient(): StataMcpClient {
   if (!output) throw new Error("output channel not initialized");
 
   const cfg = vscode.workspace.getConfiguration("stataCode");
-  const command = cfg.get<string>("serverCommand", "stata-code-mcp");
+  const command = cfg.get<string>("serverCommand", DEFAULT_SERVER_COMMAND);
   const args = cfg.get<string[]>("serverArgs", []);
-  client = new StataMcpClient(buildServerLaunchCandidates(command, args), output);
+  client = new StataMcpClient(
+    buildServerLaunchCandidates(command, args, extensionContext?.extensionUri.fsPath),
+    output,
+  );
   return client;
 }
 
 function buildServerLaunchCandidates(
   configuredCommand: string,
   configuredArgs: string[],
+  extensionRoot: string | undefined,
 ): StataServerLaunch[] {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const cwd = workspaceRoot;
-  const env = serverEnvironment(workspaceRoot);
+  const sourceRoots = localSourceRoots(workspaceRoot, extensionRoot);
+  const venvDirs = localVenvDirs(workspaceRoot, sourceRoots);
+  const env = serverEnvironment(sourceRoots);
   const [command, inlineArgs] = normalizeConfiguredCommand(configuredCommand, configuredArgs);
-  const args = inlineArgs.length > 0 ? inlineArgs : configuredArgs;
-  const usesDefaultCommand = command === "stata-code-mcp" && args.length === 0;
+  const args = inlineArgs;
+  const usesDefaultCommand = command === DEFAULT_SERVER_COMMAND && args.length === 0;
 
   if (!usesDefaultCommand) {
     return [{ command, args, cwd, env }];
@@ -186,17 +202,20 @@ function buildServerLaunchCandidates(
     }
   };
 
-  const venvDir = workspaceRoot ? path.join(workspaceRoot, ".venv") : undefined;
-  const venvPython = venvDir ? venvExecutable(venvDir, "python") : undefined;
-  const venvScript = venvDir ? venvExecutable(venvDir, "stata-code-mcp") : undefined;
-  if (venvScript && fs.existsSync(venvScript)) {
-    add({ command: venvScript, args: [], cwd, env });
+  for (const venvDir of venvDirs) {
+    const venvScript = venvExecutable(venvDir, DEFAULT_SERVER_COMMAND);
+    if (fs.existsSync(venvScript)) {
+      add({ command: venvScript, args: [], cwd, env });
+    }
   }
 
-  add({ command: "stata-code-mcp", args: [], cwd, env });
+  add({ command: DEFAULT_SERVER_COMMAND, args: [], cwd, env });
 
-  if (venvPython && fs.existsSync(venvPython)) {
-    add({ command: venvPython, args: ["-m", "stata_code.mcp"], cwd, env });
+  for (const venvDir of venvDirs) {
+    const venvPython = venvExecutable(venvDir, "python");
+    if (fs.existsSync(venvPython)) {
+      add({ command: venvPython, args: ["-m", "stata_code.mcp"], cwd, env });
+    }
   }
 
   for (const pythonCommand of configuredPythonCommands()) {
@@ -224,13 +243,18 @@ function normalizeConfiguredCommand(
   command: string,
   configuredArgs: string[],
 ): [string, string[]] {
-  const expanded = expandHome(command.trim());
-  if (configuredArgs.length > 0 || !/\s/.test(expanded) || fs.existsSync(expanded)) {
-    return [expanded, []];
+  const raw = command.trim();
+  if (!raw) {
+    return [DEFAULT_SERVER_COMMAND, configuredArgs];
   }
-  const parts = parseCommandLine(expanded);
-  if (parts.length <= 1) return [expanded, []];
-  return [parts[0], parts.slice(1)];
+  const expanded = expandHome(raw);
+  if (!/\s/.test(expanded) || fs.existsSync(expanded)) {
+    return [expanded, configuredArgs];
+  }
+  const parts = parseCommandLine(raw);
+  if (parts.length === 0) return [expanded, configuredArgs];
+  if (parts.length === 1) return [expandHome(parts[0]), configuredArgs];
+  return [expandHome(parts[0]), [...parts.slice(1), ...configuredArgs]];
 }
 
 function parseCommandLine(value: string): string[] {
@@ -276,29 +300,59 @@ function parseCommandLine(value: string): string[] {
   return parts;
 }
 
-function serverEnvironment(workspaceRoot: string | undefined): Record<string, string> {
+function serverEnvironment(sourceRoots: string[]): Record<string, string> {
   const env: Record<string, string> = {
     PATH: expandedPath(),
   };
-  if (workspaceRoot) {
-    env.PYTHONPATH = [workspaceRoot, process.env.PYTHONPATH]
-      .filter((entry): entry is string => Boolean(entry))
-      .join(path.delimiter);
+  const pythonPath = uniqueStrings([...sourceRoots, ...splitPathList(process.env.PYTHONPATH)]);
+  if (pythonPath.length > 0) {
+    env.PYTHONPATH = pythonPath.join(path.delimiter);
   }
   return env;
 }
 
 function expandedPath(): string {
   const entries = [
-    process.env.PATH,
+    ...splitPathList(process.env.PATH),
     path.join(os.homedir(), ".local", "bin"),
     ...pythonUserScriptDirs(),
     "/opt/homebrew/bin",
     "/usr/local/bin",
   ].filter((entry): entry is string => Boolean(entry));
-  return Array.from(new Set(entries.flatMap((entry) => entry.split(path.delimiter)))).join(
-    path.delimiter,
+  return uniqueStrings(entries).join(path.delimiter);
+}
+
+function localSourceRoots(
+  workspaceRoot: string | undefined,
+  extensionRoot: string | undefined,
+): string[] {
+  const candidates = [
+    workspaceRoot,
+    workspaceRoot ? path.dirname(workspaceRoot) : undefined,
+    extensionRoot,
+    extensionRoot ? path.dirname(extensionRoot) : undefined,
+  ].filter((entry): entry is string => Boolean(entry));
+  return uniqueStrings(candidates).filter((root) =>
+    fs.existsSync(path.join(root, "stata_code", "mcp", "__main__.py")),
   );
+}
+
+function localVenvDirs(
+  workspaceRoot: string | undefined,
+  sourceRoots: string[],
+): string[] {
+  const roots = [workspaceRoot, ...sourceRoots].filter((entry): entry is string =>
+    Boolean(entry),
+  );
+  return uniqueStrings(roots.map((root) => path.join(root, ".venv")));
+}
+
+function splitPathList(value: string | undefined): string[] {
+  return value?.split(path.delimiter).filter(Boolean) ?? [];
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 function pythonUserScriptDirs(): string[] {

@@ -69,9 +69,12 @@ export class StataMcpClient implements vscode.Disposable {
       [
         "MCP server failed to start.",
         `Tried: ${this.launchCandidates.map(formatLaunch).join("; ")}.`,
+        failures.length > 0 ? `Last failure: ${failures[failures.length - 1]}.` : "",
         "Install with `python3 -m pip install \"stata-code[mcp]\"` or set `stataCode.serverCommand` and `stataCode.serverArgs`.",
         "See the stata-code output panel for startup details.",
-      ].join(" "),
+      ]
+        .filter(Boolean)
+        .join(" "),
     );
   }
 
