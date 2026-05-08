@@ -197,7 +197,6 @@ UI modules:
 - Marketplace publishing
 - `.do` notebook editor (kept deliberately minimal in favor of code-lens cells)
 - Full paged/filterable dataset table view (the current button is a first-100-row preview)
-- Rich matrix / dataset table formatting beyond TSV/text preview
 - Rich matrix formatting beyond TSV
 - Extension-host tests (planned)
 
