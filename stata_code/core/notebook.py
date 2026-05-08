@@ -777,6 +777,28 @@ def _ensure_native_id(cell: dict[str, Any], index: int, source: str) -> str:
     return new_id
 
 
+def _upgrade_all_pre_45_ids(cells: list[Any]) -> int:
+    """Assign a fresh UUID to every cell that lacks a native ``id``.
+
+    Synthesised ids are derived from the cell's array index; any structural
+    mutation (insert / delete) shifts indices, silently invalidating every
+    synth id the caller is holding. Upgrading the whole notebook to nbformat
+    4.5+ ids on first mutation makes every cell handle stable from then on.
+
+    Returns the number of cells that were upgraded.
+    """
+    upgraded = 0
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        raw = cell.get("id")
+        if isinstance(raw, str) and raw:
+            continue
+        cell["id"] = _new_cell_id()
+        upgraded += 1
+    return upgraded
+
+
 def edit_cell(
     path: str | Path,
     *,
@@ -814,6 +836,11 @@ def edit_cell(
         )
 
     actual_id = _ensure_native_id(cell, index, current_source)
+    # Stabilise every other synth-id cell too. edit_cell does not shift
+    # indices, but a later insert/delete will — and callers that read the
+    # outline once and edit several cells in a row should not have their
+    # later handles silently invalidated.
+    _upgrade_all_pre_45_ids(cells)
     ctype = _cell_type(cell)
     cell["source"] = new_source
     if ctype == "code":
@@ -883,6 +910,8 @@ def insert_cell(
     nb = load_notebook(p)
     cells = nb["cells"]
 
+    # Resolve the anchor BEFORE upgrading other ids — the caller may have
+    # passed a synth id that depends on the current array indices.
     if at_start:
         target_index = 0
     elif at_end:
@@ -891,19 +920,18 @@ def insert_cell(
         anchor_index, anchor_cell = _resolve_cell(
             cells, cell_id=after_cell_id, cell_index=None
         )
-        # If the anchor was a pre-4.5 cell addressed by its synth id, upgrade
-        # to a real UUID. Otherwise the anchor's index-derived synth id would
-        # change after insertion (silent foot-gun for the caller).
-        anchor_source = _source_to_str(anchor_cell.get("source"))
-        _ensure_native_id(anchor_cell, anchor_index, anchor_source)
         target_index = anchor_index + 1
     else:
         anchor_index, anchor_cell = _resolve_cell(
             cells, cell_id=before_cell_id, cell_index=None
         )
-        anchor_source = _source_to_str(anchor_cell.get("source"))
-        _ensure_native_id(anchor_cell, anchor_index, anchor_source)
         target_index = anchor_index
+
+    # Insertion shifts every cell at >= target_index by one slot, which
+    # would silently invalidate every synth id the caller is holding.
+    # Upgrade the whole notebook to nbformat 4.5+ ids in one shot so every
+    # cell handle remains stable across this and future mutations.
+    _upgrade_all_pre_45_ids(cells)
 
     new_id = _new_cell_id()
     new_cell = _build_cell(cell_type=cell_type, source=source, cell_id=new_id)
@@ -949,6 +977,10 @@ def delete_cell(
     actual_id, synthesized = _cell_id(cell, index, current_source)
     ctype = _cell_type(cell)
     cells.pop(index)
+    # The pop shifts every later cell's array index, invalidating any synth
+    # ids the caller might still be holding for those cells. Upgrade them
+    # all to fresh UUIDs in one shot.
+    _upgrade_all_pre_45_ids(cells)
     _atomic_write_notebook(p, nb)
 
     return {

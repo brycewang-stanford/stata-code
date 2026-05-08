@@ -292,6 +292,95 @@ class TestDispatch:
         body = _json_body(out)
         assert "error" in body
 
+    def test_stata_run_rejects_non_boolean_argument(self):
+        """The schema declares ``include_full_log`` as boolean, but many MCP
+        clients do not validate. Server must reject coerced strings rather
+        than silently truthy-coerce them (``bool("false") is True``).
+        """
+        from stata_code.mcp.server import _dispatch
+
+        out = asyncio.run(
+            _dispatch(
+                "stata_run", {"code": "display 1", "include_full_log": "false"}
+            )
+        )
+        assert out.isError is True
+        body = _json_body(out)
+        assert "include_full_log" in body["error"]
+        assert "boolean" in body["error"].lower()
+
+    def test_notebook_insert_cell_rejects_string_at_start(self, tmp_path):
+        from stata_code.mcp.server import _dispatch
+
+        nb_path = tmp_path / "nb.ipynb"
+        nb_path.write_text(
+            json.dumps(
+                {
+                    "nbformat": 4,
+                    "nbformat_minor": 5,
+                    "metadata": {},
+                    "cells": [
+                        {
+                            "cell_type": "code",
+                            "id": "a",
+                            "source": "x=1",
+                            "metadata": {},
+                            "outputs": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        out = asyncio.run(
+            _dispatch(
+                "notebook_insert_cell",
+                {"path": str(nb_path), "source": "x=2", "at_start": "true"},
+            )
+        )
+        assert out.isError is True
+        body = _json_body(out)
+        assert "at_start" in body["error"]
+        # No cell was appended despite the truthy-looking string.
+        cells = json.loads(nb_path.read_text(encoding="utf-8"))["cells"]
+        assert len(cells) == 1
+
+    def test_notebook_insert_cell_accepts_bool_at_start(self, tmp_path):
+        from stata_code.mcp.server import _dispatch
+
+        nb_path = tmp_path / "nb.ipynb"
+        nb_path.write_text(
+            json.dumps(
+                {
+                    "nbformat": 4,
+                    "nbformat_minor": 5,
+                    "metadata": {},
+                    "cells": [
+                        {
+                            "cell_type": "code",
+                            "id": "a",
+                            "source": "x=1",
+                            "metadata": {},
+                            "outputs": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        out = asyncio.run(
+            _dispatch(
+                "notebook_insert_cell",
+                {"path": str(nb_path), "source": "x=2", "at_start": True},
+            )
+        )
+        assert out.isError is not True
+        cells = json.loads(nb_path.read_text(encoding="utf-8"))["cells"]
+        assert len(cells) == 2
+        assert cells[0]["source"] == "x=2"
+
     def test_stata_info_unavailable_shape(self, monkeypatch):
         from stata_code.mcp import server
 

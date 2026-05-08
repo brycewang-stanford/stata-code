@@ -477,3 +477,114 @@ def test_edit_cell_no_temp_files_left_behind(tmp_path: Path) -> None:
     # Only the notebook file should remain.
     leftover = [p.name for p in tmp_path.iterdir()]
     assert leftover == ["nb.ipynb"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-4.5 id stability across structural mutations
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_insert_at_start_upgrades_all_synth_ids(tmp_path: Path) -> None:
+    """`at_start` shifts every existing cell down one slot, which silently
+    invalidates every index-derived synth id the caller is holding. Inserting
+    must upgrade every pre-4.5 cell to a fresh UUID so previously-cached
+    handles either still resolve (if the caller re-reads) or fail loudly.
+    """
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+            {"cell_type": "markdown", "source": "# H", "metadata": {}},
+        ],
+    )
+    insert_cell(path, source="first", at_start=True)
+    cells = _read(path)["cells"]
+    assert len(cells) == 4
+    # Every cell now carries a real UUID — no synth ids survive on disk.
+    for cell in cells:
+        cid = cell["id"]
+        assert isinstance(cid, str)
+        assert not cid.startswith("synth-")
+        assert re.match(r"^[0-9a-f-]{36}$", cid)
+    # Ids are unique.
+    assert len({c["id"] for c in cells}) == 4
+
+
+def test_insert_at_end_upgrades_all_synth_ids(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+        ],
+    )
+    insert_cell(path, source="last", at_end=True)
+    cells = _read(path)["cells"]
+    for cell in cells:
+        assert not cell["id"].startswith("synth-")
+
+
+def test_insert_after_upgrades_unrelated_synth_ids(tmp_path: Path) -> None:
+    """The anchor's synth id was already upgraded by prior versions, but
+    other synth-id cells past the insertion point would silently shift.
+    All cells must end up with stable native ids.
+    """
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=3", "metadata": {}, "outputs": []},
+        ],
+    )
+    out = outline_notebook(path)
+    anchor_synth = out["cells"][0]["cell_id"]
+    third_synth = out["cells"][2]["cell_id"]
+    assert anchor_synth.startswith("synth-")
+    assert third_synth.startswith("synth-")
+
+    insert_cell(path, source="x=99", after_cell_id=anchor_synth)
+
+    cells = _read(path)["cells"]
+    # Cell that was at index 2 ('x=3') is now at index 3 — its synth id
+    # would have changed silently. The upgrade made it stable.
+    assert cells[3]["source"] == "x=3"
+    assert not cells[3]["id"].startswith("synth-")
+    assert re.match(r"^[0-9a-f-]{36}$", cells[3]["id"])
+
+
+def test_delete_cell_upgrades_remaining_synth_ids(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "drop", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "keep1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "keep2", "metadata": {}, "outputs": []},
+        ],
+    )
+    out = outline_notebook(path)
+    target = out["cells"][0]["cell_id"]
+
+    delete_cell(path, cell_id=target)
+    cells = _read(path)["cells"]
+    assert [c["source"] for c in cells] == ["keep1", "keep2"]
+    for cell in cells:
+        assert not cell["id"].startswith("synth-")
+
+
+def test_edit_cell_upgrades_remaining_synth_ids(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+        ],
+    )
+    out = outline_notebook(path)
+    target = out["cells"][0]["cell_id"]
+
+    edit_cell(path, cell_id=target, new_source="x=99")
+    cells = _read(path)["cells"]
+    for cell in cells:
+        assert not cell["id"].startswith("synth-")

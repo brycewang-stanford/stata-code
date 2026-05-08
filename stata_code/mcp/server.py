@@ -1661,11 +1661,29 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
         return _error_result(f"Error: {type(exc).__name__}: {exc}", kind="internal_error")
 
 
+_RUN_BOOL_KEYS: tuple[tuple[str, bool], ...] = (
+    ("include_full_log", False),
+    ("include_dataset_variables", True),
+    ("persist_log_files", False),
+    ("persist_generated_files", True),
+    ("use_origin_workdir", True),
+)
+
+
 def _run_tool(arguments: dict[str, Any]) -> Any:
     args = dict(arguments)
     code = args.pop("code", None)
     if not code:
         return _error_result("code is required", kind="missing_argument")
+    # Validate booleans up front rather than letting truthy strings ("false",
+    # "no", …) silently flip behaviour inside the runner.
+    for key, default in _RUN_BOOL_KEYS:
+        if key not in args:
+            continue
+        value, err = _bool_arg(args, key, default=default)
+        if err is not None:
+            return err
+        args[key] = value
     try:
         result = pool_execute(code, **args)
     except (ValueError, NotImplementedError) as exc:
@@ -1753,6 +1771,35 @@ def _require_str(arguments: dict[str, Any], key: str) -> tuple[str, Any]:
     return value, None
 
 
+_SENTINEL = object()
+
+
+def _bool_arg(
+    arguments: dict[str, Any], key: str, *, default: bool
+) -> tuple[bool, Any]:
+    """Read an optional boolean argument with strict JSON-bool typing.
+
+    JSON has a real boolean type, and the inputSchema declares these args
+    as ``"type": "boolean"``. Many MCP clients do not enforce the schema,
+    so we reject coerced values like ``"true"``, ``1``, or ``"yes"`` here
+    rather than silently truthy-coerce them (``bool("false") is True``).
+
+    ``isinstance(x, bool)`` happens to also gate against ``int`` even
+    though ``bool`` is a subclass of ``int`` — only ``True`` / ``False``
+    pass the check. Returns ``(value, None)`` on success, or
+    ``(default, error_result)`` when the type is wrong.
+    """
+    value = arguments.get(key, _SENTINEL)
+    if value is _SENTINEL or value is None:
+        return default, None
+    if not isinstance(value, bool):
+        return default, _error_result(
+            f"{key} must be a boolean (true/false), got {type(value).__name__}",
+            kind="invalid_request",
+        )
+    return value, None
+
+
 def _notebook_edit_cell_tool(arguments: dict[str, Any]) -> Any:
     path, err = _require_str(arguments, "path")
     if err is not None:
@@ -1795,8 +1842,12 @@ def _notebook_insert_cell_tool(arguments: dict[str, Any]) -> Any:
         return _error_result("cell_type must be a string", kind="invalid_request")
     after_cell_id = arguments.get("after_cell_id")
     before_cell_id = arguments.get("before_cell_id")
-    at_start = bool(arguments.get("at_start") or False)
-    at_end = bool(arguments.get("at_end") or False)
+    at_start, err = _bool_arg(arguments, "at_start", default=False)
+    if err is not None:
+        return err
+    at_end, err = _bool_arg(arguments, "at_end", default=False)
+    if err is not None:
+        return err
     for label, value in (
         ("after_cell_id", after_cell_id),
         ("before_cell_id", before_cell_id),
