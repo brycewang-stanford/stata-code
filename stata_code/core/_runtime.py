@@ -255,21 +255,31 @@ def _normalize_pystata_candidate(raw: str) -> list[str]:
     if path.suffix.lower() == ".app":
         out.append(str(path.parent / "utilities"))
     # If the user supplied the Stata executable (e.g.
-    # ``…/Stata.app/Contents/MacOS/Stata``), climb a small, bounded number of
-    # parents — enough to escape the .app bundle and reach the install root.
-    # When we encounter a ``.app`` parent we also explicitly emit *its* parent
-    # ``/utilities`` (which is the canonical macOS layout) and stop, so we
-    # don't keep climbing into OS noise like ``/Applications``. We also stop
-    # at the filesystem root so we never emit ``/utilities``.
-    for parent in list(path.parents)[:4]:
-        if not parent.name:
-            break
-        out.append(str(parent / "utilities"))
+    # ``…/Stata.app/Contents/MacOS/Stata``), climb a bounded number of
+    # parents to find the install root. The ``[:4]`` cap covers the deepest
+    # known layout (``Stata.app/Contents/MacOS/<exe>`` is exactly four levels
+    # below the install root) without walking the whole filesystem on a deep
+    # input.
+    parents = list(path.parents)[:4]
+    # Pre-scan for a ``.app`` ancestor: when present, the install root is
+    # exactly one level above it (``Stata.app/utilities`` is never used by
+    # Stata, and ``MacOS/utilities`` / ``Contents/utilities`` are guaranteed
+    # garbage), so we can emit the single canonical candidate and skip the
+    # in-bundle stat-call noise entirely.
+    for parent in parents:
         if parent.suffix.lower() == ".app":
             grandparent = parent.parent
             if grandparent.name:
                 out.append(str(grandparent / "utilities"))
             break
+    else:
+        # No ``.app`` in the climb — typical Linux / Windows install. Emit
+        # ``parent/utilities`` for each level, stopping at the filesystem
+        # root so we never produce ``/utilities``.
+        for parent in parents:
+            if not parent.name:
+                break
+            out.append(str(parent / "utilities"))
     return _dedupe(out)
 
 

@@ -514,6 +514,7 @@ The schema implies a small set of follow-up calls. Frontends expose them under c
 | `list_sessions()` | Enumerate live sessions. | `[{session_id, started_at, last_used_at, n_obs}, ...]` |
 | `reset_session(session_id?)` | Hard-reset a session (`clear all`). Invalidates all refs scoped to it. | `Result` with the cleared state. |
 | `stata_info()` | Report installed Stata. | `{stata: {...}, available: bool, capabilities: [...]}` |
+| `list_runs(log_dir or origin_path, cell_id?, session_id?, ok?, since?, limit?)` | Read-only query over persisted run-bundle manifests. Returns newest-first compact summaries of prior runs that landed under `<origin dir>/log-files/`. | `{log_dir, scanned_count, match_count, skipped_count, limit, truncated, runs: [...]}` |
 
 These are *additions* to `run()`. A minimal client only needs `run()` plus whichever auxiliaries match the truncation/ref behavior the producer can emit.
 
@@ -555,6 +556,11 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `inline_graphs` | Producer supports `include_graphs: "inline"`. |
 | `log_files` | Producer can persist immutable per-run `.log` / `.smcl` bundles. |
 | `run_artifacts` | Producer can materialize captured graphs and copied table/export outputs into the run bundle. |
+| `notebook_navigation` | Producer registers `notebook_outline` and `notebook_get_cell` for read-only `.ipynb` navigation. |
+| `notebook_search` | Producer registers `notebook_locate` for snippet/regex/error-text cell search. |
+| `notebook_edit` | Producer registers atomic `notebook_edit_cell` / `notebook_insert_cell` / `notebook_delete_cell`. |
+| `run_index` | Producer registers `list_runs` to query the on-disk run-bundle manifests. |
+| `origin_echo` | Producer accepts `origin_path` / `origin_kind` / `origin_label` / `origin_cell_id` and echoes them in `result.origin`. |
 
 Consumers detect optional features via `capabilities`, not by parsing `schema_version`. Producers may add entries; agents MUST treat unknown capability names as opaque.
 

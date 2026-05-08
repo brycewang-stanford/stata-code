@@ -91,15 +91,26 @@ export function computeRenameSkipMask(
     if (ch === "`") {
       // Stata macro reference: `` `name' ``, `` `=expr' ``, or nested
       // `` `outer `inner' ' ``. Treat ``` ` ``` and ``'`` like balanced
-      // brackets and skip the whole span. If the brackets stay open to
-      // end-of-line, skip to EOL conservatively (Stata macros rarely span
-      // lines, but we'd rather over-skip than corrupt code).
+      // brackets and skip the whole span. We also track ``"…"`` literals
+      // inside the macro body so that an apostrophe inside a string —
+      // ``` `= "it's"' ``` — doesn't prematurely close the outer macro.
+      // If the brackets stay open to end-of-line, skip to EOL conservatively
+      // (Stata macros rarely span lines, but we'd rather over-skip than
+      // corrupt code).
       let depth = 1;
+      let inMacroString = false;
       let j = i + 1;
       while (j < text.length && depth > 0) {
         const c = text[j];
-        if (c === "`") depth += 1;
-        else if (c === "'") depth -= 1;
+        if (inMacroString) {
+          if (c === '"') inMacroString = false;
+        } else if (c === '"') {
+          inMacroString = true;
+        } else if (c === "`") {
+          depth += 1;
+        } else if (c === "'") {
+          depth -= 1;
+        }
         j += 1;
       }
       if (depth !== 0) {

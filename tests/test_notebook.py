@@ -240,6 +240,37 @@ def test_outline_synth_id_resolves_in_get_cell(tmp_path: Path) -> None:
     assert detail["source"] == "x=1"
 
 
+def test_outputs_summary_streams_and_truncates_text(tmp_path: Path) -> None:
+    """A cell with many large stream outputs should not materialise the full
+    concatenation in memory — `_summarise_outputs` truncates as it goes.
+    The post-fix contract: `text_preview` length ≤ budget + suffix, and
+    `text_chars_total` reflects the full pre-truncation size.
+    """
+    big = "x" * 5_000  # one output well above the 4_000-char budget
+    path = _write_nb(
+        tmp_path,
+        [
+            {
+                "cell_type": "code",
+                "id": "x",
+                "execution_count": 1,
+                "source": "spam()",
+                "metadata": {},
+                "outputs": [
+                    {"output_type": "stream", "name": "stdout", "text": big}
+                    for _ in range(50)
+                ],
+            }
+        ],
+    )
+    detail = get_cell(path, cell_id="x")
+    summary = detail["outputs_summary"]
+    assert summary["text_truncated"] is True
+    # Budget is 4 000 chars; suffix "…[truncated]" is then appended.
+    assert len(summary["text_preview"]) <= 4_000 + len("…[truncated]")
+    assert summary["text_chars_total"] == 50 * 5_000
+
+
 def test_traceback_truncation(tmp_path: Path) -> None:
     long_tb = [f"line {i}" for i in range(100)]
     path = _write_nb(

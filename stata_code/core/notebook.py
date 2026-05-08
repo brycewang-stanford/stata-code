@@ -1,15 +1,27 @@
-"""Read-only helpers for Jupyter notebooks (.ipynb).
+"""Helpers for navigating and editing Jupyter notebooks (.ipynb).
 
 stata-code's MCP execution protocol stays cell-agnostic: `stata_run` accepts a
 string and returns a `RunResult`. This module provides side-channel tools so
-agents can navigate a notebook without pulling the whole file into context:
+agents can navigate, search, and atomically edit a notebook without pulling
+the whole file into context or risking JSON corruption.
+
+Phase 1 (read-only):
 
 - :func:`outline_notebook` — one-line preview per cell (id, type, head)
 - :func:`get_cell` — single cell's full source plus a token-economic summary
   of its outputs
 
-Both functions only read from disk. They do not mutate the notebook and never
-re-run a cell. Editing/inserting/deleting cells lives in Phase 2.
+Phase 2 (search + atomic edits):
+
+- :func:`locate_cells` — find cells by exact snippet, regex, or error text
+- :func:`edit_cell` — atomically replace one cell's source; preserves the
+  cell's ``id`` and ``metadata``; clears ``outputs`` and ``execution_count``
+- :func:`insert_cell` — insert a new cell after/before an anchor; assigns a
+  fresh nbformat 4.5+ UUID
+- :func:`delete_cell` — remove a cell by id
+
+Edits write the whole notebook atomically (temp file + rename). The runner
+itself never mutates the notebook — only these explicit edit calls do.
 
 Cell identity follows nbformat 4.5+: every cell SHOULD have a stable ``id``
 field. For older notebooks (pre-4.5) we synthesise a deterministic id from
@@ -22,6 +34,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
+import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 
@@ -273,16 +289,18 @@ def _summarise_outputs(outputs: list[Any]) -> dict[str, Any]:
     still counted); ``types`` only includes well-formed dict outputs, so
     ``count >= len(types)`` always.
 
-    TODO(phase 2): stream `text_chunks` and stop early once the preview budget
-    is hit so we don't materialise multi-MB output blobs in memory before
-    truncating to 4 KB. The current worst case is bounded by the on-disk
-    notebook size, but a streaming version would be cheaper for very chatty
-    cells (50× 2 KB stream events).
+    Streaming-truncation contract: we keep accumulating ``text_chars_total``
+    across every output (so the caller knows how much was elided) but stop
+    appending to ``text_preview_parts`` once the ``_MAX_OUTPUT_TEXT_CHARS``
+    budget is hit. A pathological cell with 50 stream events × 2 KB is now
+    O(budget + per-output overhead) in memory, not O(total).
     """
     types: list[str] = []
-    text_chunks: list[str] = []
     has_image = False
     error_summary: dict[str, Any] | None = None
+    text_preview_parts: list[str] = []
+    remaining_budget = _MAX_OUTPUT_TEXT_CHARS
+    chars_total = 0
 
     for o in outputs:
         if not isinstance(o, dict):
@@ -307,11 +325,18 @@ def _summarise_outputs(outputs: list[Any]) -> dict[str, Any]:
                 "traceback_truncated": len(tb_lines) > _MAX_TRACEBACK_HEAD + _MAX_TRACEBACK_TAIL,
             }
         payload = _output_text_payload(o)
-        if payload:
-            text_chunks.append(payload)
+        if not payload:
+            continue
+        chars_total += len(payload)
+        if remaining_budget > 0:
+            take = payload[:remaining_budget]
+            text_preview_parts.append(take)
+            remaining_budget -= len(take)
 
-    full_text = "".join(text_chunks)
-    text_preview, truncated = _truncate(full_text, _MAX_OUTPUT_TEXT_CHARS)
+    truncated = chars_total > _MAX_OUTPUT_TEXT_CHARS
+    text_preview = "".join(text_preview_parts)
+    if truncated:
+        text_preview += "…[truncated]"
 
     return {
         "count": len(outputs),
@@ -320,7 +345,7 @@ def _summarise_outputs(outputs: list[Any]) -> dict[str, Any]:
         "has_error": error_summary is not None,
         "error": error_summary,
         "text_preview": text_preview,
-        "text_chars_total": len(full_text),
+        "text_chars_total": chars_total,
         "text_truncated": truncated,
     }
 
@@ -406,4 +431,532 @@ def get_cell(
         "execution_count": exec_count,
         "metadata": metadata,
         "outputs_summary": _summarise_outputs(outputs_list) if ctype == "code" else None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Locate (Phase 2 — search)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_LOCATE_LIMIT_DEFAULT = 10
+_LOCATE_LIMIT_MAX = 100
+_LOCATE_PREVIEW_LINES = 3
+_ERROR_TEXT_LINE_MIN_LEN = 8
+
+
+def _line_with_match(source: str, idx: int) -> tuple[int, str]:
+    """Return (1-based line number, line text) for a character offset."""
+    line_no = source.count("\n", 0, idx) + 1
+    line_start = source.rfind("\n", 0, idx) + 1
+    line_end = source.find("\n", idx)
+    line_text = source[line_start:] if line_end == -1 else source[line_start:line_end]
+    return line_no, line_text
+
+
+def _score_snippet(source: str, snippet: str) -> tuple[float, int | None]:
+    """Score a cell against a literal snippet.
+
+    Returns ``(score in [0, 1], line_number)``. Higher is better; 0 means
+    no match. Exact-substring match is 1.0; longest-common-line match scores
+    by `match_chars / snippet_chars`. Whitespace is normalised on each line
+    so leading-indent shifts don't tank the score.
+    """
+    if not snippet:
+        return 0.0, None
+    needle = snippet.strip()
+    if not needle:
+        return 0.0, None
+
+    idx = source.find(needle)
+    if idx >= 0:
+        line_no, _ = _line_with_match(source, idx)
+        return 1.0, line_no
+
+    # Fallback: per-line containment of any non-empty line of `snippet`.
+    snippet_lines = [ln.strip() for ln in needle.split("\n") if ln.strip()]
+    if not snippet_lines:
+        return 0.0, None
+    # Score against the non-blank content only; blank separators in `needle`
+    # would otherwise inflate the denominator and tank otherwise-good matches.
+    needle_chars = sum(len(ln) for ln in snippet_lines)
+
+    best_score = 0.0
+    best_line: int | None = None
+    source_lines = source.split("\n")
+    for src_idx, src_line in enumerate(source_lines, start=1):
+        norm = src_line.strip()
+        if not norm:
+            continue
+        for snip_line in snippet_lines:
+            if snip_line and snip_line in norm:
+                score = len(snip_line) / max(needle_chars, 1)
+                if score > best_score:
+                    best_score = score
+                    best_line = src_idx
+                    if best_score >= 0.99:
+                        return best_score, best_line
+    return best_score, best_line
+
+
+def _score_regex(source: str, pattern: re.Pattern[str]) -> tuple[float, int | None]:
+    m = pattern.search(source)
+    if m is None:
+        return 0.0, None
+    line_no, _ = _line_with_match(source, m.start())
+    return 1.0, line_no
+
+
+def _score_error_text(source: str, error_text: str) -> tuple[float, int | None]:
+    """Use error text (e.g. a Stata traceback) as a content fingerprint.
+
+    Strategy: extract substrings that look like Stata commands or identifiers
+    from `error_text` and find the longest one that occurs in `source`. This
+    is the workflow from the design notes — the user pastes a failure log,
+    the agent uses ``error.context.failing`` (or analogous text) to locate
+    the originating cell.
+    """
+    if not error_text:
+        return 0.0, None
+
+    # Candidate fingerprints: lines that look code-like (have alphanumerics
+    # and aren't pure punctuation/traceback markers). Sort by length desc so
+    # we try the most specific first.
+    candidates: list[str] = []
+    for raw in error_text.split("\n"):
+        s = raw.strip()
+        if len(s) < _ERROR_TEXT_LINE_MIN_LEN:
+            continue
+        if not any(c.isalnum() for c in s):
+            continue
+        # Drop a leading "r(123);" / "Traceback (..." / similar framing.
+        s = re.sub(r"^(r\(\d+\);|>|\.\s*|--+\s*|\*+\s*)", "", s).strip()
+        if len(s) < _ERROR_TEXT_LINE_MIN_LEN:
+            continue
+        candidates.append(s)
+    candidates.sort(key=len, reverse=True)
+
+    for s in candidates:
+        idx = source.find(s)
+        if idx >= 0:
+            line_no, _ = _line_with_match(source, idx)
+            return min(1.0, len(s) / 80.0 + 0.5), line_no
+    return 0.0, None
+
+
+def locate_cells(
+    path: str | Path,
+    *,
+    snippet: str | None = None,
+    regex: str | None = None,
+    error_text: str | None = None,
+    cell_type: str | None = None,
+    limit: int = _LOCATE_LIMIT_DEFAULT,
+) -> dict[str, Any]:
+    """Find cells in a notebook by content.
+
+    Exactly one of ``snippet`` / ``regex`` / ``error_text`` is required:
+
+    - ``snippet`` — literal substring match (preferred for quoting code lines).
+      Whitespace-normalised line-by-line fallback if the exact match fails.
+    - ``regex`` — Python regex applied to the cell source (multiline mode).
+    - ``error_text`` — pasted Stata/traceback text; the longest code-like line
+      is treated as a fingerprint and located in the notebook.
+
+    Optional ``cell_type`` filters to ``"code"``, ``"markdown"``, or ``"raw"``.
+
+    Returns up to ``limit`` candidates, sorted by descending score:
+
+        {
+            "path": <abs path>,
+            "query": {"snippet"|"regex"|"error_text": ...},
+            "match_count": int,
+            "matches": [
+                {
+                    "cell_id": str,
+                    "id_synthesized": bool,
+                    "index": int,
+                    "cell_type": str,
+                    "score": float,           # in (0, 1]
+                    "line_in_cell": int|null, # 1-based, where the match was found
+                    "preview": str,           # ±1 line around the match, ≤3 lines
+                },
+                ...
+            ],
+        }
+    """
+    provided = [
+        ("snippet", snippet),
+        ("regex", regex),
+        ("error_text", error_text),
+    ]
+    chosen = [(k, v) for k, v in provided if v]
+    if len(chosen) == 0:
+        raise NotebookError(
+            "locate_query_required: provide snippet, regex, or error_text"
+        )
+    if len(chosen) > 1:
+        raise NotebookError(
+            "locate_query_conflict: pass exactly one of snippet/regex/error_text"
+        )
+    if not isinstance(limit, int) or limit < 1:
+        raise NotebookError("locate_limit_invalid: limit must be a positive integer")
+    if limit > _LOCATE_LIMIT_MAX:
+        limit = _LOCATE_LIMIT_MAX
+    if cell_type is not None and cell_type not in ("code", "markdown", "raw"):
+        raise NotebookError(
+            f"cell_type_invalid: must be code|markdown|raw, got {cell_type!r}"
+        )
+
+    nb = load_notebook(path)
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = p.resolve()
+
+    compiled_regex: re.Pattern[str] | None = None
+    if regex is not None:
+        try:
+            compiled_regex = re.compile(regex, re.MULTILINE)
+        except re.error as exc:
+            raise NotebookError(f"locate_regex_invalid: {exc}") from exc
+
+    matches: list[dict[str, Any]] = []
+    for index, cell in enumerate(nb["cells"]):
+        if not isinstance(cell, dict):
+            continue
+        ctype = _cell_type(cell)
+        if cell_type is not None and ctype != cell_type:
+            continue
+        source = _source_to_str(cell.get("source"))
+        if not source:
+            continue
+
+        if snippet is not None:
+            score, line_no = _score_snippet(source, snippet)
+        elif compiled_regex is not None:
+            score, line_no = _score_regex(source, compiled_regex)
+        else:
+            score, line_no = _score_error_text(source, error_text or "")
+
+        if score <= 0.0:
+            continue
+
+        cell_id, synthesized = _cell_id(cell, index, source)
+        preview = _preview_around(source, line_no, _LOCATE_PREVIEW_LINES)
+        matches.append(
+            {
+                "cell_id": cell_id,
+                "id_synthesized": synthesized,
+                "index": index,
+                "cell_type": ctype,
+                "score": round(score, 4),
+                "line_in_cell": line_no,
+                "preview": preview,
+            }
+        )
+
+    matches.sort(key=lambda m: (-m["score"], m["index"]))
+    matches = matches[:limit]
+
+    query: dict[str, str] = {chosen[0][0]: chosen[0][1] or ""}
+    return {
+        "path": str(p),
+        "query": query,
+        "match_count": len(matches),
+        "matches": matches,
+    }
+
+
+def _preview_around(source: str, line_no: int | None, max_lines: int) -> str:
+    if line_no is None:
+        return _source_preview(source, max_lines)
+    lines = source.split("\n")
+    half = max_lines // 2
+    start = max(0, line_no - 1 - half)
+    end = min(len(lines), line_no - 1 + (max_lines - half))
+    chunk = lines[start:end]
+    truncated = [
+        (
+            ln
+            if len(ln) <= _PREVIEW_CHARS_PER_LINE
+            else ln[: _PREVIEW_CHARS_PER_LINE - 1] + "…"
+        )
+        for ln in chunk
+    ]
+    return "\n".join(truncated)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Edit / insert / delete (Phase 2 — atomic mutations)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_VALID_NEW_CELL_TYPES = ("code", "markdown", "raw")
+
+
+def _resolve_path(path: str | Path) -> Path:
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = p.resolve()
+    return p
+
+
+def _atomic_write_notebook(path: Path, nb: dict[str, Any]) -> None:
+    """Write the notebook JSON atomically (temp file + rename in same dir).
+
+    Uses ``json.dumps`` with ``indent=1`` to match the convention Jupyter
+    uses on save (small diffs, line-stable). Trailing newline matches the
+    nbformat saver behaviour.
+    """
+    # Match Jupyter / nbformat.writes: indent=1 with no trailing space after
+    # commas, so saved-by-stata-code notebooks diff cleanly against
+    # saved-by-Jupyter notebooks.
+    serialised = json.dumps(
+        nb, indent=1, separators=(",", ": "), ensure_ascii=False
+    )
+    if not serialised.endswith("\n"):
+        serialised += "\n"
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(serialised)
+        os.replace(tmp_name, path)
+    except Exception:
+        # Best-effort cleanup of the temp file on any write/rename failure.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _new_cell_id() -> str:
+    """RFC 4122 UUID4 hex — matches Jupyter's nbformat 4.5+ id format."""
+    return str(uuid.uuid4())
+
+
+def _build_cell(
+    *,
+    cell_type: str,
+    source: str,
+    cell_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if cell_type not in _VALID_NEW_CELL_TYPES:
+        raise NotebookError(
+            f"cell_type_invalid: must be {'|'.join(_VALID_NEW_CELL_TYPES)}, "
+            f"got {cell_type!r}"
+        )
+    cell: dict[str, Any] = {
+        "cell_type": cell_type,
+        "id": cell_id,
+        "metadata": metadata or {},
+        "source": source,
+    }
+    if cell_type == "code":
+        cell["execution_count"] = None
+        cell["outputs"] = []
+    return cell
+
+
+def _ensure_native_id(cell: dict[str, Any], index: int, source: str) -> str:
+    """Make sure a cell has a real ``id`` field. Returns the id we used.
+
+    If the notebook is pre-4.5 (cell lacks ``id``), upgrade the cell in place
+    by assigning a fresh UUID. We do this only when an edit/delete actually
+    needs a stable handle and the caller addressed the cell by its synthesised
+    id (so the user is intentionally working with this cell).
+    """
+    raw = cell.get("id")
+    if isinstance(raw, str) and raw:
+        return raw
+    new_id = _new_cell_id()
+    cell["id"] = new_id
+    return new_id
+
+
+def edit_cell(
+    path: str | Path,
+    *,
+    cell_id: str,
+    new_source: str,
+    expected_source: str | None = None,
+) -> dict[str, Any]:
+    """Atomically replace one cell's source.
+
+    Preserves the cell's ``id`` and ``metadata``. For code cells, clears
+    ``outputs`` and ``execution_count`` (because the previous outputs no
+    longer correspond to the new source).
+
+    ``expected_source`` is an optional optimistic-concurrency guard: when
+    provided, the call fails with ``edit_source_drift`` if the current
+    on-disk source differs. Use this when the agent read the cell some
+    time ago — it prevents clobbering edits the user made in between.
+
+    Returns the updated cell summary (same shape as :func:`get_cell`'s
+    return, minus ``outputs_summary`` since outputs were cleared).
+    """
+    if not isinstance(new_source, str):
+        raise NotebookError("edit_source_invalid: new_source must be a string")
+
+    p = _resolve_path(path)
+    nb = load_notebook(p)
+    cells = nb["cells"]
+    index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
+    current_source = _source_to_str(cell.get("source"))
+
+    if expected_source is not None and expected_source != current_source:
+        raise NotebookError(
+            "edit_source_drift: on-disk source no longer matches expected_source; "
+            "re-read the cell before editing"
+        )
+
+    actual_id = _ensure_native_id(cell, index, current_source)
+    ctype = _cell_type(cell)
+    cell["source"] = new_source
+    if ctype == "code":
+        cell["outputs"] = []
+        cell["execution_count"] = None
+
+    _atomic_write_notebook(p, nb)
+
+    return {
+        "path": str(p),
+        "cell_id": actual_id,
+        "id_synthesized": False,  # we just upgraded if it was synth
+        "index": index,
+        "cell_type": ctype,
+        "source": new_source,
+        "line_count": new_source.count("\n")
+        + (1 if new_source and not new_source.endswith("\n") else 0),
+        "char_count": len(new_source),
+        "execution_count": None,
+        "metadata": cell.get("metadata") or {},
+        "previous_source": current_source,
+    }
+
+
+def insert_cell(
+    path: str | Path,
+    *,
+    source: str,
+    cell_type: str = "code",
+    after_cell_id: str | None = None,
+    before_cell_id: str | None = None,
+    at_start: bool = False,
+    at_end: bool = False,
+) -> dict[str, Any]:
+    """Insert a new cell with a fresh nbformat 4.5+ UUID.
+
+    Exactly one anchor must be specified:
+
+    - ``after_cell_id`` — insert immediately after the named cell
+    - ``before_cell_id`` — insert immediately before the named cell
+    - ``at_start=True`` — insert at index 0
+    - ``at_end=True`` — append to the end
+
+    Returns the new cell's id, index, and a `get_cell`-shaped summary.
+    """
+    if not isinstance(source, str):
+        raise NotebookError("insert_source_invalid: source must be a string")
+    anchors = [
+        ("after_cell_id", after_cell_id),
+        ("before_cell_id", before_cell_id),
+        ("at_start", at_start or None),
+        ("at_end", at_end or None),
+    ]
+    chosen = [(k, v) for k, v in anchors if v]
+    if len(chosen) != 1:
+        raise NotebookError(
+            "insert_anchor_required: pass exactly one of after_cell_id, "
+            "before_cell_id, at_start, at_end"
+        )
+    if cell_type not in _VALID_NEW_CELL_TYPES:
+        raise NotebookError(
+            f"cell_type_invalid: must be {'|'.join(_VALID_NEW_CELL_TYPES)}, "
+            f"got {cell_type!r}"
+        )
+
+    p = _resolve_path(path)
+    nb = load_notebook(p)
+    cells = nb["cells"]
+
+    if at_start:
+        target_index = 0
+    elif at_end:
+        target_index = len(cells)
+    elif after_cell_id:
+        anchor_index, anchor_cell = _resolve_cell(
+            cells, cell_id=after_cell_id, cell_index=None
+        )
+        # If the anchor was a pre-4.5 cell addressed by its synth id, upgrade
+        # to a real UUID. Otherwise the anchor's index-derived synth id would
+        # change after insertion (silent foot-gun for the caller).
+        anchor_source = _source_to_str(anchor_cell.get("source"))
+        _ensure_native_id(anchor_cell, anchor_index, anchor_source)
+        target_index = anchor_index + 1
+    else:
+        anchor_index, anchor_cell = _resolve_cell(
+            cells, cell_id=before_cell_id, cell_index=None
+        )
+        anchor_source = _source_to_str(anchor_cell.get("source"))
+        _ensure_native_id(anchor_cell, anchor_index, anchor_source)
+        target_index = anchor_index
+
+    new_id = _new_cell_id()
+    new_cell = _build_cell(cell_type=cell_type, source=source, cell_id=new_id)
+    cells.insert(target_index, new_cell)
+    _atomic_write_notebook(p, nb)
+
+    return {
+        "path": str(p),
+        "cell_id": new_id,
+        "id_synthesized": False,
+        "index": target_index,
+        "cell_type": cell_type,
+        "source": source,
+        "line_count": source.count("\n")
+        + (1 if source and not source.endswith("\n") else 0),
+        "char_count": len(source),
+        "execution_count": None,
+        "metadata": {},
+    }
+
+
+def delete_cell(
+    path: str | Path,
+    *,
+    cell_id: str,
+    expected_source: str | None = None,
+) -> dict[str, Any]:
+    """Remove a cell by id. Returns the deleted cell's summary so the agent
+    can announce or undo.
+
+    ``expected_source`` is an optional concurrency guard, same semantics as
+    :func:`edit_cell`.
+    """
+    p = _resolve_path(path)
+    nb = load_notebook(p)
+    cells = nb["cells"]
+    index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
+    current_source = _source_to_str(cell.get("source"))
+    if expected_source is not None and expected_source != current_source:
+        raise NotebookError(
+            "delete_source_drift: on-disk source no longer matches expected_source"
+        )
+    actual_id, synthesized = _cell_id(cell, index, current_source)
+    ctype = _cell_type(cell)
+    cells.pop(index)
+    _atomic_write_notebook(p, nb)
+
+    return {
+        "path": str(p),
+        "cell_id": actual_id,
+        "id_synthesized": synthesized,
+        "index": index,
+        "cell_type": ctype,
+        "deleted_source": current_source,
+        "remaining_cell_count": len(cells),
     }

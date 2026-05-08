@@ -139,16 +139,63 @@ Recommended loop (opt-in; never run without an explicit "fix and rerun" request)
      cell's source verbatim — no off-by-one math against the notebook file.
    - `error.context.failing` is the failing command line; use it as a content
      fingerprint when the user describes the failure later.
-5. If the user authorised repairs, propose an edit. Phase 1 has no
-   `notebook_edit_cell` tool yet — surface the patch and let the user apply it,
-   or use the IDE's notebook editor. Phase 2 will add atomic edit tools.
+5. If the user authorised repairs, apply the edit via
+   `notebook_edit_cell(path, cell_id, new_source, expected_source=<old source>)`.
+   The `expected_source` guard is optimistic-concurrency: if the user changed
+   the cell while the agent was working, the call fails with
+   `edit_source_drift` and the agent must re-read.
 6. Repeat from step 3 with a small retry budget (default 3). If still failing,
    stop and recommend `restart kernel + run all from top` — repeated failure
    on a single cell is usually upstream-state pollution, not a code bug.
 
-Non-goals for Phase 1:
+Phase 2 also adds:
+
+- `notebook_locate(path, snippet=… | regex=… | error_text=…)` — turn a code
+  fingerprint or pasted Stata error into one or more candidate cells. Use this
+  when the user describes a failure without selecting a cell ("the regression
+  cell errored out") instead of asking them to scroll.
+- `notebook_insert_cell(path, source, after_cell_id=… | before_cell_id=… |
+  at_start=true | at_end=true, cell_type="code"|"markdown"|"raw")` — assigns
+  a fresh nbformat 4.5+ UUID. Use sparingly; explicitly tell the user that a
+  new cell was added.
+- `notebook_delete_cell(path, cell_id, expected_source=…)` — same drift guard
+  as edit. Confirm with the user before calling unless the deletion is
+  obviously requested.
+
+## Run-bundle index (Phase 3)
+
+Every `stata_run` call with `persist_log_files=true` and `origin_path=…`
+writes a manifest under `<origin dir>/log-files/<run-dir>/manifest.json`.
+`list_runs` is the read-only query over those manifests:
+
+```python
+list_runs(
+    log_dir | origin_path,        # one of these is required
+    cell_id?,                      # filter by origin_cell_id
+    session_id?,
+    ok?,
+    since?,                        # ISO 8601 UTC, lexicographic >=
+    limit=50,                      # max 500
+)
+```
+
+Returns newest-first compact summaries (request_id, started_at, ok, rc,
+origin_*, directory, manifest_path, log_path). For the full manifest, read
+the file at `manifest_path` directly. Use cases:
+
+- "What did I last try on this cell?" → `cell_id=…, limit=5`
+- "Show me failures in this notebook" → `origin_path=<.ipynb>, ok=false`
+- "Anything since 02:00 UTC?" → `since="2026-05-08T02:00:00.000Z"`
+
+Pair with `origin_cell_id` echo on `stata_run` to close the loop: the
+agent's runs are now traceable back to specific cells without the MCP
+protocol becoming notebook-aware.
+
+Non-goals (still):
 
 - No notebook-wide execution (`notebook_run_all`). Per-cell stays the unit.
 - No execution-count tracking in the protocol — that's a kernel/UI concern.
 - No new `error` schema fields. `error.line` and `error.context` already work
   cell-relative when the agent submits one cell at a time.
+- `list_runs` only sees runs that were persisted (`persist_log_files=true`
+  and `origin_path` provided). Ephemeral runs leave no trace, by design.

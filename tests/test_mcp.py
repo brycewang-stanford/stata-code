@@ -87,6 +87,31 @@ class TestToolRegistry:
         assert gg.annotations is not None
         assert gg.annotations.readOnlyHint is True
 
+    def test_notebook_locate_schema_oneof(self):
+        from stata_code.mcp.server import _tool_definitions
+
+        loc = next(t for t in _tool_definitions() if t.name == "notebook_locate")
+        schema = loc.inputSchema
+        assert "oneOf" in schema
+        required_sets = [tuple(sorted(o.get("required", []))) for o in schema["oneOf"]]
+        assert ("snippet",) in required_sets
+        assert ("regex",) in required_sets
+        assert ("error_text",) in required_sets
+
+    def test_notebook_insert_cell_schema_oneof(self):
+        from stata_code.mcp.server import _tool_definitions
+
+        ins = next(t for t in _tool_definitions() if t.name == "notebook_insert_cell")
+        schema = ins.inputSchema
+        assert "oneOf" in schema
+        anchors = {tuple(sorted(o.get("required", []))) for o in schema["oneOf"]}
+        assert anchors == {
+            ("after_cell_id",),
+            ("before_cell_id",),
+            ("at_start",),
+            ("at_end",),
+        }
+
     def test_resource_templates_include_ref_shapes(self):
         from stata_code.mcp.server import _resource_templates
 
@@ -108,6 +133,35 @@ class TestToolRegistry:
         assert "replication_audit" in prompts
         assert "summarize_estimation_results" in prompts
         assert prompts["run_do_file_and_report"].arguments[0].name == "path"
+
+    def test_prompts_include_notebook_cell_workflows(self):
+        from stata_code.mcp.server import _get_mcp_prompt, _prompt_definitions
+
+        prompts = {p.name: p for p in _prompt_definitions()}
+        assert "run_notebook_cell_and_report" in prompts
+        assert "fix_and_rerun_notebook_cell" in prompts
+
+        # Both prompts require path + cell_id; fix prompt also takes
+        # max_attempts.
+        run_args = {a.name: a for a in prompts["run_notebook_cell_and_report"].arguments}
+        assert run_args["path"].required is True
+        assert run_args["cell_id"].required is True
+
+        fix_args = {a.name: a for a in prompts["fix_and_rerun_notebook_cell"].arguments}
+        assert fix_args["path"].required is True
+        assert fix_args["cell_id"].required is True
+        assert "max_attempts" in fix_args
+
+        # Rendered prompt body wires origin_cell_id and the expected_source
+        # concurrency guard — these are the load-bearing details for agents.
+        rendered = _get_mcp_prompt(
+            "fix_and_rerun_notebook_cell",
+            {"path": "/x.ipynb", "cell_id": "abc"},
+        )
+        body = rendered.messages[0].content.text
+        assert "origin_cell_id" in body
+        assert "expected_source" in body
+        assert "restart kernel" in body
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +332,15 @@ class TestDispatch:
         }
         assert body["version"] == "19.0"
         assert "matrix_ref" in body["capabilities"]
+        # Phase 1-3 surface advertised so clients can feature-detect.
+        for cap in (
+            "notebook_navigation",
+            "notebook_search",
+            "notebook_edit",
+            "run_index",
+            "origin_echo",
+        ):
+            assert cap in body["capabilities"]
 
     def test_stata_info_dispatch_does_not_block_event_loop(self, monkeypatch):
         from stata_code.mcp import server

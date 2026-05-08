@@ -62,8 +62,16 @@ from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_inf
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.notebook import (
     NotebookError,
+    delete_cell as _notebook_delete_cell,
+    edit_cell as _notebook_edit_cell,
     get_cell as _notebook_get_cell,
+    insert_cell as _notebook_insert_cell,
+    locate_cells as _notebook_locate_cells,
     outline_notebook as _notebook_outline,
+)
+from stata_code.core.run_index import (
+    RunIndexError,
+    list_runs as _list_runs,
 )
 from stata_code.core.runner import (
     cancel,
@@ -74,7 +82,7 @@ from stata_code.core.runner import (
 )
 from stata_code.core.schema import RunResult
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 SERVER_INSTRUCTIONS = (
     "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
@@ -245,6 +253,151 @@ _NOTEBOOK_GET_CELL_OUTPUT_SCHEMA = _object_schema(
         "source",
         "line_count",
         "char_count",
+    ],
+)
+
+_NOTEBOOK_LOCATE_MATCH_SCHEMA = _object_schema(
+    {
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "score": {"type": "number"},
+        "line_in_cell": {"type": ["integer", "null"]},
+        "preview": {"type": "string"},
+    },
+    [
+        "cell_id",
+        "id_synthesized",
+        "index",
+        "cell_type",
+        "score",
+        "preview",
+    ],
+)
+
+_NOTEBOOK_LOCATE_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "query": {"type": "object"},
+        "match_count": {"type": "integer"},
+        "matches": {
+            "type": "array",
+            "items": _NOTEBOOK_LOCATE_MATCH_SCHEMA,
+        },
+    },
+    ["path", "query", "match_count", "matches"],
+)
+
+_NOTEBOOK_EDIT_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "source": {"type": "string"},
+        "line_count": {"type": "integer"},
+        "char_count": {"type": "integer"},
+        "execution_count": {"type": ["integer", "null"]},
+        "metadata": {"type": "object"},
+        "previous_source": {"type": "string"},
+    },
+    [
+        "path",
+        "cell_id",
+        "index",
+        "cell_type",
+        "source",
+        "previous_source",
+    ],
+)
+
+_NOTEBOOK_INSERT_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "source": {"type": "string"},
+        "line_count": {"type": "integer"},
+        "char_count": {"type": "integer"},
+        "execution_count": {"type": ["integer", "null"]},
+        "metadata": {"type": "object"},
+    },
+    [
+        "path",
+        "cell_id",
+        "index",
+        "cell_type",
+        "source",
+    ],
+)
+
+_NOTEBOOK_DELETE_OUTPUT_SCHEMA = _object_schema(
+    {
+        "path": {"type": "string"},
+        "cell_id": {"type": "string"},
+        "id_synthesized": {"type": "boolean"},
+        "index": {"type": "integer"},
+        "cell_type": {"type": "string"},
+        "deleted_source": {"type": "string"},
+        "remaining_cell_count": {"type": "integer"},
+    },
+    [
+        "path",
+        "cell_id",
+        "index",
+        "cell_type",
+        "deleted_source",
+        "remaining_cell_count",
+    ],
+)
+
+# All manifest-derived fields are nullable because we tolerate older or
+# partially-populated manifests (run_index._read_manifest only enforces a
+# small core of required fields). `directory` and `manifest_path` are the
+# only non-nullable strings: they are derived from the on-disk path that
+# was just scanned, never from manifest content, so they cannot be missing.
+_LIST_RUNS_ENTRY_SCHEMA = _object_schema(
+    {
+        "request_id": {"type": ["string", "null"]},
+        "session_id": {"type": ["string", "null"]},
+        "started_at": {"type": ["string", "null"]},
+        "elapsed_ms": {"type": ["integer", "null"]},
+        "ok": {"type": ["boolean", "null"]},
+        "rc": {"type": ["integer", "null"]},
+        "source_path": {"type": ["string", "null"]},
+        "origin_kind": {"type": ["string", "null"]},
+        "origin_label": {"type": ["string", "null"]},
+        "origin_cell_id": {"type": ["string", "null"]},
+        "directory": {"type": "string"},
+        "manifest_path": {"type": "string"},
+        "log_path": {"type": ["string", "null"]},
+        "code_path": {"type": ["string", "null"]},
+    },
+    ["directory", "manifest_path"],
+)
+
+_LIST_RUNS_OUTPUT_SCHEMA = _object_schema(
+    {
+        "log_dir": {"type": "string"},
+        "scanned_count": {"type": "integer"},
+        "match_count": {"type": "integer"},
+        "skipped_count": {"type": "integer"},
+        "limit": {"type": "integer"},
+        "truncated": {"type": "boolean"},
+        "runs": {"type": "array", "items": _LIST_RUNS_ENTRY_SCHEMA},
+    },
+    [
+        "log_dir",
+        "scanned_count",
+        "match_count",
+        "skipped_count",
+        "limit",
+        "truncated",
+        "runs",
     ],
 )
 
@@ -632,6 +785,265 @@ def _tool_definitions() -> list[Tool]:
                 openWorldHint=False,
             ),
         ),
+        Tool(
+            name="notebook_locate",
+            title="Locate Notebook Cells",
+            description=(
+                "Find cells in a .ipynb by content. Pass exactly one of "
+                "snippet (literal substring with whitespace-tolerant fall-"
+                "back), regex (Python regex, multiline), or error_text "
+                "(pasted Stata/traceback text — the longest code-like line "
+                "is used as a fingerprint). Returns up to `limit` candidates "
+                "ranked by match score, each with cell_id, line_in_cell, "
+                "and a short preview. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute or workspace path to the .ipynb file.",
+                    },
+                    "snippet": {
+                        "type": "string",
+                        "description": (
+                            "Literal substring to match. Whitespace is "
+                            "normalised line-by-line as a fallback if the "
+                            "exact substring is not found."
+                        ),
+                    },
+                    "regex": {
+                        "type": "string",
+                        "description": "Python regex applied to the cell source (multiline mode).",
+                    },
+                    "error_text": {
+                        "type": "string",
+                        "description": (
+                            "Pasted error/traceback text. The longest code-"
+                            "like line is treated as a fingerprint and "
+                            "located in the notebook."
+                        ),
+                    },
+                    "cell_type": {
+                        "type": "string",
+                        "enum": ["code", "markdown", "raw"],
+                        "description": "Optional filter by cell type.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 10,
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Maximum number of candidates to return.",
+                    },
+                },
+                "required": ["path"],
+                # Schema-level expression of the "exactly one of snippet /
+                # regex / error_text" rule. The runtime guard in
+                # notebook.locate_cells still enforces this for clients that
+                # don't validate inputs against the schema.
+                "oneOf": [
+                    {"required": ["snippet"]},
+                    {"required": ["regex"]},
+                    {"required": ["error_text"]},
+                ],
+            },
+            outputSchema=_NOTEBOOK_LOCATE_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Locate Notebook Cells",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="notebook_edit_cell",
+            title="Edit Notebook Cell",
+            description=(
+                "Atomically replace one cell's source. Preserves cell.id and "
+                "metadata. For code cells, clears outputs and "
+                "execution_count. Optionally pass expected_source for "
+                "optimistic-concurrency: the call fails with "
+                "'edit_source_drift' if the on-disk source no longer "
+                "matches. Writes the whole notebook via temp file + rename. "
+                "Note: if the cell was addressed by a synthesised id (pre-"
+                "nbformat-4.5 notebook), the cell is upgraded to a real UUID "
+                "during this call. The old synth id is no longer valid — "
+                "use the cell_id returned in this result for follow-up calls."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "cell_id": {
+                        "type": "string",
+                        "description": (
+                            "Cell to edit. If addressing a pre-4.5 cell by "
+                            "synthesised id, the cell is upgraded with a "
+                            "fresh nbformat 4.5+ UUID before saving."
+                        ),
+                    },
+                    "new_source": {
+                        "type": "string",
+                        "description": "Replacement source text.",
+                    },
+                    "expected_source": {
+                        "type": "string",
+                        "description": (
+                            "Optional concurrency guard. When provided, the "
+                            "current on-disk source must match exactly."
+                        ),
+                    },
+                },
+                "required": ["path", "cell_id", "new_source"],
+            },
+            outputSchema=_NOTEBOOK_EDIT_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Edit Notebook Cell",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="notebook_insert_cell",
+            title="Insert Notebook Cell",
+            description=(
+                "Insert a new cell with a fresh nbformat 4.5+ UUID. Pass "
+                "exactly one anchor: after_cell_id, before_cell_id, "
+                "at_start, or at_end. Default cell_type is 'code'."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "source": {"type": "string"},
+                    "cell_type": {
+                        "type": "string",
+                        "enum": ["code", "markdown", "raw"],
+                        "default": "code",
+                    },
+                    "after_cell_id": {"type": "string"},
+                    "before_cell_id": {"type": "string"},
+                    "at_start": {"type": "boolean"},
+                    "at_end": {"type": "boolean"},
+                },
+                "required": ["path", "source"],
+                # Exactly one anchor must be present. Booleans for
+                # at_start/at_end must additionally be `true` to count as
+                # "specified" — the JSON Schema below treats them as
+                # required-presence; the runtime guard in
+                # notebook.insert_cell additionally rejects the false-y form.
+                "oneOf": [
+                    {"required": ["after_cell_id"]},
+                    {"required": ["before_cell_id"]},
+                    {"required": ["at_start"]},
+                    {"required": ["at_end"]},
+                ],
+            },
+            outputSchema=_NOTEBOOK_INSERT_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Insert Notebook Cell",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="notebook_delete_cell",
+            title="Delete Notebook Cell",
+            description=(
+                "Remove a cell by id. Returns the deleted cell's source so "
+                "the caller can announce or undo. Optionally pass "
+                "expected_source for optimistic-concurrency."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "cell_id": {"type": "string"},
+                    "expected_source": {"type": "string"},
+                },
+                "required": ["path", "cell_id"],
+            },
+            outputSchema=_NOTEBOOK_DELETE_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Delete Notebook Cell",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="list_runs",
+            title="List Run Bundles",
+            description=(
+                "Query the on-disk run-bundle manifests under a log-files "
+                "directory. Pass either log_dir directly or origin_path "
+                "(then the dir is inferred as <origin_path parent>/log-"
+                "files). Filters compose with AND: cell_id, session_id, "
+                "ok, since (ISO 8601 UTC, lexicographic compare on "
+                "started_at). Read-only; never re-runs anything. Returns "
+                "compact summaries newest-first; callers fetch the full "
+                "manifest from the returned manifest_path if needed."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "log_dir": {
+                        "type": "string",
+                        "description": "Explicit log-files directory to scan.",
+                    },
+                    "origin_path": {
+                        "type": "string",
+                        "description": (
+                            "Source path (.do or .ipynb). Used both to "
+                            "locate <dirname>/log-files (when log_dir is "
+                            "absent) and as a filter on source_path."
+                        ),
+                    },
+                    "cell_id": {
+                        "type": "string",
+                        "description": (
+                            "Filter by origin_cell_id recorded on the run."
+                        ),
+                    },
+                    "session_id": {"type": "string"},
+                    "ok": {"type": "boolean"},
+                    "since": {
+                        "type": "string",
+                        "description": (
+                            "ISO 8601 UTC string, e.g. "
+                            "'2026-05-08T01:00:00.000Z'. Lexicographic "
+                            "compare against started_at; the boundary is "
+                            "inclusive (runs at exactly `since` are returned)."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "minimum": 1,
+                        "maximum": 500,
+                    },
+                },
+            },
+            outputSchema=_LIST_RUNS_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="List Run Bundles",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                # `list_runs` reads from caller-specified filesystem paths,
+                # which is "open world" the same way stata_run is — the
+                # surface is constrained (read-only, manifest.json only) but
+                # the input is not bounded by the server's own state.
+                openWorldHint=True,
+            ),
+        ),
     ]
 
 
@@ -880,6 +1292,66 @@ def _prompt_definitions() -> list[Prompt]:
                 ),
             ],
         ),
+        Prompt(
+            name="run_notebook_cell_and_report",
+            title="Run Notebook Cell and Report",
+            description=(
+                "Read one cell of a .ipynb and execute it through stata_run "
+                "with origin_cell_id metadata. Report ok, rc, typed errors, "
+                "warnings, and any artifacts without editing the cell."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="path",
+                    description="Path to the .ipynb file.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="cell_id",
+                    description="Stable nbformat 4.5+ cell id (or a synthesised id).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to main.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="fix_and_rerun_notebook_cell",
+            title="Fix and Rerun a Notebook Cell",
+            description=(
+                "Iteratively repair one notebook cell: notebook_get_cell → "
+                "stata_run with origin_cell_id → on failure, edit the cell "
+                "with notebook_edit_cell using expected_source as a "
+                "concurrency guard → rerun. Stop on success, on a small "
+                "retry budget, or with a recommendation to restart the "
+                "kernel if the same cell keeps failing."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="path",
+                    description="Path to the .ipynb file.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="cell_id",
+                    description="Cell to repair (nbformat 4.5+ id).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to main.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="max_attempts",
+                    description="Optional retry budget; defaults to 3.",
+                    required=False,
+                ),
+            ],
+        ),
     ]
 
 
@@ -949,6 +1421,52 @@ def _prompt_text(name: str, arguments: dict[str, str] | None) -> tuple[str, str]
                 "first; consult `log.ref` only for context missing from structured "
                 "fields. Keep statistical claims tied to available coefficients, "
                 "sample size, model command, and warnings."
+            ),
+        )
+    if name == "run_notebook_cell_and_report":
+        path = args.get("path", "<path>")
+        cell_id = args.get("cell_id", "<cell-id>")
+        session_id = args.get("session_id", "main")
+        return (
+            "Run a notebook cell and report",
+            (
+                f"Read cell `{cell_id}` of `{path}` via `notebook_get_cell`, "
+                f"then execute it with `stata_run` in session `{session_id}`. "
+                "Always pass `origin_path`, `origin_kind='cell'`, "
+                "`origin_cell_id` (the same id), and `persist_log_files=true` "
+                "so the run is traceable via `list_runs`. Report `ok`, `rc`, "
+                "any `error.kind/line/context`, warnings, and the run-bundle "
+                "directory. Do not edit the cell — this is a validation "
+                "workflow, not a repair workflow."
+            ),
+        )
+    if name == "fix_and_rerun_notebook_cell":
+        path = args.get("path", "<path>")
+        cell_id = args.get("cell_id", "<cell-id>")
+        session_id = args.get("session_id", "main")
+        max_attempts = args.get("max_attempts", "3")
+        return (
+            "Fix and rerun a notebook cell",
+            (
+                f"Repair cell `{cell_id}` of `{path}` in session "
+                f"`{session_id}`. Loop:\n"
+                "1. `notebook_get_cell(path, cell_id)` → capture `source`.\n"
+                "2. `stata_run(code=source, origin_path=path, "
+                "origin_kind='cell', origin_cell_id=cell_id, "
+                "persist_log_files=true)`.\n"
+                "3. If `ok=true`, stop and report.\n"
+                "4. Otherwise use `error.line` (already cell-relative) and "
+                "`error.context.failing` to make the smallest defensible "
+                "edit, then call `notebook_edit_cell(path, cell_id, "
+                "new_source, expected_source=source)` — the "
+                "`expected_source` guard catches concurrent human edits.\n"
+                f"5. Repeat up to {max_attempts} times. If still failing, "
+                "stop and recommend `restart kernel + run all from top` "
+                "rather than continuing to edit — repeated failure on one "
+                "cell usually signals upstream-state pollution, not a code "
+                "bug.\n"
+                "Report changed cell, attempts made, final status, and any "
+                "residual risk."
             ),
         )
     raise ValueError(f"Unknown prompt: {name}")
@@ -1113,12 +1631,26 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _notebook_outline_tool(arguments)
         if name == "notebook_get_cell":
             return _notebook_get_cell_tool(arguments)
+        if name == "notebook_locate":
+            return _notebook_locate_tool(arguments)
+        if name == "notebook_edit_cell":
+            return _notebook_edit_cell_tool(arguments)
+        if name == "notebook_insert_cell":
+            return _notebook_insert_cell_tool(arguments)
+        if name == "notebook_delete_cell":
+            return _notebook_delete_cell_tool(arguments)
+        if name == "list_runs":
+            return _list_runs_tool(arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
         # Message starts with a stable kind prefix like "notebook_not_found:".
         msg = str(exc)
         kind, _, _ = msg.partition(":")
         return _error_result(msg, kind=kind or "notebook_error")
+    except RunIndexError as exc:
+        msg = str(exc)
+        kind, _, _ = msg.partition(":")
+        return _error_result(msg, kind=kind or "run_index_error")
     except KeyError as exc:
         return _error_result(f"Unknown ref: {exc}", kind="unknown_ref")
     except PystataNotAvailable as exc:
@@ -1175,6 +1707,175 @@ def _notebook_get_cell_tool(arguments: dict[str, Any]) -> Any:
         path,
         cell_id=cell_id,
         cell_index=cell_index,
+    )
+    return _json_result(payload)
+
+
+def _notebook_locate_tool(arguments: dict[str, Any]) -> Any:
+    path = arguments.get("path")
+    if not isinstance(path, str) or not path:
+        return _error_result("path is required", kind="missing_argument")
+    snippet = arguments.get("snippet")
+    regex = arguments.get("regex")
+    error_text = arguments.get("error_text")
+    cell_type = arguments.get("cell_type")
+    limit = arguments.get("limit", 10)
+    for label, value in (("snippet", snippet), ("regex", regex), ("error_text", error_text)):
+        if value is not None and not isinstance(value, str):
+            return _error_result(f"{label} must be a string", kind="invalid_request")
+    if cell_type is not None and not isinstance(cell_type, str):
+        return _error_result("cell_type must be a string", kind="invalid_request")
+    if not isinstance(limit, int):
+        return _error_result("limit must be an integer", kind="invalid_request")
+    payload = _notebook_locate_cells(
+        path,
+        snippet=snippet,
+        regex=regex,
+        error_text=error_text,
+        cell_type=cell_type,
+        limit=limit,
+    )
+    return _json_result(payload)
+
+
+def _require_str(arguments: dict[str, Any], key: str) -> tuple[str, Any]:
+    """Read a required non-empty string argument.
+
+    On success: ``(value, None)``. On failure: ``("", error_result)`` —
+    callers MUST check ``err is not None`` and early-return before using
+    the first element. The empty-string sentinel keeps the success-path
+    type as plain ``str`` (no Optional) so the dispatchers don't need
+    runtime assertions to satisfy the type checker.
+    """
+    value = arguments.get(key)
+    if not isinstance(value, str) or not value:
+        return "", _error_result(f"{key} is required", kind="missing_argument")
+    return value, None
+
+
+def _notebook_edit_cell_tool(arguments: dict[str, Any]) -> Any:
+    path, err = _require_str(arguments, "path")
+    if err is not None:
+        return err
+    cell_id, err = _require_str(arguments, "cell_id")
+    if err is not None:
+        return err
+    new_source = arguments.get("new_source")
+    if not isinstance(new_source, str):
+        return _error_result(
+            "new_source is required and must be a string",
+            kind="missing_argument",
+        )
+    expected_source = arguments.get("expected_source")
+    if expected_source is not None and not isinstance(expected_source, str):
+        return _error_result(
+            "expected_source must be a string", kind="invalid_request"
+        )
+    payload = _notebook_edit_cell(
+        path,
+        cell_id=cell_id,
+        new_source=new_source,
+        expected_source=expected_source,
+    )
+    return _json_result(payload)
+
+
+def _notebook_insert_cell_tool(arguments: dict[str, Any]) -> Any:
+    path, err = _require_str(arguments, "path")
+    if err is not None:
+        return err
+    source = arguments.get("source")
+    if not isinstance(source, str):
+        return _error_result(
+            "source is required and must be a string",
+            kind="missing_argument",
+        )
+    cell_type = arguments.get("cell_type", "code")
+    if not isinstance(cell_type, str):
+        return _error_result("cell_type must be a string", kind="invalid_request")
+    after_cell_id = arguments.get("after_cell_id")
+    before_cell_id = arguments.get("before_cell_id")
+    at_start = bool(arguments.get("at_start") or False)
+    at_end = bool(arguments.get("at_end") or False)
+    for label, value in (
+        ("after_cell_id", after_cell_id),
+        ("before_cell_id", before_cell_id),
+    ):
+        if value is not None and not isinstance(value, str):
+            return _error_result(f"{label} must be a string", kind="invalid_request")
+    payload = _notebook_insert_cell(
+        path,
+        source=source,
+        cell_type=cell_type,
+        after_cell_id=after_cell_id,
+        before_cell_id=before_cell_id,
+        at_start=at_start,
+        at_end=at_end,
+    )
+    return _json_result(payload)
+
+
+def _notebook_delete_cell_tool(arguments: dict[str, Any]) -> Any:
+    path, err = _require_str(arguments, "path")
+    if err is not None:
+        return err
+    cell_id, err = _require_str(arguments, "cell_id")
+    if err is not None:
+        return err
+    expected_source = arguments.get("expected_source")
+    if expected_source is not None and not isinstance(expected_source, str):
+        return _error_result(
+            "expected_source must be a string", kind="invalid_request"
+        )
+    payload = _notebook_delete_cell(
+        path,
+        cell_id=cell_id,
+        expected_source=expected_source,
+    )
+    return _json_result(payload)
+
+
+def _list_runs_tool(arguments: dict[str, Any]) -> Any:
+    log_dir = arguments.get("log_dir")
+    origin_path = arguments.get("origin_path")
+    if log_dir is None and origin_path is None:
+        return _error_result(
+            "either log_dir or origin_path is required",
+            kind="missing_argument",
+        )
+    for label, value in (("log_dir", log_dir), ("origin_path", origin_path)):
+        if value is not None and not isinstance(value, str):
+            return _error_result(f"{label} must be a string", kind="invalid_request")
+
+    cell_id = arguments.get("cell_id")
+    session_id = arguments.get("session_id")
+    since = arguments.get("since")
+    for label, value in (
+        ("cell_id", cell_id),
+        ("session_id", session_id),
+        ("since", since),
+    ):
+        if value is not None and not isinstance(value, str):
+            return _error_result(f"{label} must be a string", kind="invalid_request")
+
+    ok = arguments.get("ok")
+    if ok is not None and not isinstance(ok, bool):
+        return _error_result("ok must be a boolean", kind="invalid_request")
+
+    limit = arguments.get("limit", 50)
+    # bool is a subclass of int — reject explicitly so True/False don't slip
+    # past as 1/0.
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        return _error_result("limit must be an integer", kind="invalid_request")
+
+    payload = _list_runs(
+        log_dir=log_dir,
+        origin_path=origin_path,
+        cell_id=cell_id,
+        session_id=session_id,
+        ok=ok,
+        since=since,
+        limit=limit,
     )
     return _json_result(payload)
 
@@ -1282,6 +1983,16 @@ def _info_payload_from_stata(
                 "subprocess_timeout",
                 "log_files",
                 "run_artifacts",
+                # Notebook side-channel — present when the server registers
+                # the corresponding `notebook_*` and `list_runs` tools.
+                # Clients can feature-detect rather than calling each tool
+                # blind. The protocol's execution path stays cell-agnostic;
+                # these advertise the side-channel surface only.
+                "notebook_navigation",  # notebook_outline, notebook_get_cell
+                "notebook_search",       # notebook_locate
+                "notebook_edit",         # edit / insert / delete cell
+                "run_index",             # list_runs over manifest bundles
+                "origin_echo",           # RunResult.origin round-trip
             ],
         }
     )

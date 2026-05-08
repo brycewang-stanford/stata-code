@@ -25,17 +25,27 @@ def test_normalize_stata_app_path(tmp_path):
 
 def test_normalize_executable_inside_app_finds_install_root(tmp_path):
     """User passes the Stata executable inside a .app — discovery should reach
-    the install root (.app's parent) and not keep climbing into OS noise."""
+    the install root (.app's parent) and not keep climbing into OS noise.
+
+    Also verifies that we don't waste stat() calls on guaranteed-junk paths
+    inside the .app bundle (Contents/, MacOS/) or on the .app itself —
+    Stata never ships ``utilities/`` at any of those locations.
+    """
     from stata_code.core._runtime import _normalize_pystata_candidate
 
     install_root = tmp_path / "Stata"
-    exe = install_root / "StataMP.app" / "Contents" / "MacOS" / "StataMP"
+    app = install_root / "StataMP.app"
+    exe = app / "Contents" / "MacOS" / "StataMP"
     candidates = _normalize_pystata_candidate(str(exe))
 
     assert str(install_root / "utilities") in candidates
-    # We must stop climbing past the .app — emitting tmp_path/utilities would
-    # be junk on a real system (e.g. /Applications/utilities).
+    # OS-noise (one level above the install root) must not appear.
     assert str(tmp_path / "utilities") not in candidates
+    # In-bundle junk: the .app itself, Contents/, and MacOS/ never have a
+    # utilities directory in any Stata layout — discovery should skip them.
+    assert str(app / "utilities") not in candidates
+    assert str(app / "Contents" / "utilities") not in candidates
+    assert str(app / "Contents" / "MacOS" / "utilities") not in candidates
 
 
 def test_candidate_paths_honor_env(monkeypatch, tmp_path):

@@ -674,9 +674,12 @@ class SessionPool:
 
 
 def _utc_iso_ms() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + (
-        f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
-    )
+    # Capture `now` once: a previous version called `datetime.now()` twice and
+    # could straddle a second boundary, producing e.g. "...T23:59:59.000Z" —
+    # silently breaking lexicographic compare downstream (e.g. list_runs'
+    # `since` filter).
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 def _empty_returns() -> StataReturns:

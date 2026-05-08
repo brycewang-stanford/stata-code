@@ -156,6 +156,52 @@ describe("computeRenameSkipMask — Stata macro references", () => {
     const start = text.indexOf("`");
     assertSkipped(r.ranges, start, text.length);
   });
+
+  test("apostrophe inside a string inside a macro doesn't close the macro early", () => {
+    // `` `= "it's"' `` — without string-tracking the inner `'` would be
+    // treated as the macro close, leaving the trailing `'` and the rest of
+    // the line dangling. With proper tracking the whole macro span is one
+    // skip range and the trailing identifier is reachable.
+    const text = "display `= \"it's\"' tail";
+    const r = computeRenameSkipMask(text, false);
+    const start = text.indexOf("`");
+    const end = text.lastIndexOf("'") + 1;
+    assertSkipped(r.ranges, start, end);
+    const tailStart = text.indexOf("tail");
+    assertNotSkipped(r.ranges, tailStart, tailStart + 4);
+  });
+});
+
+describe("computeRenameSkipMask — heading and block-close edge cases", () => {
+  test("``**#`` section heading is a Stata line comment", () => {
+    // Section headings are still ``*``-prefixed lines from Stata's POV, so
+    // identifiers inside the heading must not be renamed.
+    const text = "**# Build mpg model";
+    const r = computeRenameSkipMask(text, false);
+    assert.equal(r.skipWholeLine, true);
+    assertSkipped(r.ranges, 0, text.length);
+  });
+
+  test("``*/`` at the start of a line closes a previous block cleanly", () => {
+    // After `/*` on the previous line, this line begins inside the block.
+    // The `*/` at column 0 closes it; the rest of the line is reachable.
+    const text = "*/ regress mpg";
+    const r = computeRenameSkipMask(text, true);
+    assert.equal(r.blockOpen, false);
+    assertSkipped(r.ranges, 0, 2);
+    const mpgIdx = text.indexOf("mpg");
+    assertNotSkipped(r.ranges, mpgIdx, mpgIdx + 3);
+  });
+
+  test("``*`` at first column when a block is open is NOT a line comment", () => {
+    // Inside an open `/* … */` block, a leading `*` is just block content
+    // (or part of a `*/` close), NOT a Stata `*`-line comment.
+    const line = "* still inside the block";
+    const r = computeRenameSkipMask(line, true);
+    assert.equal(r.skipWholeLine, false);
+    assert.equal(r.blockOpen, true);
+    assertSkipped(r.ranges, 0, line.length);
+  });
 });
 
 describe("computeRenameSkipMask — interactions", () => {

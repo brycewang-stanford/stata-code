@@ -6,8 +6,57 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## [0.6.0] — 2026-05-08
+
 ### Added
 
+- **Notebook navigation tools.** New MCP tools `notebook_outline` and
+  `notebook_get_cell` let agents inspect a `.ipynb` without pulling the whole
+  file into context. `notebook_outline` returns a per-cell index (cell id,
+  type, source preview, line/char counts, execution_count, has-error flag);
+  `notebook_get_cell` returns one cell's full source plus a token-economic
+  outputs summary (head/tail of stream/text outputs, error ename/evalue,
+  truncated traceback, image presence flag). Cell identity follows nbformat
+  4.5+; pre-4.5 cells get a synthesised `synth-<index>-<hash>` id flagged via
+  `id_synthesized`. Read-only.
+- **Notebook search.** `notebook_locate` finds cells by literal `snippet`
+  (whitespace-tolerant fallback), `regex` (Python regex, multiline), or
+  pasted `error_text` (longest code-like line is used as a fingerprint).
+  Returns ranked candidates with `cell_id`, `line_in_cell`, and a small
+  preview. Read-only.
+- **Atomic notebook edits.** New `notebook_edit_cell`,
+  `notebook_insert_cell`, and `notebook_delete_cell` mutate cells via a
+  temp-file + `os.replace` write so the on-disk `.ipynb` is never partially
+  written. Edits preserve `cell.id` and metadata; for code cells they clear
+  outputs and `execution_count`. Optional `expected_source` is an
+  optimistic-concurrency guard that fails with `edit_source_drift` /
+  `delete_source_drift` if the user changed the cell between the agent's
+  read and write. Insertion against a pre-4.5 synth id auto-upgrades the
+  anchor to a real UUID so its id stays valid after the index shift.
+- **Origin echo on `RunResult`.** New optional `origin_cell_id` input
+  joins the existing `origin_path` / `origin_kind` / `origin_label` and
+  is round-tripped on `result.origin` plus the run-bundle manifest. The
+  execution path stays cell-agnostic: the runner does not interpret these
+  fields, only forwards them, so agents can correlate `stata_run` calls
+  with notebook cells without the protocol becoming notebook-aware.
+- **Run-bundle index.** New MCP tool `list_runs` queries the on-disk
+  `manifest.json` files written by `persist_log_files=true` runs. Filters
+  compose: `cell_id`, `origin_path`, `session_id`, `ok`, `since` (ISO 8601
+  UTC, lexicographic compare, inclusive). Returns newest-first compact
+  summaries with `directory`, `manifest_path`, and `log_path` so callers
+  read the full manifest from disk if needed. Read-only.
+- **Notebook MCP prompts.** New `run_notebook_cell_and_report` and
+  `fix_and_rerun_notebook_cell` prompts wire the per-cell repair recipe
+  (read → run with `origin_cell_id` → on failure, edit with
+  `expected_source` guard → rerun → recommend kernel restart after the
+  retry budget is exhausted) so users can `/mcp prompts` it directly.
+- **Capability advertising.** `stata_info.capabilities` now lists
+  `notebook_navigation`, `notebook_search`, `notebook_edit`, `run_index`,
+  and `origin_echo` so clients can feature-detect the Phase 1-3 surface.
+- **Schema-level mutex constraints.** `notebook_locate` and
+  `notebook_insert_cell` inputSchemas now use `oneOf` to express the
+  "exactly one of snippet / regex / error_text" and "exactly one anchor"
+  rules so strict MCP clients catch them before dispatch.
 - **VSCode language layer.** The extension now ships Stata TextMate syntax
   highlighting and language configuration, plus an Outline provider for
   `**#` hierarchical sections and `program define` blocks.
@@ -44,6 +93,23 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 - **Jupyter completions inspect live context.** The kernel now completes
   variables from the last result's dataset and `do_inspect` reports variable
   type/label metadata when available.
+- **`_summarise_outputs` is now streaming.** A cell with many large stream
+  outputs no longer materialises the full concatenation in memory before
+  truncating to 4 KB; we accumulate `text_chars_total` as we go but stop
+  appending to `text_preview` once the budget is hit.
+
+### Fixed
+
+- **`_pool._utc_iso_ms` race across the second boundary.** The fallback
+  pool helper that builds `started_at` for synthetic timeout / crash
+  results called `datetime.now()` twice; if the two calls straddled a
+  second boundary it could produce timestamps like `T23:59:59.000Z`
+  (correct seconds, wrong milliseconds) and silently break lexicographic
+  compare in `list_runs`'s `since` filter. Captured `now` once.
+- **`limit=True` accepted as `limit=1` in `list_runs`.** Python booleans
+  are a subclass of `int`; the `isinstance(limit, int)` check was passing
+  through `True` / `False`. Both `list_runs` and the MCP dispatcher now
+  reject `bool` explicitly with `limit_invalid`.
 
 ## [0.5.0] — 2026-05-08
 
