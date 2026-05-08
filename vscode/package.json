@@ -22,7 +22,15 @@
       {
         "id": "stata",
         "aliases": ["Stata", "stata"],
-        "extensions": [".do", ".ado", ".mata"]
+        "extensions": [".do", ".ado", ".mata"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "stata",
+        "scopeName": "source.stata",
+        "path": "./syntaxes/stata.tmLanguage.json"
       }
     ],
     "commands": [
@@ -48,6 +56,24 @@
         "command": "stataCode.runCell",
         "title": "Stata: Run Cell",
         "category": "stata-code"
+      },
+      {
+        "command": "stataCode.runSection",
+        "title": "Stata: Run Current Section",
+        "category": "stata-code",
+        "icon": "$(play)"
+      },
+      {
+        "command": "stataCode.openHelpForSelection",
+        "title": "Stata: Open Help for Selection",
+        "category": "stata-code",
+        "icon": "$(question)"
+      },
+      {
+        "command": "stataCode.insertContinuation",
+        "title": "Stata: Insert Line Continuation",
+        "category": "stata-code",
+        "icon": "$(newline)"
       },
       {
         "command": "stataCode.showLastResult",
@@ -239,6 +265,12 @@
         "key": "ctrl+enter",
         "mac": "cmd+enter",
         "when": "editorTextFocus && editorLangId == stata"
+      },
+      {
+        "command": "stataCode.runSection",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus && editorLangId == stata"
       }
     ],
     "viewsContainers": {
@@ -315,44 +347,49 @@
           "group": "navigation@1001"
         },
         {
-          "command": "stataCode.viewDataPreview",
+          "command": "stataCode.runSection",
           "when": "resourceLangId == stata",
           "group": "navigation@1002"
         },
         {
-          "command": "stataCode.showOutput",
+          "command": "stataCode.viewDataPreview",
           "when": "resourceLangId == stata",
           "group": "navigation@1003"
         },
         {
-          "command": "stataCode.showGraphs",
+          "command": "stataCode.showOutput",
           "when": "resourceLangId == stata",
           "group": "navigation@1004"
         },
         {
-          "command": "stataCode.newSession",
+          "command": "stataCode.showGraphs",
           "when": "resourceLangId == stata",
           "group": "navigation@1005"
         },
         {
-          "command": "stataCode.switchSession",
+          "command": "stataCode.newSession",
           "when": "resourceLangId == stata",
           "group": "navigation@1006"
         },
         {
-          "command": "stataCode.cancelSession",
+          "command": "stataCode.switchSession",
           "when": "resourceLangId == stata",
           "group": "navigation@1007"
         },
         {
-          "command": "stataCode.resetSession",
+          "command": "stataCode.cancelSession",
           "when": "resourceLangId == stata",
           "group": "navigation@1008"
         },
         {
-          "command": "stataCode.workingDirectoryMenu",
+          "command": "stataCode.resetSession",
           "when": "resourceLangId == stata",
           "group": "navigation@1009"
+        },
+        {
+          "command": "stataCode.workingDirectoryMenu",
+          "when": "resourceLangId == stata",
+          "group": "navigation@1010"
         }
       ],
       "editor/context": [
@@ -367,14 +404,29 @@
           "group": "stataCode@2"
         },
         {
-          "command": "stataCode.viewDataPreview",
+          "command": "stataCode.runSection",
           "when": "editorLangId == stata",
           "group": "stataCode@3"
         },
         {
-          "command": "stataCode.workingDirectoryMenu",
+          "command": "stataCode.viewDataPreview",
           "when": "editorLangId == stata",
           "group": "stataCode@4"
+        },
+        {
+          "command": "stataCode.workingDirectoryMenu",
+          "when": "editorLangId == stata",
+          "group": "stataCode@5"
+        },
+        {
+          "command": "stataCode.openHelpForSelection",
+          "when": "editorLangId == stata",
+          "group": "stataCode@6"
+        },
+        {
+          "command": "stataCode.insertContinuation",
+          "when": "editorLangId == stata",
+          "group": "stataCode@7"
         }
       ],
       "view/title": [
@@ -570,6 +622,12 @@
           "type": "boolean",
           "default": true,
           "description": "Before running file-backed Stata code, cd Stata to the source .do file's directory so relative table and graph exports land next to the .do file by default."
+        },
+        "stataCode.customCommands": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["reghdfe", "ivreghdfe", "winsor2", "outreg2", "esttab"],
+          "description": "Extra community or project-specific Stata commands surfaced by VS Code completion."
         }
       }
     }

@@ -2,13 +2,13 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.3 (May 2026).** Full UI surface — orange Stata title-bar
+> **Status: v0.5 (May 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / run history / logs / graphs panels,
-> inline error squigglies, code-lens cells, graph webview Save/Open actions,
-> run-bundle export, and Stata working-directory helpers. Source-only —
-> build with `npm install && npm run compile`. Marketplace publishing still
-> pending.
+> syntax highlighting, outline/section navigation, code-lens cells and sections,
+> inline error squigglies, graph webview Save/Open actions, run-bundle export,
+> and Stata working-directory helpers. Source build with
+> `npm install && npm run compile`.
 
 ## What it does
 
@@ -28,7 +28,12 @@ everything goes through MCP `stata_run`, `get_log`, `get_graph`,
 | Right-click menu → *Stata: Run Selection / Run Active File / View Data Preview* | Same, from the editor |
 | Right-click menu → *Stata: Working Directory...* | Show or change Stata's current directory |
 | `Cmd/Ctrl+Enter` | Run selection (or current line if no selection) |
+| `Cmd/Ctrl+Shift+Enter` | Run the current hierarchical section |
 | Inline `▶ Run Cell` code-lens above any `* %%` line | Run that cell |
+| Inline `▶ Run Section` code-lens above `**#` headings | Run from that heading to the next equal/higher heading |
+| Outline view entries for `**#` headings and `program define` blocks | Navigate long `.do` / `.ado` files |
+| Completion | Built-in commands, configured community commands, functions, variables from the last result, and variables inferred from the open document |
+| F2 rename on recognized variables | Rename variables across the current document while skipping comments and Stata commands |
 | Red squiggle on the failing line | After a failed run; hover to see the typed-error message and suggestions |
 | *Stata: View Data Preview* | Opens the first 100 observations from the active session as a side text document, plus dataset metadata and variables |
 
@@ -37,6 +42,12 @@ followed by a title, e.g. `* %% setup`) marks the start of a cell. The
 marker line is a Stata comment, so plain Stata still runs the file
 unchanged. The cell ends at the next marker or EOF. This is the Stata
 analog of Python's `# %%` cells.
+
+**Section convention.** Lines beginning with `**#`, `**##`, ..., `**######`
+are hierarchical section headings. Running a section includes the heading
+comment line and stops before the next heading at the same or higher level.
+The Outline view shows the same hierarchy, with `program define` blocks nested
+under the section that contains them.
 
 ### Status bar
 

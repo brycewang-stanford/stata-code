@@ -204,7 +204,7 @@ Then open Jupyter Notebook / JupyterLab (or a `.ipynb` in VS Code), pick **Stata
 
 ### As a VS Code Extension
 
-The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds a sidebar (sessions / last result / run history / logs / graphs), code-lens "Run cell" actions on `.do` files, status-bar indicators, and inline diagnostics from the v1.0 typed errors.
+The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a sidebar (sessions / last result / run history / logs / graphs), status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors.
 
 ```bash
 # from the VS Code CLI
@@ -305,7 +305,7 @@ stata_code/
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Cooperative cancellation: `cancel(session_id)` / MCP `cancel_session`
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): sidebar (sessions / last result / run history / logs / graphs), code-lens cell runner, status bar, diagnostics, MCP child-process spawn
+- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, sidebar (sessions / last result / run history / logs / graphs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next Up
@@ -560,7 +560,7 @@ jupyter kernelspec list
 
 ### 作为 VS Code 扩展
 
-配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供侧边栏（sessions / last result / run history / logs / graphs）、`.do` 文件的 code-lens "Run cell"、状态栏指示器，以及来自 v1.0 typed errors 的内联诊断。
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、侧边栏（sessions / last result / run history / logs / graphs）、状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
 
 ```bash
 # 从 VS Code 命令行
@@ -661,7 +661,7 @@ stata_code/
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 协作式取消：`cancel(session_id)` / MCP `cancel_session`
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：侧边栏（sessions / last result / run history / logs / graphs）、code-lens cell runner、状态栏、诊断、MCP 子进程
+- VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、侧边栏（sessions / last result / run history / logs / graphs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### 下一步

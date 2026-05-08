@@ -20,10 +20,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-# Bundled kernelspec resources (logo files) shipped alongside this module.
-# Copied into the kernelspec dir at install time so VS Code's Jupyter extension
-# lists the kernel in its picker — it filters out kernelspecs without logos.
-ASSETS_DIR = Path(__file__).parent / "assets"
+from stata_code.core._runtime import PystataNotAvailable
+from stata_code.core.runner import execute
+from stata_code.core.schema import RunResult
 
 try:
     from ipykernel.kernelbase import Kernel
@@ -33,9 +32,10 @@ except ImportError:
     Kernel = object  # type: ignore[misc,assignment]
     _HAS_IPYKERNEL = False
 
-from stata_code.core._runtime import PystataNotAvailable
-from stata_code.core.runner import execute
-from stata_code.core.schema import RunResult
+# Bundled kernelspec resources (logo files) shipped alongside this module.
+# Copied into the kernelspec dir at install time so VS Code's Jupyter extension
+# lists the kernel in its picker — it filters out kernelspecs without logos.
+ASSETS_DIR = Path(__file__).parent / "assets"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Static keyword / help tables (carried over verbatim — independent of
@@ -76,6 +76,18 @@ STATA_HELP: dict[str, str] = {
     "graph": "graph [type] plot [if] [in] [, options]\n\ngraph creates twoway plots.",
     "by": "by varlist: command\n\nby repeats command for each subset of data.",
 }
+
+
+def _word_at_cursor(code: str, cursor_pos: int) -> tuple[str, int, int]:
+    """Return the Stata-ish identifier around ``cursor_pos``."""
+    safe_pos = max(0, min(cursor_pos, len(code)))
+    start = safe_pos
+    while start > 0 and (code[start - 1].isalnum() or code[start - 1] == "_"):
+        start -= 1
+    end = safe_pos
+    while end < len(code) and (code[end].isalnum() or code[end] == "_"):
+        end += 1
+    return code[start:end], start, end
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,7 +227,15 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
         while token_start > 0 and line[token_start - 1] not in (" \t\n\r(,"):
             token_start -= 1
         token = line[token_start:cursor_pos]
-        matches = sorted(kw for kw in STATA_KEYWORDS if kw.lstrip().startswith(token))
+        keyword_matches = [kw.lstrip() for kw in STATA_KEYWORDS if kw.lstrip().startswith(token)]
+        variable_matches: list[str] = []
+        if self._last_result and self._last_result.dataset.variables:
+            variable_matches = [
+                v.name
+                for v in self._last_result.dataset.variables
+                if v.name.startswith(token)
+            ]
+        matches = sorted(set(keyword_matches + variable_matches))
         return {
             "status": "ok",
             "matches": matches,
@@ -226,11 +246,19 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
     def do_inspect(
         self, code: str, cursor_pos: int, detail_level: int = 0
     ) -> dict[str, Any]:
-        word_end = cursor_pos
-        word_start = word_end - 1
-        while word_start > 0 and code[word_start - 1].isalnum():
-            word_start -= 1
-        word = code[word_start:word_end]
+        word, word_start, word_end = _word_at_cursor(code, cursor_pos)
+        if self._last_result and self._last_result.dataset.variables:
+            for variable in self._last_result.dataset.variables:
+                if variable.name == word:
+                    label = f"\nLabel: {variable.label}" if variable.label else ""
+                    return {
+                        "status": "ok",
+                        "found": True,
+                        "name": word,
+                        "documentation": f"Variable `{word}`\nType: {variable.type}{label}",
+                        "cursor_start": word_start,
+                        "cursor_end": word_end,
+                    }
         found = STATA_HELP.get(word.lower())
         if found:
             return {

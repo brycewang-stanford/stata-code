@@ -828,7 +828,7 @@ def execute(
     else:
         graphs = []
 
-    capabilities = ["log_truncation", "multi_session"]
+    capabilities = ["log_truncation", "matrix_ref", "multi_session"]
     if include_graphs != "none":
         capabilities.append("graph_ref")
     if include_graphs == "inline":

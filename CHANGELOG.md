@@ -4,6 +4,34 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
+## Unreleased
+
+### Added
+
+- **VSCode language layer.** The extension now ships Stata TextMate syntax
+  highlighting and language configuration, plus an Outline provider for
+  `**#` hierarchical sections and `program define` blocks.
+- **VSCode section ergonomics.** `Stata: Run Current Section`,
+  `Cmd/Ctrl+Shift+Enter`, and `▶ Run Section` code lenses run from the
+  current heading to the next equal/higher heading. Existing `Cmd/Ctrl+Enter`
+  also runs a section when the cursor is on a section heading.
+- **VSCode editing aids.** Added Stata command/function/variable completion,
+  configured custom command completions, conservative F2 variable rename,
+  `Stata: Open Help for Selection`, and `Stata: Insert Line Continuation`
+  for `///` blocks.
+- **Runtime discovery.** `pystata` discovery now honors
+  `STATA_CODE_PYSTATA_PATH`, `PYSTATA_PATH`, `STATA_HOME`, `STATA_PATH`,
+  and `STATA_CLI`, and includes Stata 19 / StataNow default locations.
+
+### Changed
+
+- **`stata_info` payload is richer.** It now returns a nested `stata`
+  object with version/edition/backend plus the supported capabilities list,
+  while retaining the older flat aliases for compatibility.
+- **Jupyter completions inspect live context.** The kernel now completes
+  variables from the last result's dataset and `do_inspect` reports variable
+  type/label metadata when available.
+
 ## [0.5.0] — 2026-05-08
 
 ### Added

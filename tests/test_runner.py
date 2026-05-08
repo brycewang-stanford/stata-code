@@ -394,6 +394,7 @@ class TestLogTruncation:
 
         r = execute('display "x"')
         assert "log_truncation" in r.capabilities
+        assert "matrix_ref" in r.capabilities
 
 
 class TestWarnings:

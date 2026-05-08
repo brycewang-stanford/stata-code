@@ -518,6 +518,7 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `graph_ref` | Producer captures graphs and supports `get_graph`. |
 | `matrix_ref` | Producer can emit large matrices as refs and supports `get_matrix`. |
 | `multi_session` | Producer supports `session_id != "main"` and `list_sessions`. |
+| `subprocess_timeout` | Producer enforces hard wall-clock timeouts by isolating Stata in a worker process. |
 | `inline_graphs` | Producer supports `include_graphs: "inline"`. |
 | `log_files` | Producer can persist immutable per-run `.log` / `.smcl` bundles. |
 | `run_artifacts` | Producer can materialize captured graphs and copied table/export outputs into the run bundle. |

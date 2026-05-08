@@ -13,6 +13,16 @@ import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient, type StataServerLaunch } from "./mcpClient";
+import {
+  StataCompletionProvider,
+  StataRenameProvider,
+  StataSectionCodeLensProvider,
+  StataSectionSymbolProvider,
+  headingAtLine,
+  insertStataContinuation,
+  openStataHelpForSelection,
+  sectionRangeAtLine,
+} from "./stataLanguage";
 import { StataStatusBar, currentSessionId } from "./statusBar";
 import {
   GraphsHistoryProvider,
@@ -74,6 +84,22 @@ export function activate(context: vscode.ExtensionContext): void {
   const cellLens = new CellCodeLensProvider();
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider({ language: "stata" }, cellLens),
+    vscode.languages.registerCodeLensProvider(
+      { language: "stata" },
+      new StataSectionCodeLensProvider(),
+    ),
+    vscode.languages.registerDocumentSymbolProvider(
+      { language: "stata" },
+      new StataSectionSymbolProvider(),
+    ),
+    vscode.languages.registerCompletionItemProvider(
+      { language: "stata" },
+      new StataCompletionProvider(() => lastResult),
+    ),
+    vscode.languages.registerRenameProvider(
+      { language: "stata" },
+      new StataRenameProvider(() => lastResult),
+    ),
   );
 
   context.subscriptions.push(
@@ -124,6 +150,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("stataCode.runFile", () => runSelection(true)),
     vscode.commands.registerCommand("stataCode.runCell", runCell),
+    vscode.commands.registerCommand("stataCode.runSection", runSection),
+    vscode.commands.registerCommand("stataCode.openHelpForSelection", openStataHelpForSelection),
+    vscode.commands.registerCommand("stataCode.insertContinuation", insertStataContinuation),
     vscode.commands.registerCommand("stataCode.showLastResult", showLastResult),
     vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
     vscode.commands.registerCommand("stataCode.openMatrix", openMatrix),
@@ -418,6 +447,11 @@ async function runSelection(wholeFile: boolean): Promise<void> {
     code = editor.document.getText();
     baseLine = 0;
   } else if (editor.selection.isEmpty) {
+    const heading = headingAtLine(editor.document, editor.selection.active.line);
+    if (heading) {
+      await runSection(editor.document.uri, heading.startLine);
+      return;
+    }
     code = editor.document.lineAt(editor.selection.active.line).text;
     baseLine = editor.selection.active.line;
   } else {
@@ -448,6 +482,43 @@ async function runCell(uri: vscode.Uri, markerLine: number): Promise<void> {
     uri,
     baseLine: rangeInfo.startLine,
     kind: "cell",
+  });
+}
+
+async function runSection(
+  uri?: vscode.Uri,
+  lineNumber?: number,
+): Promise<void> {
+  let doc: vscode.TextDocument;
+  let activeLine: number;
+
+  if (uri) {
+    doc = await vscode.workspace.openTextDocument(uri);
+    activeLine = lineNumber ?? 0;
+  } else {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage("stata-code: no active editor");
+      return;
+    }
+    doc = editor.document;
+    activeLine = editor.selection.active.line;
+  }
+
+  const rangeInfo = sectionRangeAtLine(doc, activeLine);
+  if (rangeInfo.startLine > rangeInfo.endLine) {
+    vscode.window.showWarningMessage("stata-code: empty section");
+    return;
+  }
+
+  const range = new vscode.Range(
+    new vscode.Position(rangeInfo.startLine, 0),
+    doc.lineAt(rangeInfo.endLine).range.end,
+  );
+  await submitCode(doc.getText(range), {
+    uri: doc.uri,
+    baseLine: rangeInfo.startLine,
+    kind: "section",
   });
 }
 

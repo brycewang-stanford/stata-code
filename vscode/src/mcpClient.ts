@@ -25,7 +25,7 @@ export interface RunStataOptions {
   persistLogFiles?: boolean;
   persistGeneratedFiles?: boolean;
   originPath?: string;
-  originKind?: "file" | "selection" | "line" | "cell" | "code" | "unknown";
+  originKind?: "file" | "selection" | "line" | "cell" | "section" | "code" | "unknown";
   originLabel?: string;
   useOriginWorkdir?: boolean;
   workingDir?: string;

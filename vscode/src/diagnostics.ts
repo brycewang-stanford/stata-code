@@ -10,7 +10,7 @@ import type { RunResult } from "./types/runResult";
 export interface SubmitOrigin {
   uri: vscode.Uri;
   baseLine: number;
-  kind?: "file" | "selection" | "line" | "cell" | "code" | "unknown";
+  kind?: "file" | "selection" | "line" | "cell" | "section" | "code" | "unknown";
 }
 
 export class StataDiagnostics implements vscode.Disposable {

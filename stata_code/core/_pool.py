@@ -194,6 +194,16 @@ def _worker_main() -> int:
                 from stata_code.core.runner import list_sessions as _ls
 
                 response = {"id": req_id, "ok": True, "sessions": _ls()}
+            elif op == "stata_info":
+                from stata_code.core._runtime import get_runtime
+                from stata_code.core.runner import _stata_info
+
+                info = _stata_info(get_runtime())
+                response = {
+                    "id": req_id,
+                    "ok": True,
+                    "stata": info.model_dump(mode="json"),
+                }
             elif op == "execute":
                 code = req["code"]
                 options = req.get("options", {})
@@ -392,19 +402,23 @@ class WorkerProcess:
         op: str,
         *,
         timeout_ms: int | None,
+        spawn: bool = False,
     ) -> dict[str, Any]:
         """Send a no-payload op (e.g., ``ping``, ``list_sessions``) and return
         the full response dict.
 
-        Unlike :meth:`execute`, this does **not** respawn a dead worker —
-        if the subprocess isn't running, raises :class:`_WorkerError`.
+        By default, unlike :meth:`execute`, this does **not** respawn a dead
+        worker; if the subprocess isn't running, raises :class:`_WorkerError`.
         Caller should treat that as "this worker has nothing to report"
         rather than block on a fresh pystata init for a status query.
         """
         with self._lock:
-            if self._proc is None or self._proc.poll() is not None:
+            if spawn:
+                proc = self._ensure_alive()
+            elif self._proc is None or self._proc.poll() is not None:
                 raise _WorkerError(f"worker for {self.session_id!r} not running")
-            proc = self._proc
+            else:
+                proc = self._proc
             assert proc.stdin is not None and proc.stdout is not None  # for mypy
             req_id = uuid.uuid4().hex
             request = {"id": req_id, "op": op}
@@ -630,6 +644,29 @@ class SessionPool:
                 sessions.append(entry)
         return sessions
 
+    def stata_info(
+        self,
+        *,
+        session_id: str = "main",
+        timeout_ms: int | None = 60_000,
+    ) -> dict[str, Any]:
+        """Return Stata runtime info from a worker process.
+
+        This keeps pystata initialization out of the parent MCP process, where
+        it can otherwise block the asyncio event loop and delay stdout flushes.
+        """
+        worker = self._get_or_spawn(session_id)
+        try:
+            response = worker.send_simple_op(
+                "stata_info", timeout_ms=timeout_ms, spawn=True
+            )
+        except (_WorkerError, _WorkerTimeout):
+            worker.kill()
+            with self._lock:
+                self._workers.pop(session_id, None)
+            raise
+        return response["stata"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Synthetic-result builders for timeout / adapter crash.
@@ -792,6 +829,15 @@ def pool_execute(
     return get_default_pool().execute(
         code, session_id=session_id, timeout_ms=timeout_ms, **options
     )
+
+
+def pool_stata_info(
+    *,
+    session_id: str = "main",
+    timeout_ms: int | None = 60_000,
+) -> dict[str, Any]:
+    """Query Stata info through the default subprocess pool."""
+    return get_default_pool().stata_info(session_id=session_id, timeout_ms=timeout_ms)
 
 
 def shutdown_default_pool() -> None:

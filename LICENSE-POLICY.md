@@ -35,10 +35,11 @@ MIT, BSD, Apache 2.0, ISC. Reading source is allowed; copying must follow the li
 
 - `kylebarron/stata-enhanced` — MIT (TextMate grammar; we do not reuse it).
 - `kylebarron/stata-exec` — MIT (Atom; not reused).
-- `kylebarron/language-stata` — MIT (Atom grammar; not reused).
+- `kylebarron/language-stata` / Stata Enhanced grammar lineage — MIT (bundled in the VS Code extension with notice).
 - `hanlulong/stata-mcp` — MIT (we do not consult its source; see §4).
-- `lbraglia/RStata` — design reference only.
 - `euglevi/stata-language-server` — MIT.
+- `ZihaoVistonWang/stata-outline` — MIT.
+- `ZihaoVistonWang/stata-all-in-one` — MIT; incorporates Stata Enhanced grammar under MIT.
 
 ### 2.3 Copyleft projects (source code forbidden)
 
@@ -49,6 +50,7 @@ MIT, BSD, Apache 2.0, ISC. Reading source is allowed; copying must follow the li
 - `tmonk/stata-workbench` — AGPL-3.0
 - `kylebarron/stata_kernel` — GPL-3.0
 - `hugetim/nbstata` — GPL-3.0
+- `lbraglia/RStata` — GPL-3.0
 
 If new copyleft Stata projects appear, add them here in the same PR that first references them.
 

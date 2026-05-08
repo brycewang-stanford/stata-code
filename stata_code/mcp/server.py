@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - environment without mcp installed
     stdio_server = None  # type: ignore[assignment]
     _MCP_AVAILABLE = False
 
-from stata_code.core._pool import get_default_pool, pool_execute
+from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable, is_available
 from stata_code.core.runner import (
     cancel,
@@ -148,7 +148,15 @@ def _tool_definitions() -> list[Tool]:
                     },
                     "origin_kind": {
                         "type": "string",
-                        "enum": ["file", "selection", "line", "cell", "code", "unknown"],
+                        "enum": [
+                            "file",
+                            "selection",
+                            "line",
+                            "cell",
+                            "section",
+                            "code",
+                            "unknown",
+                        ],
                         "description": "Which editor surface produced the submitted code.",
                     },
                     "origin_label": {
@@ -286,7 +294,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> list[Any]:
         if name == "stata_run":
             return _run_tool(arguments)
         if name == "stata_info":
-            return [TextContent(type="text", text=_info_payload())]
+            return [TextContent(type="text", text=await _info_payload_async())]
         if name == "get_log":
             payload = get_log(arguments["ref"])
             return [TextContent(type="text", text=json.dumps(payload))]
@@ -379,18 +387,87 @@ def _run_tool(arguments: dict[str, Any]) -> list[Any]:
     return [TextContent(type="text", text=result.model_dump_json())]
 
 
+async def _info_payload_async() -> str:
+    return await asyncio.to_thread(_info_payload_from_pool)
+
+
+def _info_payload_from_pool() -> str:
+    try:
+        stata = pool_stata_info()
+    except Exception:  # noqa: BLE001 - unavailable Stata should be reported as data
+        return json.dumps(
+            {
+                "available": False,
+                "schema_version": "1.0",
+                "capabilities": [],
+            }
+        )
+
+    edition = stata.get("edition")
+    edition_alias = edition.lower() if isinstance(edition, str) else None
+    return _info_payload_from_stata(stata, edition_alias=edition_alias)
+
+
 def _info_payload() -> str:
     if not is_available():
-        return json.dumps({"available": False})
+        return json.dumps(
+            {
+                "available": False,
+                "schema_version": "1.0",
+                "capabilities": [],
+            }
+        )
     from stata_code.core._runtime import get_runtime
 
     rt = get_runtime()
+    try:
+        version = rt.sfi.SFIToolkit.macroExpand("`c(stata_version)'") or None
+    except Exception:  # noqa: BLE001
+        version = None
+    edition = {
+        "mp": "MP",
+        "se": "SE",
+        "ic": "IC",
+        "be": "BE",
+    }.get((rt.edition or "").lower(), "unknown")
+    stata = {
+        "version": version,
+        "edition": edition,
+        "backend": "pystata",
+    }
+    return _info_payload_from_stata(
+        stata,
+        edition_alias=rt.edition,
+        version_alias=version,
+    )
+
+
+def _info_payload_from_stata(
+    stata: dict[str, Any],
+    *,
+    edition_alias: str | None = None,
+    version_alias: str | None = None,
+) -> str:
+    version = version_alias if version_alias is not None else stata.get("version")
+    edition = edition_alias if edition_alias is not None else stata.get("edition")
     return json.dumps(
         {
             "available": True,
-            "edition": rt.edition,
+            "stata": stata,
+            # Backward-compatible flat aliases retained for older clients.
+            "edition": edition,
+            "version": version,
             "backend": "pystata",
             "schema_version": "1.0",
+            "capabilities": [
+                "log_truncation",
+                "graph_ref",
+                "matrix_ref",
+                "multi_session",
+                "subprocess_timeout",
+                "log_files",
+                "run_artifacts",
+            ],
         }
     )
 

@@ -30,7 +30,7 @@ All metrics captured **April 2026**. Star counts and "last pushed" dates may dri
 | Sublime | [mattiasnordin/StataEditor](https://github.com/mattiasnordin/StataEditor) | 48★ | 2022-02 | — | AppleScript |
 | Sublime (macOS) | [zizhongyan/StataImproved](https://github.com/zizhongyan/StataImproved) | 49★ | 2026-02 | MIT | AppleScript |
 | Python library | [pystata](https://www.stata.com/python/pystata18/) (official) | — | shipped with Stata | proprietary | in-process |
-| R bridge | [lbraglia/RStata](https://github.com/lbraglia/RStata) | 117★ | 2025-03 | — | subprocess |
+| R bridge | [lbraglia/RStata](https://github.com/lbraglia/RStata) | 117★ | 2025-03 | GPL-3.0 | subprocess |
 
 ---
 
@@ -298,7 +298,7 @@ See B.3. Older; superseded by `pystata`'s built-in magic.
 
 ### F.1 `lbraglia/RStata`
 
-- **GitHub**: 117★ · **CRAN**: yes · **Last pushed**: 2025-03
+- **GitHub**: 117★ · **CRAN**: yes · **License**: GPL-3.0 · **Last pushed**: 2025-03
 - **What it does**: R package wrapping a Stata subprocess. Lets R users send Stata code, retrieve console output, and pass data frames back and forth
 - **Communication**: subprocess (Stata batch mode)
 - **Pros**:

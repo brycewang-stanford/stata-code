@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from stata_code.core.schema import (
     Backend,
+    DatasetInfo,
     ErrorContext,
     ErrorInfo,
     ErrorKind,
@@ -17,6 +18,7 @@ from stata_code.core.schema import (
     StataEdition,
     StataInfo,
     Suggestion,
+    VariableInfo,
 )
 
 
@@ -137,6 +139,26 @@ class TestStataKernelClass:
         assert result["status"] == "ok"
         matches = result["matches"]
         assert any("summarize" in m for m in matches)
+        assert all(not m.startswith(" ") for m in matches)
+
+    def test_do_complete_includes_last_result_variables(self):
+        """Completion should surface variables from the last run's dataset."""
+        from stata_code.kernel import StataKernel
+
+        kb = StataKernel()
+        kb._last_result = _make_run_result(
+            dataset=DatasetInfo(
+                n_obs=10,
+                n_vars=2,
+                variables=[
+                    VariableInfo(name="mpg", type="int", label="Mileage"),
+                    VariableInfo(name="make", type="str18", label="Make"),
+                ],
+            )
+        )
+        result = kb.do_complete("mp", 2)
+        assert result["status"] == "ok"
+        assert "mpg" in result["matches"]
 
     def test_do_complete_empty_on_no_match(self):
         """do_complete returns empty list when no keyword matches."""
@@ -157,6 +179,24 @@ class TestStataKernelClass:
         assert result["status"] == "ok"
         assert result["found"] is True
         assert "summary statistics" in result["documentation"]
+
+    def test_do_inspect_returns_variable_metadata(self):
+        """do_inspect should prefer last-result variable metadata."""
+        from stata_code.kernel import StataKernel
+
+        kb = StataKernel()
+        kb._last_result = _make_run_result(
+            dataset=DatasetInfo(
+                n_obs=10,
+                n_vars=1,
+                variables=[VariableInfo(name="mpg", type="int", label="Mileage")],
+            )
+        )
+        result = kb.do_inspect("summarize mpg", cursor_pos=13)
+        assert result["status"] == "ok"
+        assert result["found"] is True
+        assert "Variable `mpg`" in result["documentation"]
+        assert "Mileage" in result["documentation"]
 
     def test_do_inspect_unknown_command(self):
         """do_inspect returns found=False for unknown commands."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -130,6 +131,76 @@ class TestDispatch:
         assert len(out) == 1
         body = json.loads(out[0].text)
         assert "error" in body
+
+    def test_stata_info_unavailable_shape(self, monkeypatch):
+        from stata_code.mcp import server
+
+        monkeypatch.setattr(server, "is_available", lambda: False)
+        body = json.loads(server._info_payload())
+        assert body == {
+            "available": False,
+            "schema_version": "1.0",
+            "capabilities": [],
+        }
+
+    def test_stata_info_available_shape(self, monkeypatch):
+        from stata_code.core import _runtime
+        from stata_code.mcp import server
+
+        class DummyToolkit:
+            @staticmethod
+            def macroExpand(value: str) -> str:
+                assert value == "`c(stata_version)'"
+                return "19.0"
+
+        class DummySfi:
+            SFIToolkit = DummyToolkit
+
+        class DummyRuntime:
+            edition = "mp"
+            sfi = DummySfi()
+
+        monkeypatch.setattr(server, "is_available", lambda: True)
+        monkeypatch.setattr(_runtime, "get_runtime", lambda: DummyRuntime())
+
+        body = json.loads(server._info_payload())
+        assert body["available"] is True
+        assert body["stata"] == {
+            "version": "19.0",
+            "edition": "MP",
+            "backend": "pystata",
+        }
+        assert body["version"] == "19.0"
+        assert "matrix_ref" in body["capabilities"]
+
+    def test_stata_info_dispatch_does_not_block_event_loop(self, monkeypatch):
+        from stata_code.mcp import server
+
+        payload = json.dumps(
+            {
+                "available": False,
+                "schema_version": "1.0",
+                "capabilities": [],
+            }
+        )
+
+        def slow_info() -> str:
+            time.sleep(0.05)
+            return payload
+
+        monkeypatch.setattr(server, "_info_payload_from_pool", slow_info)
+
+        async def probe() -> list[TextContent]:
+            task = asyncio.create_task(_dispatch_stata_info())
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            return await task
+
+        async def _dispatch_stata_info() -> list[TextContent]:
+            return await server._dispatch("stata_info", {})
+
+        out = asyncio.run(probe())
+        assert json.loads(out[0].text) == json.loads(payload)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

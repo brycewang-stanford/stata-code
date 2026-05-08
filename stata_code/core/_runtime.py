@@ -8,6 +8,7 @@ the public runner. Not part of the API; subject to change without notice.
 from __future__ import annotations
 
 import io
+import os
 import re
 import sys
 import threading
@@ -18,12 +19,28 @@ from typing import Any
 # Common pystata install locations across platforms. Order is best-guess for
 # popularity; the first match wins. Users can also pre-install pystata into
 # their Python environment, in which case we skip the path search entirely.
+_PYSTATA_PATH_ENV_VARS: tuple[str, ...] = (
+    "STATA_CODE_PYSTATA_PATH",
+    "PYSTATA_PATH",
+)
+
+_STATA_ROOT_ENV_VARS: tuple[str, ...] = (
+    "STATA_HOME",
+    "STATA_PATH",
+    "STATA_CLI",
+)
+
 _PYSTATA_SEARCH_PATHS: tuple[str, ...] = (
+    "/Applications/StataNow/utilities",
+    "/Applications/Stata19/utilities",
     "/Applications/Stata/utilities",
     "/Applications/Stata18/utilities",
     "/Applications/Stata17/utilities",
+    "/usr/local/stata/utilities",
+    "/usr/local/stata19/utilities",
     "/usr/local/stata18/utilities",
     "/usr/local/stata17/utilities",
+    r"C:\Program Files\Stata19\utilities",
     r"C:\Program Files\Stata18\utilities",
     r"C:\Program Files\Stata17\utilities",
 )
@@ -57,12 +74,12 @@ class PystataRuntime:
     @staticmethod
     def _find_pystata_path() -> str | None:
         try:
-            import pystata  # noqa: F401
+            from pystata import config as _config  # noqa: F401
 
             return None  # already importable; nothing to add to sys.path
         except ImportError:
             pass
-        for p in _PYSTATA_SEARCH_PATHS:
+        for p in _candidate_pystata_paths():
             if Path(p).joinpath("pystata").is_dir():
                 return p
         return None
@@ -177,3 +194,67 @@ def is_available() -> bool:
         return True
     except PystataNotAvailable:
         return False
+
+
+def _candidate_pystata_paths() -> list[str]:
+    """Return sys.path entries that may contain StataCorp's ``pystata``.
+
+    Accepts either a direct ``utilities`` path, the ``utilities/pystata`` package
+    path, a Stata install root, a macOS ``.app`` bundle, or the Stata executable
+    path through environment variables. This keeps the public setup story close
+    to other Stata tooling while still loading the official StataCorp module.
+    """
+    candidates: list[str] = []
+
+    for env_name in _PYSTATA_PATH_ENV_VARS:
+        raw = os.environ.get(env_name)
+        if raw:
+            candidates.extend(_normalize_pystata_candidate(raw))
+
+    for env_name in _STATA_ROOT_ENV_VARS:
+        raw = os.environ.get(env_name)
+        if raw:
+            candidates.extend(_normalize_pystata_candidate(raw))
+
+    candidates.extend(_PYSTATA_SEARCH_PATHS)
+    return _dedupe(candidates)
+
+
+def _normalize_pystata_candidate(raw: str) -> list[str]:
+    """Expand one user-supplied Stata/pystata path into utilities candidates."""
+    value = raw.strip().strip('"').strip("'")
+    if not value:
+        return []
+
+    path = Path(value).expanduser()
+    bases: list[Path] = [path]
+    if path.suffix.lower() == ".app":
+        bases.append(path.parent)
+    if path.name.lower() == "pystata":
+        bases.append(path.parent)
+    if path.name.lower() != "utilities":
+        bases.append(path / "utilities")
+    if path.is_file():
+        bases.append(path.parent)
+    bases.extend(path.parents)
+
+    out: list[str] = []
+    for base in bases:
+        if base.name.lower() == "pystata":
+            out.append(str(base.parent))
+        elif base.name.lower() == "utilities":
+            out.append(str(base))
+        else:
+            out.append(str(base / "utilities"))
+    return _dedupe(out)
+
+
+def _dedupe(values: list[str] | tuple[str, ...]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
