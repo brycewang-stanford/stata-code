@@ -21,7 +21,12 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.2 (May 2026)** — the core, MCP server, and Jupyter kernel work end-to-end against Stata 18 MP. Current test suite: 144 passing tests (88 no-Stata unit tests + 56 real-Stata integration tests). License: **MIT**.
+**Status: v0.5 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 218 passing tests across schema, runner, MCP, kernel, and ref-store modules. License: **MIT**.
+
+Two workflows v0.5 explicitly supports for end users:
+
+- **Run Stata code from a Jupyter notebook.** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` registers a **Stata** kernel that the Jupyter Notebook UI, JupyterLab, and the VS Code Jupyter extension all pick up by name. Cells render Stata logs, graphs, and warnings inline (the kernel logo bundled in v0.5 makes it appear in VS Code's kernel picker too). See [As a Jupyter Kernel](#as-a-jupyter-kernel).
+- **Optional agent "fix and rerun" loop.** `stata_run` returns typed `error.kind/line/context` plus `suggestions` on every failure. By default Claude Code only reports diagnostics — but if you explicitly say "fix this and rerun until it passes", the agent uses the same fields to edit your `.do` file and re-call `stata_run` until the run is green. The repair loop is **opt-in**: failed runs are diagnostics first, not automatic rewrite permission. See [Error Recovery in Agent Workflows](#error-recovery-in-agent-workflows).
 
 ---
 
@@ -285,7 +290,7 @@ stata_code/
 
 ## Roadmap
 
-### Done (v0.2 — May 2026)
+### Done (through v0.5 — May 2026)
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - `pystata`-based runner with native-typed `r()`, `e()`, and matrices
@@ -318,7 +323,7 @@ See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite (144 tests)
+pytest                              # full suite (218 tests)
 pytest -m "not stata_required"      # CI subset; no Stata needed
 pytest -m "stata_required" -v       # Stata-only integration tests
 ```
@@ -373,7 +378,12 @@ The Stata tooling landscape that this project builds on and learns from is surve
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.2（2026 年 5 月）** —— core、MCP server 和 Jupyter kernel 已经可以在 Stata 18 MP 上端到端运行。当前测试：144 passing（88 个不需要 Stata 的单元测试 + 56 个真实 Stata 集成测试）。许可证：**MIT**。
+**当前状态：v0.5（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：218 个 passing tests，覆盖 schema、runner、MCP、kernel 和 ref-store。许可证：**MIT**。
+
+v0.5 明确支持的两种用户工作流：
+
+- **在 Jupyter notebook 里跑 Stata 代码。** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` 会注册一个名为 **Stata** 的 kernel，Jupyter Notebook、JupyterLab、以及 VS Code 的 Jupyter 扩展都能在 kernel 选择器里看到它。Cell 里直接写 Stata 命令，日志、图形和警告会内联渲染（v0.5 把 kernel logo 一起打包进 PyPI wheel，VS Code 的 Jupyter kernel picker 也能正常显示）。详见下文 [作为 Jupyter kernel](#作为-jupyter-kernel)。
+- **可选的 agent「修复并重跑」循环。** `stata_run` 在每次失败时都会返回结构化的 `error.kind/line/context` 和 `suggestions`。默认情况下 Claude Code 只把它当作诊断信息上报；但如果你明确说「帮我修到跑通」「修复并反复运行直到成功」，agent 就会用同一组字段去改 `.do` 文件、再调 `stata_run`，直到代码通过。这个修复循环是 **opt-in** 的：默认失败 = 诊断，不是自动改写授权。详见下文 [Agent 工作流里的报错恢复](#agent-工作流里的报错恢复)。
 
 ---
 

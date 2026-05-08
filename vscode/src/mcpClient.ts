@@ -105,7 +105,7 @@ export class StataMcpClient implements vscode.Disposable {
     });
 
     const client = new Client(
-      { name: "stata-code-vscode", version: "0.3.2" },
+      { name: "stata-code-vscode", version: "0.5.0" },
       { capabilities: {} },
     );
     this.output.appendLine(`[stata-code] launching MCP server: ${formatLaunch(candidate)}`);

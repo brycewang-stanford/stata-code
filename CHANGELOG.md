@@ -4,6 +4,45 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
+## [0.5.0] — 2026-05-08
+
+### Added
+
+- **Bundled Jupyter kernel logos.** `stata-code-kernel install --user`
+  now copies `stata_code/kernel/assets/{logo-32x32.png,logo-64x64.png,
+  logo-svg.svg}` into the kernelspec source dir before
+  `KernelSpecManager().install_kernel_spec` runs. VS Code's Jupyter
+  extension filters out kernelspecs that lack logo files, so prior
+  releases were invisible in its kernel picker; v0.5 fixes that without
+  affecting JupyterLab or classic Jupyter (which both already worked).
+- **TestPyPI publishing step in `release.yml`.** Tag `v*` now publishes
+  to TestPyPI (via OIDC trusted publishing, environment `testpypi`)
+  before publishing to PyPI proper. `continue-on-error: true` keeps
+  PyPI + GitHub Release on the happy path even when TestPyPI is
+  misconfigured. Setup mirrors the PyPI trusted publisher and is
+  documented in [CLAUDE.md](CLAUDE.md).
+
+### Changed
+
+- **`stata_run` tool description and README** clarify the boundary
+  between non-mutating execution and the optional agent "fix and
+  rerun" repair loop. The tool itself never rewrites your `.do` file
+  — but the submitted Stata code can still produce logs, graphs, and
+  output files as usual. Repair loops require explicit user opt-in;
+  failed runs are diagnostics first, not automatic rewrite permission.
+- **VSCode MCP-client handshake version aligned to 0.5.0** (was a
+  stale 0.3.2 since the v0.3.2 release).
+
+### Fixed
+
+- **`install_kernel` no longer `.resolve()`s `sys.executable`.** On
+  macOS Homebrew venvs (and other layouts that use a `python` symlink
+  outside the venv's `bin/` to a Cellar-style real interpreter),
+  resolving the symlink pointed Jupyter at an interpreter that
+  couldn't import `stata_code`. The kernelspec now keeps the
+  unresolved `sys.executable`, so the venv's `python` (with
+  `stata_code` on its `sys.path`) launches the kernel.
+
 ## [0.4.0] — 2026-05-07
 
 ### Added

@@ -10,11 +10,12 @@ from reading the workflows.
 
 ## Release coordination
 
-A unified release ships **three artifacts under the same version number**:
+A unified release ships **four artifacts under the same version number**:
 
 | Channel | Tag | Workflow |
 | --- | --- | --- |
-| PyPI (`stata-code`) | `vX.Y.Z` | [.github/workflows/release.yml](.github/workflows/release.yml) |
+| TestPyPI (`stata-code`) | `vX.Y.Z` | `publish-testpypi` job in [.github/workflows/release.yml](.github/workflows/release.yml) |
+| PyPI (`stata-code`) | `vX.Y.Z` | `publish-pypi` job in [.github/workflows/release.yml](.github/workflows/release.yml) |
 | VS Code Marketplace (`stata-code-vscode`) | `vscode-vX.Y.Z` | [.github/workflows/vscode-release.yml](.github/workflows/vscode-release.yml) |
 | GitHub Release | `vX.Y.Z` | tail end of `release.yml` |
 
@@ -27,19 +28,30 @@ ship inconsistent metadata:
 4. `vscode/package.json` → `version`
 5. `vscode/src/mcpClient.ts` → handshake version string
 
-## PyPI Trusted Publishing — what to know
+## PyPI / TestPyPI Trusted Publishing — what to know
 
-PyPI uses OIDC (no API tokens in repo secrets). The trusted publisher is configured
-**per PyPI project** at <https://pypi.org/manage/project/stata-code/settings/publishing/>
-with these exact values:
+Both PyPI and TestPyPI use OIDC (no API tokens in repo secrets). They are
+**separate sites with separate publisher configs** — each must be set up
+independently:
+
+| Site | Manage URL | Environment |
+| --- | --- | --- |
+| PyPI | <https://pypi.org/manage/project/stata-code/settings/publishing/> | `pypi` |
+| TestPyPI | <https://test.pypi.org/manage/project/stata-code/settings/publishing/> | `testpypi` |
+
+For both, the publisher values are:
 
 - Owner: `brycewang-stanford`
 - Repository: `stata-code` (hyphen — not the local dir name `stata_code`)
 - Workflow: `release.yml`
-- Environment: `pypi`
+- Environment: `pypi` or `testpypi` (must match the job's `environment.name`)
 
 Configuring trusted publishers on another project (e.g. `statspai`) does **not**
-carry over — each PyPI project has its own publisher list.
+carry over — each (site, project) pair has its own publisher list.
+
+The `release.yml` flow is `build → publish-testpypi → publish-pypi → github-release`.
+Both publish jobs are `continue-on-error: true`, so a missing TestPyPI publisher
+does not block the PyPI publish or the GitHub Release.
 
 ## Recovery: `invalid-publisher` failure
 

@@ -49,9 +49,41 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  publish-testpypi:
+    name: publish to TestPyPI (Trusted Publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    # Don't block PyPI / github-release on a TestPyPI failure. TestPyPI
+    # needs its own trusted publisher configured at
+    # https://test.pypi.org/manage/project/stata-code/settings/publishing/
+    # (owner=brycewang-stanford, repo=stata-code, workflow=release.yml,
+    # environment=testpypi). If that's not yet configured, this job
+    # fails with `invalid-publisher` but the release still proceeds.
+    continue-on-error: true
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/stata-code
+    permissions:
+      # Required for TestPyPI Trusted Publishing (OIDC).
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
   publish-pypi:
     name: publish to PyPI (Trusted Publishing)
-    needs: build
+    # `needs: publish-testpypi` chains TestPyPI → PyPI; because that job
+    # has continue-on-error, a TestPyPI failure does not block PyPI.
+    needs: publish-testpypi
     runs-on: ubuntu-latest
     # Don't block github-release on a PyPI failure (e.g. Trusted Publisher
     # not yet configured, or version already uploaded manually via twine).
