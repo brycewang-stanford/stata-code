@@ -564,7 +564,11 @@ class SessionPool:
         # and now — `request_cancel` adds to `_cancel_pending` but cannot
         # observe a worker that does not yet exist. Re-check here so a
         # cancel issued during spawn fires on THIS call, not the next one.
-        # No need to kill the worker — it has not yet been asked to do work.
+        # The freshly spawned worker is intentionally LEFT in `_workers`
+        # untouched: it never received any code, so it is in the same
+        # clean state as a worker that has never run; killing it would
+        # only force the next `execute()` to pay the pystata-init cost
+        # again. Reuse over churn.
         if self._consume_cancel(session_id):
             return _build_cancelled_result(
                 session_id=session_id,

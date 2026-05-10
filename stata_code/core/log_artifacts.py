@@ -424,9 +424,17 @@ def _unique_dir(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     # 998 collisions almost certainly mean a real filesystem problem rather
-    # than a naming collision. Fall back to a UUID suffix so the run is not
-    # blocked: returning a non-existent path keeps the caller's contract.
-    return path.with_name(f"{path.name}__{uuid.uuid4().hex[:12]}")
+    # than a naming collision. Fall back to a UUID-suffixed candidate so
+    # the run isn't blocked. We do verify non-existence: a 48-bit hex
+    # collision is astronomically unlikely, but spinning the digits a few
+    # times costs nothing.
+    for _ in range(8):
+        candidate = path.with_name(f"{path.name}__{uuid.uuid4().hex[:12]}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(
+        f"could not allocate unique log artifact directory under {path.parent}"
+    )
 
 
 def _unique_file(path: Path) -> Path:
@@ -438,5 +446,11 @@ def _unique_file(path: Path) -> Path:
         candidate = path.with_name(f"{stem}__{i}{suffix}")
         if not candidate.exists():
             return candidate
-    return path.with_name(f"{stem}__{uuid.uuid4().hex[:12]}{suffix}")
+    for _ in range(8):
+        candidate = path.with_name(f"{stem}__{uuid.uuid4().hex[:12]}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(
+        f"could not allocate unique artifact path under {path.parent}"
+    )
 

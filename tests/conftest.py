@@ -22,15 +22,22 @@ import pytest
 def _isolate_refs_store():
     from stata_code.core import _refs
 
+    # ``_store`` is an ``OrderedDict`` whose insertion order doubles as the
+    # LRU ordering used by ``_evict_to_capacity_locked``. ``list(_store.items())``
+    # preserves that order; ``dict(...)`` would as well in CPython 3.7+,
+    # but the explicit list spelling makes the LRU-preservation intent
+    # obvious to a future reader and is robust against alternate dict
+    # implementations.
     with _refs._lock:  # noqa: SLF001
-        saved = dict(_refs._store)  # noqa: SLF001
+        saved = list(_refs._store.items())  # noqa: SLF001
         _refs._store.clear()  # noqa: SLF001
     try:
         yield
     finally:
         with _refs._lock:  # noqa: SLF001
             _refs._store.clear()  # noqa: SLF001
-            _refs._store.update(saved)  # noqa: SLF001
+            for k, v in saved:
+                _refs._store[k] = v  # noqa: SLF001
 
 
 @pytest.fixture(scope="session", autouse=True)

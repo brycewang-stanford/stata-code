@@ -125,21 +125,6 @@ def _object_schema(
     }
 
 
-def _strict_input_schema(
-    properties: dict[str, Any],
-    required: list[str] | None = None,
-) -> dict[str, Any]:
-    """Tool inputSchema with strict typo-detection on undeclared keys.
-
-    Many MCP clients pass arguments verbatim from agent JSON — a stray
-    ``originPath`` (camelCase) or misspelled ``log_lin_head`` would
-    otherwise be silently ignored. Strict mode lets the server reject the
-    call up-front with a typed validation error instead of producing a
-    silently-wrong run.
-    """
-    return _object_schema(properties, required, additional_properties=False)
-
-
 _INFO_OUTPUT_SCHEMA = _object_schema(
     {
         "available": {"type": "boolean"},
@@ -1760,11 +1745,18 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
                 lambda: get_default_pool().request_cancel(sid)
             )
             was_pending = not registered
+            # `is_pending` is reported as the post-registration state, which
+            # is True by definition: `request_cancel` always adds the session
+            # to `_cancel_pending` inside its own lock. A naive second call
+            # to `is_cancel_pending` here would race a concurrent `execute()`
+            # that consumes the flag between the two lock acquisitions and
+            # could report False even though the cancel was successfully
+            # registered. Trust the registration.
             return _json_result(
                 {
                     "session_id": sid,
                     "was_pending": was_pending,
-                    "is_pending": get_default_pool().is_cancel_pending(sid),
+                    "is_pending": True,
                     "killed_worker": killed_worker,
                 }
             )

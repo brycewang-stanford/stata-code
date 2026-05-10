@@ -58,6 +58,14 @@ def main() -> int:
     # import is present, there is no separate sync site. If someone later
     # reverts to a literal, parse it back so the alignment check still
     # catches drift.
+    #
+    # KNOWN LIMITATION: when the import is present this script does NOT
+    # also scan the file for a stray hardcoded literal alongside the
+    # import (e.g. a merge-conflict artifact). The check is import-OR-
+    # literal, not import-AND-no-stray-literal. The Python sync sites
+    # don't have that escape hatch — they're always literal-checked.
+    # If this asymmetry ever causes a bad release, tighten by failing
+    # whenever BOTH the import and a literal handshake string co-exist.
     mcp_client_src = _read("vscode/src/mcpClient.ts")
     if 'from "../package.json"' not in mcp_client_src:
         match = re.search(
