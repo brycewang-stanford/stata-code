@@ -74,7 +74,7 @@ class PystataRuntime:
     @staticmethod
     def _find_pystata_path() -> str | None:
         try:
-            from pystata import config as _config  # noqa: F401
+            from pystata import config as _config  # type: ignore[import-not-found]  # noqa: F401
 
             return None  # already importable; nothing to add to sys.path
         except ImportError:

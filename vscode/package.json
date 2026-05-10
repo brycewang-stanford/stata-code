@@ -598,6 +598,11 @@
           "default": [],
           "description": "Extra args passed to the MCP server process."
         },
+        "stataCode.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python interpreter used as a fallback to launch the MCP server with -m stata_code.mcp. Leave empty to use workspace .venv/venv, the Python extension interpreter, or system Python."
+        },
         "stataCode.sessionId": {
           "type": "string",
           "default": "main",

@@ -125,8 +125,12 @@ def _cell_id(cell: dict[str, Any], index: int, source: str) -> tuple[str, bool]:
 
 def _cell_type(cell: dict[str, Any]) -> CellType:
     t = cell.get("cell_type")
-    if t in ("code", "markdown", "raw"):
-        return t  # type: ignore[return-value]
+    if t == "code":
+        return "code"
+    if t == "markdown":
+        return "markdown"
+    if t == "raw":
+        return "raw"
     return "unknown"
 
 

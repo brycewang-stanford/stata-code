@@ -40,6 +40,9 @@ jobs:
         # full suite locally with plain `pytest`.
         run: pytest -v -m "not stata_required"
 
+      - name: Verify release version literals are aligned
+        run: python scripts/check_versions.py
+
       - name: Verify JSON Schema artifact is in sync
         run: python scripts/export_schema.py --check
 

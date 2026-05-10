@@ -88,11 +88,9 @@ from stata_code.core.run_index import (
     list_runs as _list_runs,
 )
 from stata_code.core.runner import (
-    cancel,
     get_graph,
     get_log,
     get_matrix,
-    is_cancel_pending,
 )
 from stata_code.core.schema import RunResult
 
@@ -669,12 +667,12 @@ def _tool_definitions() -> list[Tool]:
             name="cancel_session",
             title="Cancel Stata Session",
             description=(
-                "Request cooperative cancellation of the next stata_run for "
-                "this session. The flag is consumed by the next call and "
-                "produces a RunResult with ok=false, rc=-3, "
-                "error.kind='cancelled'. Does NOT interrupt code that is "
-                "currently mid-execution (pystata is in-process). Returns "
-                "JSON {session_id, was_pending, is_pending}."
+                "Request cancellation for this subprocess-backed session. "
+                "If a run is in flight, the worker process is terminated; "
+                "otherwise the flag is consumed by the next call and returns "
+                "a RunResult with ok=false, rc=-3, error.kind='cancelled'. "
+                "Returns JSON {session_id, was_pending, is_pending, "
+                "killed_worker}."
             ),
             inputSchema={
                 "type": "object",
@@ -1615,18 +1613,15 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _json_result({"sessions": sessions}, text_payload=sessions)
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
-            was_pending = not cancel(sid)  # cancel() returns False if already pending
-            # In subprocess-pool mode, also SIGTERM the worker so an in-flight
-            # call that's blocked inside Stata C-land actually terminates rather
-            # than waiting for the next inter-command cooperative checkpoint.
-            killed_worker = await asyncio.to_thread(
-                lambda: get_default_pool().kill_session(sid)
+            registered, killed_worker = await asyncio.to_thread(
+                lambda: get_default_pool().request_cancel(sid)
             )
+            was_pending = not registered
             return _json_result(
                 {
                     "session_id": sid,
                     "was_pending": was_pending,
-                    "is_pending": is_cancel_pending(sid),
+                    "is_pending": get_default_pool().is_cancel_pending(sid),
                     "killed_worker": killed_worker,
                 }
             )
@@ -1639,7 +1634,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # that ref-store entries this session produced stay valid in
             # the parent's `_refs` LRU until naturally evicted.
             dropped = await asyncio.to_thread(
-                lambda: get_default_pool().kill_session(sid)
+                lambda: get_default_pool().reset_session(sid)
             )
             return _json_result(
                 {

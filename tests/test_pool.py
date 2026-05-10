@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import textwrap
+import threading
 import time
 
 import pytest
@@ -251,6 +252,50 @@ class TestSessionPool:
             assert r.ok is False
             assert r.rc == -1
             assert r.error is not None and r.error.kind is ErrorKind.ADAPTER_CRASH
+        finally:
+            pool.shutdown()
+
+    def test_cancel_before_execute_returns_cancelled_result(self):
+        pool = SessionPool(worker_cmd=_cmd_for(_ECHO_WORKER))
+        try:
+            registered, killed = pool.request_cancel("s")
+            assert registered is True
+            assert killed is False
+            assert pool.is_cancel_pending("s") is True
+
+            r = pool.execute("noop", session_id="s", timeout_ms=5000)
+            assert r.ok is False
+            assert r.rc == -3
+            assert r.error is not None and r.error.kind is ErrorKind.CANCELLED
+            assert pool.is_cancel_pending("s") is False
+            assert pool.session_ids() == []
+        finally:
+            pool.shutdown()
+
+    def test_cancel_in_flight_kills_worker_without_waiting_for_timeout(self):
+        pool = SessionPool(worker_cmd=_cmd_for(_SLOW_WORKER))
+        result: list[RunResult] = []
+
+        def run_slow() -> None:
+            result.append(pool.execute("hangs", session_id="s", timeout_ms=30_000))
+
+        thread = threading.Thread(target=run_slow)
+        try:
+            thread.start()
+            time.sleep(0.2)
+            started = time.monotonic()
+            registered, killed = pool.request_cancel("s")
+            cancel_elapsed = time.monotonic() - started
+
+            assert registered is True
+            assert killed is True
+            assert cancel_elapsed < 2.0
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+            assert result
+            assert result[0].ok is False
+            assert result[0].error is not None
+            assert result[0].error.kind is ErrorKind.CANCELLED
         finally:
             pool.shutdown()
 

@@ -58,6 +58,7 @@ from stata_code.core.schema import (
     LogInfo,
     ResultsInfo,
     RunResult,
+    StataEdition,
     StataInfo,
     StataReturns,
 )
@@ -447,38 +448,41 @@ class WorkerProcess:
                 raise _WorkerError(
                     f"worker reported failure: {response.get('error', '<no error>')}"
                 )
-            return response
+            return dict(response)
 
     def kill(self) -> None:
-        """Terminate the worker. SIGTERM with grace, then SIGKILL."""
-        with self._lock:
-            self._kill_locked()
+        """Terminate the worker. SIGTERM with grace, then SIGKILL.
 
-    def _kill_locked(self) -> None:
-        if self._proc is None:
+        Cancellation must work while ``execute()`` is blocked waiting for a
+        worker response. ``execute()`` holds ``self._lock`` during that read,
+        so kill deliberately does not wait for the same lock.
+        """
+        proc = self._proc
+        if proc is None:
             return
-        if self._proc.poll() is not None:
+        if proc.poll() is not None:
             self._proc = None
             return
         try:
-            self._proc.terminate()
+            proc.terminate()
             try:
-                self._proc.wait(timeout=_KILL_GRACE_S)
+                proc.wait(timeout=_KILL_GRACE_S)
             except subprocess.TimeoutExpired:
-                self._proc.kill()
+                proc.kill()
                 try:
-                    self._proc.wait(timeout=_KILL_GRACE_S)
+                    proc.wait(timeout=_KILL_GRACE_S)
                 except subprocess.TimeoutExpired:
                     pass
         except ProcessLookupError:
             pass
         # Drain any buffered stderr so we don't leak a fd.
         try:
-            if self._proc.stderr is not None:
-                self._proc.stderr.read()
+            if proc.stderr is not None:
+                proc.stderr.read()
         except Exception:  # noqa: BLE001
             pass
-        self._proc = None
+        if self._proc is proc:
+            self._proc = None
 
 
 class SessionPool:
@@ -495,6 +499,7 @@ class SessionPool:
         self._capacity = capacity
         self._worker_cmd = worker_cmd
         self._workers: dict[str, WorkerProcess] = {}
+        self._cancel_pending: set[str] = set()
         self._lock = threading.Lock()
 
     @property
@@ -543,12 +548,18 @@ class SessionPool:
         # Normalize: pass session_id through to the worker so it routes
         # to the right Stata frame. timeout_ms is enforced HERE — the
         # worker doesn't see it.
+        started = time.monotonic()
+        if self._consume_cancel(session_id):
+            return _build_cancelled_result(
+                session_id=session_id,
+                elapsed_ms=max(1, int((time.monotonic() - started) * 1000)),
+            )
+
         worker_options = {**options, "session_id": session_id}
         # Forward timeout_ms verbatim so the worker stores it on the result
         # for observability, even though the real enforcement is parent-side.
         worker_options.setdefault("timeout_ms", timeout_ms)
         worker = self._get_or_spawn(session_id)
-        started = time.monotonic()
         try:
             result_dict, ref_blobs = worker.execute(
                 code, worker_options, timeout_ms=timeout_ms
@@ -564,10 +575,16 @@ class SessionPool:
                 timeout_ms=timeout_ms or 0,
             )
         except _WorkerError as exc:
+            cancelled = self._consume_cancel(session_id)
             worker.kill()
             with self._lock:
                 self._workers.pop(session_id, None)
             elapsed_ms = int((time.monotonic() - started) * 1000)
+            if cancelled:
+                return _build_cancelled_result(
+                    session_id=session_id,
+                    elapsed_ms=max(1, elapsed_ms),
+                )
             return _build_adapter_crash_result(
                 session_id=session_id,
                 elapsed_ms=elapsed_ms,
@@ -591,11 +608,54 @@ class SessionPool:
         w.kill()
         return True
 
+    def request_cancel(self, session_id: str) -> tuple[bool, bool]:
+        """Request cancellation and terminate a live worker if one exists.
+
+        Returns ``(registered, killed_worker)``. ``registered`` is ``False``
+        when a cancellation for this session was already pending.
+        """
+        with self._lock:
+            registered = session_id not in self._cancel_pending
+            self._cancel_pending.add(session_id)
+            worker = self._workers.pop(session_id, None)
+        if worker is not None:
+            worker.kill()
+        return registered, worker is not None
+
+    def is_cancel_pending(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._cancel_pending
+
+    def clear_cancel(self, session_id: str) -> bool:
+        with self._lock:
+            if session_id not in self._cancel_pending:
+                return False
+            self._cancel_pending.remove(session_id)
+            return True
+
+    def _consume_cancel(self, session_id: str) -> bool:
+        with self._lock:
+            if session_id not in self._cancel_pending:
+                return False
+            self._cancel_pending.remove(session_id)
+            return True
+
+    def reset_session(self, session_id: str) -> bool:
+        """Clear pending cancellation and terminate a session worker."""
+        with self._lock:
+            self._cancel_pending.discard(session_id)
+            worker = self._workers.pop(session_id, None)
+        if worker is None:
+            return False
+        worker.kill()
+        return True
+
     def shutdown(self) -> None:
         """Kill all workers."""
         with self._lock:
             workers = list(self._workers.values())
             self._workers.clear()
+            self._cancel_pending.clear()
         for w in workers:
             w.kill()
 
@@ -665,7 +725,8 @@ class SessionPool:
             with self._lock:
                 self._workers.pop(session_id, None)
             raise
-        return response["stata"]
+        stata = response["stata"]
+        return stata if isinstance(stata, dict) else {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -728,7 +789,11 @@ def _build_timeout_result(
         started_at=_utc_iso_ms(),
         elapsed_ms=elapsed_ms,
         stata_elapsed_ms=elapsed_ms,
-        stata=StataInfo(version="unknown", edition="unknown", backend=Backend.PYSTATA),
+        stata=StataInfo(
+            version="unknown",
+            edition=StataEdition.UNKNOWN,
+            backend=Backend.PYSTATA,
+        ),
         log=LogInfo(
             head="",
             tail="",
@@ -777,7 +842,11 @@ def _build_adapter_crash_result(
         started_at=_utc_iso_ms(),
         elapsed_ms=elapsed_ms,
         stata_elapsed_ms=elapsed_ms,
-        stata=StataInfo(version="unknown", edition="unknown", backend=Backend.PYSTATA),
+        stata=StataInfo(
+            version="unknown",
+            edition=StataEdition.UNKNOWN,
+            backend=Backend.PYSTATA,
+        ),
         log=LogInfo(
             head="",
             tail="",
@@ -795,6 +864,61 @@ def _build_adapter_crash_result(
         error=err,
         schema_version="1.0",
         capabilities=["pystata", "subprocess_timeout"],
+    )
+
+
+def _build_cancelled_result(
+    *,
+    session_id: str,
+    elapsed_ms: int,
+) -> RunResult:
+    err = ErrorInfo(
+        kind=ErrorKind.CANCELLED,
+        rc=-3,
+        rc_label="cancelled",
+        message=(
+            "Execution was cancelled before a completed Stata response was "
+            f"received for session_id={session_id!r}."
+        ),
+        command=None,
+        line=None,
+        context=ErrorContext(before=[], failing="", after=[]),
+        commands_executed=None,
+        path=None,
+        varname=None,
+        name=None,
+        suggestions=[],
+    )
+    return RunResult(
+        ok=False,
+        rc=-3,
+        session_id=session_id,
+        request_id=uuid.uuid4().hex,
+        started_at=_utc_iso_ms(),
+        elapsed_ms=elapsed_ms,
+        stata_elapsed_ms=0,
+        stata=StataInfo(
+            version="unknown",
+            edition=StataEdition.UNKNOWN,
+            backend=Backend.PYSTATA,
+        ),
+        log=LogInfo(
+            head="",
+            tail="",
+            lines_total=0,
+            bytes_total=0,
+            truncated=False,
+            complete=True,
+            error_window=None,
+            ref=None,
+        ),
+        results=ResultsInfo(r=_empty_returns(), e=_empty_returns(), last_estimation_cmd=None),
+        dataset=_empty_dataset(),
+        graphs=[],
+        warnings=[],
+        error=err,
+        schema_version="1.0",
+        capabilities=["pystata", "subprocess_timeout", "cancel"],
     )
 
 

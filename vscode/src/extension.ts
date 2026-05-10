@@ -111,7 +111,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (
         e.affectsConfiguration("stataCode.serverCommand") ||
-        e.affectsConfiguration("stataCode.serverArgs")
+        e.affectsConfiguration("stataCode.serverArgs") ||
+        e.affectsConfiguration("stataCode.pythonPath")
       ) {
         client?.dispose();
         client = undefined;
@@ -373,7 +374,9 @@ function localVenvDirs(
   const roots = [workspaceRoot, ...sourceRoots].filter((entry): entry is string =>
     Boolean(entry),
   );
-  return uniqueStrings(roots.map((root) => path.join(root, ".venv")));
+  return uniqueStrings(
+    roots.flatMap((root) => [path.join(root, ".venv"), path.join(root, "venv")]),
+  );
 }
 
 function splitPathList(value: string | undefined): string[] {
@@ -393,8 +396,10 @@ function pythonUserScriptDirs(): string[] {
 }
 
 function configuredPythonCommands(): string[] {
+  const stataCfg = vscode.workspace.getConfiguration("stataCode");
   const cfg = vscode.workspace.getConfiguration("python");
   return [
+    stataCfg.get<string>("pythonPath"),
     cfg.get<string>("defaultInterpreterPath"),
     cfg.get<string>("pythonPath"),
   ]

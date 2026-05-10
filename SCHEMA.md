@@ -580,7 +580,6 @@ When v2 ships, v1 is supported by frontends for at least 6 months. Servers MAY e
 Explicitly *not* in this version, to keep the surface small:
 
 - **Streaming logs.** All output is batched at end-of-call. `log.complete: false` is reserved for this in v2. Streams (Stata vs Python vs Mata) may be separated under a future `log.streams` field.
-- **Hard timeout enforcement / mid-Stata interrupt.** `cancel(session_id)` is implemented as a *cooperative* signal that short-circuits the next `execute()` call before pystata is invoked; it does not interrupt code that is already mid-`stata.run()`. Hard interruption requires a subprocess-based runtime (post-v0.2).
 - **Distributed / remote sessions.** Sessions are per-process. `session_id` reserves `:` for future host-prefixing.
 - **Authentication / authorization.** Local trusted environment is assumed.
 - **Mata internals.** Mata code runs (`stata.run("mata: ...")`) but Mata-specific return values aren't surfaced beyond what `r()` carries.
@@ -596,7 +595,7 @@ Explicitly *not* in this version, to keep the surface small:
 This section tracks how much of the schema is wired up in code. Not normative
 — the contract above is the contract — but useful as a release checklist.
 
-### Implemented in v0.2 (2026-05)
+### Implemented through v0.6 (2026-05)
 
 - Log `head` / `tail` / `truncated` / `complete` / `error_window` / `ref`
   with an in-memory ref store backing `get_log`.
@@ -634,23 +633,21 @@ This section tracks how much of the schema is wired up in code. Not normative
 - LRU eviction on the ref store (default cap 256) keeps long-running
   producers from growing unboundedly.
 
-- **Cooperative cancellation** via `cancel(session_id)` /
-  `clear_cancel(session_id)` / `is_cancel_pending(session_id)`,
-  exposed as a Python API and as the MCP `cancel_session` tool.
-  Short-circuits the next `execute()` call for the named session and
-  returns a `RunResult` with `ok=false`, `rc=-3`,
-  `error.kind="cancelled"`. Cooperative semantics — does not
-  interrupt code that is already mid-`stata.run()`.
+- **Subprocess-backed hard timeout and cancellation** via the public
+  package API, MCP `stata_run`, and the subprocess session pool.
+  `timeout_ms` returns `ok=false`, `rc=-2`, `error.kind="timeout"`
+  after terminating the worker. `cancel(session_id)` /
+  `clear_cancel(session_id)` / `is_cancel_pending(session_id)` and
+  MCP `cancel_session` return `ok=false`, `rc=-3`,
+  `error.kind="cancelled"`; an in-flight pool worker is terminated and a
+  not-yet-started run is short-circuited before Stata receives code.
 
-### Still deferred (post-v0.2)
+### Still deferred
 
-- **Hard timeout / mid-Stata interrupt.** `timeout_ms` is accepted by
-  `execute()` but not yet enforced; cancellation is cooperative-only
-  (does not interrupt code already in-flight). pystata's in-process
-  model has no clean cancel primitive — v0.3 will move long calls
-  into a subprocess pool with signal-based cancellation. Design
-  constraints, options considered, and an effort estimate are
-  written up in [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md).
+- **In-process hard timeout.** `stata_code.core.runner.execute()` still
+  runs inside the caller process and cannot preempt code already inside
+  `pystata`. Use the package-level `stata_code.run()` / `execute()` or
+  MCP server for subprocess-backed timeouts and cancellation.
 - **Console fallback for Stata 11–16.** Earlier scaffold's
   `ConsoleFallback` was deleted in v0.2 (it produced legacy
   `StataResult` and didn't fit the new pipeline). v0.3 will reintroduce

@@ -13,6 +13,7 @@ import threading
 import pytest
 
 from stata_code.core import runner
+from stata_code.core._pool import shutdown_default_pool
 
 
 @pytest.fixture(autouse=True)
@@ -20,9 +21,11 @@ def _isolate_cancel_state():
     """Each test starts with no pending cancels and ends the same way."""
     with runner._cancel_lock:
         runner._cancel_pending.clear()
+    shutdown_default_pool()
     yield
     with runner._cancel_lock:
         runner._cancel_pending.clear()
+    shutdown_default_pool()
 
 
 class TestCancelMechanics:

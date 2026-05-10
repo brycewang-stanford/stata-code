@@ -147,8 +147,9 @@ spawns `stata-code-mcp` lazily (one process per workspace). Make sure
 `stata-code-mcp` is on `PATH` or override. The extension also expands
 common macOS Python script directories (`~/.local/bin`, Homebrew, and
 `~/Library/Python/*/bin`) before spawning, and falls back to
-`python -m stata_code.mcp` when the default console script cannot be
-found.
+workspace `.venv` / `venv` interpreters, `stataCode.pythonPath`, the
+Python extension interpreter, and system `python3 -m stata_code.mcp`
+when the default console script cannot be found.
 
 ```jsonc
 // settings.json
@@ -164,6 +165,7 @@ found.
 | --- | --- | --- |
 | `stataCode.serverCommand` | `stata-code-mcp` | Command to spawn the MCP server |
 | `stataCode.serverArgs` | `[]` | Extra args passed to the server process |
+| `stataCode.pythonPath` | `""` | Fallback Python interpreter for `-m stata_code.mcp` |
 | `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*) |
 | `stataCode.includeFullLog` | `false` | Inline full log instead of fetching via `get_log(ref)` |
 

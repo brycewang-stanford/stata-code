@@ -108,9 +108,10 @@ The extension auto-discovers a Python interpreter for the MCP server in this ord
 (see [vscode/src/mcpClient.ts](vscode/src/mcpClient.ts) and
 [vscode/src/extension.ts](vscode/src/extension.ts)):
 
-1. Per-workspace `.venv` / `venv` in any workspace folder
+1. Per-workspace `.venv` / `venv` in any workspace/source folder
 2. The Python configured in `stataCode.pythonPath` (settings)
-3. System `python3`
+3. The Python extension's configured interpreter
+4. System `python3`
 
 The MCP client is reset whenever `stataCode.*` settings change so users don't have
 to reload the window.

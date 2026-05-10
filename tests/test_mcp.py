@@ -558,13 +558,16 @@ class TestDispatch:
 
         class SlowPool:
             @staticmethod
-            def kill_session(session_id: str):
+            def request_cancel(session_id: str):
                 assert session_id == "main"
                 time.sleep(0.05)
+                return True, True
+
+            @staticmethod
+            def is_cancel_pending(session_id: str):
+                assert session_id == "main"
                 return True
 
-        monkeypatch.setattr(server, "cancel", lambda _sid: True)
-        monkeypatch.setattr(server, "is_cancel_pending", lambda _sid: False)
         monkeypatch.setattr(server, "get_default_pool", lambda: SlowPool())
 
         async def probe() -> CallToolResult:
@@ -580,7 +583,7 @@ class TestDispatch:
         assert _json_body(out) == {
             "session_id": "main",
             "was_pending": False,
-            "is_pending": False,
+            "is_pending": True,
             "killed_worker": True,
         }
 
@@ -589,7 +592,7 @@ class TestDispatch:
 
         class SlowPool:
             @staticmethod
-            def kill_session(session_id: str):
+            def reset_session(session_id: str):
                 assert session_id == "main"
                 time.sleep(0.05)
                 return True

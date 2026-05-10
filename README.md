@@ -45,7 +45,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.6 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 310 passing tests across schema, runner, MCP, kernel, notebook, and run-index modules. License: **MIT**.
+**Status: v0.6 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 329 passing tests across schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules. License: **MIT**.
 
 Two workflows v0.6 explicitly supports for end users:
 
@@ -106,6 +106,10 @@ Note: `pystata` is **not** on PyPI; it ships with Stata. `stata-code` auto-disco
 See [`examples/`](examples/) for end-to-end cookbook entries: basic regression, DiD, graphs, multi-session, and large matrices.
 
 ### As a Python Library
+
+The package-level `run()` / `execute()` API uses the same subprocess-backed
+runner as the MCP server, so long calls honor `timeout_ms` and `pystata`
+stdout redirection stays isolated from the caller process.
 
 ```python
 from stata_code import run
@@ -310,14 +314,15 @@ stata_code/
 │   ├── _refs.py       # LRU ref store for log/graph/matrix payloads
 │   ├── schema.py      # Pydantic v2 models for the v1.0 result schema
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
-│   └── runner.py      # the one execute(); collects everything via sfi
+│   ├── runner.py      # in-process execute(); collects everything via sfi
+│   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
 │   └── server.py      # MCP server (15 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
 
-`runner.py` is the only place that touches Stata. The Jupyter kernel and MCP server both import from it and only translate results into their own transports.
+`runner.py` is the only place that directly talks to `pystata`. The public Python API and MCP server route calls through `_pool.py`, whose workers call `runner.execute()` in an isolated subprocess; the Jupyter kernel uses the in-process runner for notebook interactivity.
 
 ---
 

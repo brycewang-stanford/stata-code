@@ -59,6 +59,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify unified project versions
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/vscode-v* ]]; then
+            python3 scripts/check_versions.py --tag "$GITHUB_REF_NAME"
+          else
+            python3 scripts/check_versions.py
+          fi
+
       - name: Install dependencies
         run: |
           if [ -f package-lock.json ]; then

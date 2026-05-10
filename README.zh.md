@@ -45,7 +45,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.6（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：310 个 passing tests，覆盖 schema、runner、MCP、kernel、notebook 和 run-index 等模块。许可证：**MIT**。
+**当前状态：v0.6（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：329 个 passing tests，覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块。许可证：**MIT**。
 
 v0.6 明确支持的两种用户工作流：
 
@@ -105,6 +105,9 @@ pip install -e ".[mcp,kernel]"
 完整 cookbook 在 [`examples/`](examples/)：基础回归、DiD、图形、多 session、大矩阵。
 
 ### 作为 Python library
+
+包级 `run()` / `execute()` API 使用和 MCP server 相同的 subprocess-backed
+runner，因此长任务会遵守 `timeout_ms`，`pystata` 对 stdout 的重定向也会被隔离在 worker 进程中，不会污染调用方进程。
 
 ```python
 from stata_code import run
@@ -307,14 +310,15 @@ stata_code/
 │   ├── _refs.py       # LRU ref store for log/graph/matrix payloads
 │   ├── schema.py      # Pydantic v2 models for the v1.0 result schema
 │   ├── errors.py      # rc → ErrorKind mapping + suggestion seeds
-│   └── runner.py      # the one execute(); collects everything via sfi
+│   ├── runner.py      # in-process execute(); collects everything via sfi
+│   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
 │   └── server.py      # MCP server (15 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
 
-`runner.py` 是唯一直接接触 Stata 的地方。Jupyter kernel 和 MCP server 都只导入它，然后把结果翻译成各自的传输格式。
+`runner.py` 是唯一直接接触 `pystata` 的地方。包级 Python API 和 MCP server 会先走 `_pool.py`，由隔离的 worker subprocess 调用 `runner.execute()`；Jupyter kernel 为了 notebook 交互性仍使用 in-process runner。
 
 ---
 
