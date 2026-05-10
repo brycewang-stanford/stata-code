@@ -1571,7 +1571,7 @@ def _error_result(message: str, *, kind: str = "tool_error") -> Any:
 async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
     try:
         if name == "stata_run":
-            return _run_tool(arguments)
+            return await asyncio.to_thread(_run_tool, arguments)
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
@@ -1609,7 +1609,9 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # `list_sessions` op to each live worker and aggregates. Dead
             # or unresponsive workers are skipped silently — partial info
             # beats failing the whole list call.
-            sessions = get_default_pool().list_session_info()
+            sessions = await asyncio.to_thread(
+                lambda: get_default_pool().list_session_info()
+            )
             return _json_result({"sessions": sessions}, text_payload=sessions)
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
@@ -1617,7 +1619,9 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # In subprocess-pool mode, also SIGTERM the worker so an in-flight
             # call that's blocked inside Stata C-land actually terminates rather
             # than waiting for the next inter-command cooperative checkpoint.
-            killed_worker = get_default_pool().kill_session(sid)
+            killed_worker = await asyncio.to_thread(
+                lambda: get_default_pool().kill_session(sid)
+            )
             return _json_result(
                 {
                     "session_id": sid,
@@ -1634,7 +1638,9 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # `clear all` (both wipe data + r()/e()), with the wrinkle
             # that ref-store entries this session produced stay valid in
             # the parent's `_refs` LRU until naturally evicted.
-            dropped = get_default_pool().kill_session(sid)
+            dropped = await asyncio.to_thread(
+                lambda: get_default_pool().kill_session(sid)
+            )
             return _json_result(
                 {
                     "session_id": sid,
