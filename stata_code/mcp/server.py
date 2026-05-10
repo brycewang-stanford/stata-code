@@ -1571,7 +1571,7 @@ def _error_result(message: str, *, kind: str = "tool_error") -> Any:
 async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
     try:
         if name == "stata_run":
-            return _run_tool(arguments)
+            return await asyncio.to_thread(_run_tool, arguments)
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":

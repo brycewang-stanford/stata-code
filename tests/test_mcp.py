@@ -461,6 +461,72 @@ class TestDispatch:
         assert _json_body(out) == json.loads(payload)
         assert out.structuredContent == json.loads(payload)
 
+    def test_stata_run_dispatch_does_not_block_event_loop(self, monkeypatch):
+        from stata_code.core.schema import RunResult
+        from stata_code.mcp import server
+
+        payload = {
+            "ok": True,
+            "rc": 0,
+            "session_id": "main",
+            "request_id": "req-test",
+            "started_at": "2026-05-10T00:00:00.000Z",
+            "elapsed_ms": 50,
+            "stata_elapsed_ms": 50,
+            "stata": {
+                "version": "19.0",
+                "edition": "MP",
+                "backend": "pystata",
+            },
+            "log": {
+                "head": "slow run",
+                "tail": "",
+                "lines_total": 1,
+                "bytes_total": 8,
+                "truncated": False,
+                "complete": True,
+            },
+            "results": {
+                "r": {"scalars": {}, "macros": {}, "matrices": {}},
+                "e": {"scalars": {}, "macros": {}, "matrices": {}},
+                "last_estimation_cmd": None,
+            },
+            "dataset": {
+                "frame": "default",
+                "n_obs": 0,
+                "n_vars": 0,
+                "changed": False,
+                "filename": None,
+                "variables": None,
+            },
+            "graphs": [],
+            "warnings": [],
+            "error": None,
+            "schema_version": "1.0",
+            "capabilities": [],
+        }
+
+        def slow_run(code: str, **_kwargs):
+            assert code == "display 1"
+            time.sleep(0.05)
+            return RunResult.model_validate(payload)
+
+        monkeypatch.setattr(server, "pool_execute", slow_run)
+
+        async def probe() -> CallToolResult:
+            task = asyncio.create_task(_dispatch_stata_run())
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            return await task
+
+        async def _dispatch_stata_run() -> CallToolResult:
+            return await server._dispatch("stata_run", {"code": "display 1"})
+
+        out = asyncio.run(probe())
+        expected = json.loads(RunResult.model_validate(payload).model_dump_json())
+        assert _json_body(out) == expected
+        assert out.structuredContent == expected
+
     def test_info_payload_from_pool_happy_path(self, monkeypatch):
         """The production path returns the merged shape from a worker dict."""
         from stata_code.mcp import server
