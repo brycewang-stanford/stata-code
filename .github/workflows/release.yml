@@ -114,8 +114,47 @@ jobs:
         with:
           skip-existing: true
 
+  verify-pypi:
+    name: verify PyPI publish
+    # Authoritative signal that the PyPI publish actually landed. Because
+    # `publish-pypi` is `continue-on-error: true` (so a TestPyPI/PyPI hiccup
+    # doesn't block the GitHub Release), the only way an `invalid-publisher`
+    # or similar failure surfaces in the workflow status is via this job.
+    # Intentionally NOT `continue-on-error` — if PyPI doesn't have the
+    # version after this completes, the workflow run is marked failed.
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Poll PyPI for the published version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          # Per-version JSON returns 200 once the release is live, 404 until
+          # then. PyPI's CDN can lag the upload by a minute or two; poll for
+          # up to ~5 minutes before declaring failure.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://pypi.org/pypi/stata-code/${VERSION}/json")
+            if [ "$code" = "200" ]; then
+              echo "stata-code==${VERSION} is live on PyPI."
+              exit 0
+            fi
+            echo "attempt ${i}/30: HTTP ${code}, retrying in 10s..."
+            sleep 10
+          done
+          echo "::error::stata-code==${VERSION} not visible on PyPI after 5 minutes."
+          echo "Check https://pypi.org/manage/project/stata-code/settings/publishing/"
+          echo "and the publish-pypi job logs for an invalid-publisher or upload error."
+          exit 1
+
   github-release:
     name: create GitHub Release
+    # Depends on `publish-pypi` directly (not `verify-pypi`) so that the
+    # GitHub Release is still created when PyPI verification fails — the
+    # release artifacts and notes are useful even if PyPI is broken.
     needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:

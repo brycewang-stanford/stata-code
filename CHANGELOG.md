@@ -15,6 +15,16 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   builder is now a pure tested module covering local `.venv` / `venv`
   discovery, configured Python interpreters, inline command parsing, and
   environment construction.
+- **VS Code packaging smoke test.** The default CI now builds a VSIX artifact
+  with the same local `vsce` package command used by release packaging, so
+  package-manifest and `.vscodeignore` mistakes fail before release day.
+- **VS Code extension bundling.** The extension now bundles its TypeScript
+  entrypoint with `esbuild`, excluding `node_modules` and test/build support
+  files from the shipped VSIX.
+- **PyPI publish verification.** The release workflow now polls PyPI's
+  per-version JSON endpoint after the official publish job, so trusted
+  publisher failures surface as a failed release run instead of being hidden
+  by `continue-on-error`.
 
 ### Changed
 
@@ -25,6 +35,11 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 - **CI treats core type errors as blocking.** `mypy stata_code/core` is now a
   hard failure, and the default test workflow also compiles and tests the VS
   Code extension.
+- **VS Code npm installs are locked.** The extension now ships
+  `package-lock.json`, and CI / release workflows use `npm ci` for reproducible
+  dependency installs.
+- **Python 3.13 is in the support matrix.** CI now runs the no-Stata test
+  suite on Python 3.13, and package metadata advertises the 3.13 classifier.
 
 ### Fixed
 

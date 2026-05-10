@@ -638,19 +638,24 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
+    "compile": "npm run compile:ts && npm run bundle",
+    "compile:ts": "tsc -p .",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --outfile=out/extension.js --sourcemap --sources-content=false",
     "watch": "tsc -p . --watch",
     "gen-types": "node scripts/gen-types.cjs",
-    "test": "tsc -p . && node --test out/*.test.js",
+    "test": "npm run compile:ts && node --test out/*.test.js",
+    "package:vsix": "vsce package",
+    "publish:vsix": "vsce publish",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.1",
+    "esbuild": "^0.28.0",
     "json-schema-to-typescript": "^15.0.0",
     "typescript": "^5.4.0"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
-  }
+  "dependencies": {}
 }

@@ -1,12 +1,15 @@
 .vscode/**
 .vscode-test/**
 .git/**
+node_modules/**
 src/**
 .gitignore
 .eslintrc.json
 **/tsconfig.json
 **/*.map
 **/*.ts
+out/**/*.js
+!out/extension.js
 scripts/**
 *.vsix
 .npmignore

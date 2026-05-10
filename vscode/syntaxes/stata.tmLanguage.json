@@ -1057,10 +1057,10 @@
                             "name": "punctuation.definition.comment.stata"
                         }
                     },
-                    "begin": "^\\s*(\\*)",
+                    "begin": "^[ \\t]*(\\*)",
                     "name": "comment.line.star.stata",
                     "end": "(?=\\n)",
-                    "comment": "TODO! need to except out the occasion that a * comes after a /// on the previous line. May be easiest to join with the comment.line.triple-slash.stata below",
+                    "comment": "Known limitation: a leading `*` on a line that is the continuation of a `///`-terminated previous line is real code, not a comment, but TextMate grammars tokenize line-by-line with no access to prior-line content, so we cannot suppress this match here. Users hitting this should split the continuation or use `/* ... */`. A complete fix would require a semantic tokenizer.",
                     "patterns": [
                         {
                             "include": "#docblockr-comment"
