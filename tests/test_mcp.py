@@ -527,6 +527,90 @@ class TestDispatch:
         assert _json_body(out) == expected
         assert out.structuredContent == expected
 
+    def test_list_sessions_dispatch_does_not_block_event_loop(self, monkeypatch):
+        from stata_code.mcp import server
+
+        sessions = [{"session_id": "main", "frame": "default", "n_obs": 0}]
+
+        class SlowPool:
+            @staticmethod
+            def list_session_info():
+                time.sleep(0.05)
+                return sessions
+
+        monkeypatch.setattr(server, "get_default_pool", lambda: SlowPool())
+
+        async def probe() -> CallToolResult:
+            task = asyncio.create_task(_dispatch_list_sessions())
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            return await task
+
+        async def _dispatch_list_sessions() -> CallToolResult:
+            return await server._dispatch("list_sessions", {})
+
+        out = asyncio.run(probe())
+        assert _json_body(out) == sessions
+        assert out.structuredContent == {"sessions": sessions}
+
+    def test_cancel_session_dispatch_does_not_block_event_loop(self, monkeypatch):
+        from stata_code.mcp import server
+
+        class SlowPool:
+            @staticmethod
+            def kill_session(session_id: str):
+                assert session_id == "main"
+                time.sleep(0.05)
+                return True
+
+        monkeypatch.setattr(server, "cancel", lambda _sid: True)
+        monkeypatch.setattr(server, "is_cancel_pending", lambda _sid: False)
+        monkeypatch.setattr(server, "get_default_pool", lambda: SlowPool())
+
+        async def probe() -> CallToolResult:
+            task = asyncio.create_task(_dispatch_cancel_session())
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            return await task
+
+        async def _dispatch_cancel_session() -> CallToolResult:
+            return await server._dispatch("cancel_session", {"session_id": "main"})
+
+        out = asyncio.run(probe())
+        assert _json_body(out) == {
+            "session_id": "main",
+            "was_pending": False,
+            "is_pending": False,
+            "killed_worker": True,
+        }
+
+    def test_reset_session_dispatch_does_not_block_event_loop(self, monkeypatch):
+        from stata_code.mcp import server
+
+        class SlowPool:
+            @staticmethod
+            def kill_session(session_id: str):
+                assert session_id == "main"
+                time.sleep(0.05)
+                return True
+
+        monkeypatch.setattr(server, "get_default_pool", lambda: SlowPool())
+
+        async def probe() -> CallToolResult:
+            task = asyncio.create_task(_dispatch_reset_session())
+            await asyncio.sleep(0.01)
+            assert not task.done()
+            return await task
+
+        async def _dispatch_reset_session() -> CallToolResult:
+            return await server._dispatch("reset_session", {"session_id": "main"})
+
+        out = asyncio.run(probe())
+        assert _json_body(out) == {
+            "session_id": "main",
+            "dropped_frame": True,
+        }
+
     def test_info_payload_from_pool_happy_path(self, monkeypatch):
         """The production path returns the merged shape from a worker dict."""
         from stata_code.mcp import server
