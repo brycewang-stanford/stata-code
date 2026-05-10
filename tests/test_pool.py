@@ -267,6 +267,7 @@ class TestSessionPool:
             assert r.ok is False
             assert r.rc == -3
             assert r.error is not None and r.error.kind is ErrorKind.CANCELLED
+            assert r.log.complete is True
             assert pool.is_cancel_pending("s") is False
             assert pool.session_ids() == []
         finally:
@@ -296,6 +297,7 @@ class TestSessionPool:
             assert result[0].ok is False
             assert result[0].error is not None
             assert result[0].error.kind is ErrorKind.CANCELLED
+            assert result[0].log.complete is False
         finally:
             pool.shutdown()
 

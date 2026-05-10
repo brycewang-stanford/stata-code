@@ -6,6 +6,32 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+### Added
+
+- **Release version guard.** `scripts/check_versions.py` and the CI /
+  release workflows now verify that the Python package, MCP server, VS Code
+  package, VS Code MCP handshake, and release tag all use the same version.
+- **VS Code MCP launch tests.** The extension's server-launch candidate
+  builder is now a pure tested module covering local `.venv` / `venv`
+  discovery, configured Python interpreters, inline command parsing, and
+  environment construction.
+
+### Changed
+
+- **Package-level Python API is subprocess-backed.** `stata_code.run()`,
+  `execute()`, and `is_available()` now go through the same worker pool as
+  the MCP server, preserving hard timeout behavior and avoiding caller-process
+  stdout redirection by `pystata`.
+- **CI treats core type errors as blocking.** `mypy stata_code/core` is now a
+  hard failure, and the default test workflow also compiles and tests the VS
+  Code extension.
+
+### Fixed
+
+- **Cancelled in-flight runs report incomplete logs.** If a live worker is
+  killed by `cancel_session`, the synthetic cancelled result now marks
+  `log.complete=false`, matching timeout and adapter-crash behavior.
+
 ## [0.6.0] — 2026-05-08
 
 ### Added

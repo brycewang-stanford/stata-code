@@ -67,7 +67,25 @@ jobs:
 
       - name: mypy (core only — frontends pull in optional deps)
         run: mypy stata_code/core
-        continue-on-error: true
+
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Compile and run tests
+        run: npm test
 
   build:
     name: build wheel

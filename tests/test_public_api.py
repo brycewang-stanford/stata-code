@@ -37,6 +37,26 @@ def test_package_run_does_not_steal_process_stdout() -> None:
     assert "ok=True log='4'" in completed.stdout
 
 
+def test_package_is_available_does_not_steal_process_stdout() -> None:
+    script = textwrap.dedent(
+        """
+        from stata_code import is_available, shutdown_default_pool
+
+        print(f"available={is_available()}")
+        shutdown_default_pool()
+        print("stdout-after-availability")
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert "available=True" in completed.stdout
+    assert "stdout-after-availability" in completed.stdout
+
+
 def test_package_run_enforces_timeout() -> None:
     from stata_code import run, shutdown_default_pool
     from stata_code.core.schema import ErrorKind

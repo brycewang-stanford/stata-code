@@ -4,15 +4,14 @@
 // it submits code, tracks lightweight local history, and fetches heavy logs
 // or graphs lazily when the user asks for them.
 
-import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import { GraphPanel } from "./graphPanel";
-import { StataMcpClient, type StataServerLaunch } from "./mcpClient";
+import { StataMcpClient } from "./mcpClient";
+import { buildServerLaunchCandidates, DEFAULT_SERVER_COMMAND } from "./serverLaunch";
 import {
   StataCompletionProvider,
   StataRenameProvider,
@@ -42,7 +41,6 @@ const HISTORY_CAP = 64;
 const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
 const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
-const DEFAULT_SERVER_COMMAND = "stata-code-mcp";
 
 const EXT_BY_FORMAT: Record<GraphFormat, string> = {
   png: "png",
@@ -197,246 +195,22 @@ function getClient(): StataMcpClient {
   if (!output) throw new Error("output channel not initialized");
 
   const cfg = vscode.workspace.getConfiguration("stataCode");
+  const pythonCfg = vscode.workspace.getConfiguration("python");
   const command = cfg.get<string>("serverCommand", DEFAULT_SERVER_COMMAND);
   const args = cfg.get<string[]>("serverArgs", []);
   client = new StataMcpClient(
-    buildServerLaunchCandidates(command, args, extensionContext?.extensionUri.fsPath),
+    buildServerLaunchCandidates({
+      configuredCommand: command,
+      configuredArgs: args,
+      workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      extensionRoot: extensionContext?.extensionUri.fsPath,
+      stataPythonPath: cfg.get<string>("pythonPath"),
+      pythonDefaultInterpreterPath: pythonCfg.get<string>("defaultInterpreterPath"),
+      pythonPythonPath: pythonCfg.get<string>("pythonPath"),
+    }),
     output,
   );
   return client;
-}
-
-function buildServerLaunchCandidates(
-  configuredCommand: string,
-  configuredArgs: string[],
-  extensionRoot: string | undefined,
-): StataServerLaunch[] {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const cwd = workspaceRoot;
-  const sourceRoots = localSourceRoots(workspaceRoot, extensionRoot);
-  const venvDirs = localVenvDirs(workspaceRoot, sourceRoots);
-  const env = serverEnvironment(sourceRoots);
-  const [command, inlineArgs] = normalizeConfiguredCommand(configuredCommand, configuredArgs);
-  const args = inlineArgs;
-  const usesDefaultCommand = command === DEFAULT_SERVER_COMMAND && args.length === 0;
-
-  if (!usesDefaultCommand) {
-    return [{ command, args, cwd, env }];
-  }
-
-  const candidates: StataServerLaunch[] = [];
-  const add = (candidate: StataServerLaunch): void => {
-    const key = `${candidate.command}\0${candidate.args.join("\0")}`;
-    if (!candidates.some((existing) => `${existing.command}\0${existing.args.join("\0")}` === key)) {
-      candidates.push(candidate);
-    }
-  };
-
-  for (const venvDir of venvDirs) {
-    const venvScript = venvExecutable(venvDir, DEFAULT_SERVER_COMMAND);
-    if (fs.existsSync(venvScript)) {
-      add({ command: venvScript, args: [], cwd, env });
-    }
-  }
-
-  add({ command: DEFAULT_SERVER_COMMAND, args: [], cwd, env });
-
-  for (const venvDir of venvDirs) {
-    const venvPython = venvExecutable(venvDir, "python");
-    if (fs.existsSync(venvPython)) {
-      add({ command: venvPython, args: ["-m", "stata_code.mcp"], cwd, env });
-    }
-  }
-
-  for (const pythonCommand of configuredPythonCommands()) {
-    add({ command: pythonCommand, args: ["-m", "stata_code.mcp"], cwd, env });
-  }
-
-  for (const pythonCommand of commonPythonCommands()) {
-    if (fs.existsSync(pythonCommand)) {
-      add({ command: pythonCommand, args: ["-m", "stata_code.mcp"], cwd, env });
-    }
-  }
-
-  if (process.platform === "win32") {
-    add({ command: "py", args: ["-3", "-m", "stata_code.mcp"], cwd, env });
-    add({ command: "python", args: ["-m", "stata_code.mcp"], cwd, env });
-  } else {
-    add({ command: "python3", args: ["-m", "stata_code.mcp"], cwd, env });
-    add({ command: "python", args: ["-m", "stata_code.mcp"], cwd, env });
-  }
-
-  return candidates;
-}
-
-function normalizeConfiguredCommand(
-  command: string,
-  configuredArgs: string[],
-): [string, string[]] {
-  const raw = command.trim();
-  if (!raw) {
-    return [DEFAULT_SERVER_COMMAND, configuredArgs];
-  }
-  const expanded = expandHome(raw);
-  if (!/\s/.test(expanded) || fs.existsSync(expanded)) {
-    return [expanded, configuredArgs];
-  }
-  const parts = parseCommandLine(raw);
-  if (parts.length === 0) return [expanded, configuredArgs];
-  if (parts.length === 1) return [expandHome(parts[0]), configuredArgs];
-  return [expandHome(parts[0]), [...parts.slice(1), ...configuredArgs]];
-}
-
-function parseCommandLine(value: string): string[] {
-  const parts: string[] = [];
-  let current = "";
-  let quote: "'" | "\"" | undefined;
-  let escaping = false;
-
-  for (const ch of value) {
-    if (escaping) {
-      current += ch;
-      escaping = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (quote) {
-      if (ch === quote) {
-        quote = undefined;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === "\"") {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (current) {
-        parts.push(current);
-        current = "";
-      }
-      continue;
-    }
-    current += ch;
-  }
-
-  if (escaping) current += "\\";
-  if (current) parts.push(current);
-  return parts;
-}
-
-function serverEnvironment(sourceRoots: string[]): Record<string, string> {
-  const env: Record<string, string> = {
-    PATH: expandedPath(),
-  };
-  const pythonPath = uniqueStrings([...sourceRoots, ...splitPathList(process.env.PYTHONPATH)]);
-  if (pythonPath.length > 0) {
-    env.PYTHONPATH = pythonPath.join(path.delimiter);
-  }
-  return env;
-}
-
-function expandedPath(): string {
-  const entries = [
-    ...splitPathList(process.env.PATH),
-    path.join(os.homedir(), ".local", "bin"),
-    ...pythonUserScriptDirs(),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-  ].filter((entry): entry is string => Boolean(entry));
-  return uniqueStrings(entries).join(path.delimiter);
-}
-
-function localSourceRoots(
-  workspaceRoot: string | undefined,
-  extensionRoot: string | undefined,
-): string[] {
-  const candidates = [
-    workspaceRoot,
-    workspaceRoot ? path.dirname(workspaceRoot) : undefined,
-    extensionRoot,
-    extensionRoot ? path.dirname(extensionRoot) : undefined,
-  ].filter((entry): entry is string => Boolean(entry));
-  return uniqueStrings(candidates).filter((root) =>
-    fs.existsSync(path.join(root, "stata_code", "mcp", "__main__.py")),
-  );
-}
-
-function localVenvDirs(
-  workspaceRoot: string | undefined,
-  sourceRoots: string[],
-): string[] {
-  const roots = [workspaceRoot, ...sourceRoots].filter((entry): entry is string =>
-    Boolean(entry),
-  );
-  return uniqueStrings(
-    roots.flatMap((root) => [path.join(root, ".venv"), path.join(root, "venv")]),
-  );
-}
-
-function splitPathList(value: string | undefined): string[] {
-  return value?.split(path.delimiter).filter(Boolean) ?? [];
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values));
-}
-
-function pythonUserScriptDirs(): string[] {
-  if (process.platform === "win32") return [];
-  const versions = ["3.13", "3.12", "3.11", "3.10"];
-  return versions.map((version) =>
-    path.join(os.homedir(), "Library", "Python", version, "bin"),
-  );
-}
-
-function configuredPythonCommands(): string[] {
-  const stataCfg = vscode.workspace.getConfiguration("stataCode");
-  const cfg = vscode.workspace.getConfiguration("python");
-  return [
-    stataCfg.get<string>("pythonPath"),
-    cfg.get<string>("defaultInterpreterPath"),
-    cfg.get<string>("pythonPath"),
-  ]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .map((value) => expandHome(value.trim()));
-}
-
-function commonPythonCommands(): string[] {
-  if (process.platform === "win32") return [];
-  return [
-    "/opt/homebrew/bin/python3",
-    "/usr/local/bin/python3",
-    "/opt/homebrew/bin/python3.13",
-    "/usr/local/bin/python3.13",
-    "/opt/homebrew/bin/python3.12",
-    "/usr/local/bin/python3.12",
-    "/opt/homebrew/bin/python3.11",
-    "/usr/local/bin/python3.11",
-    "/opt/homebrew/bin/python3.10",
-    "/usr/local/bin/python3.10",
-  ];
-}
-
-function venvExecutable(venvDir: string, name: string): string {
-  if (process.platform === "win32") {
-    const executable = name === "python" ? "python.exe" : `${name}.exe`;
-    return path.join(venvDir, "Scripts", executable);
-  }
-  return path.join(venvDir, "bin", name);
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return os.homedir();
-  if (value.startsWith(`~${path.sep}`)) {
-    return path.join(os.homedir(), value.slice(2));
-  }
-  return value;
 }
 
 async function runSelection(wholeFile: boolean): Promise<void> {

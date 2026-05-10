@@ -22,8 +22,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from stata_code.core._pool import get_default_pool, pool_execute, shutdown_default_pool
-from stata_code.core._runtime import PystataNotAvailable, is_available
+from stata_code.core._pool import (
+    get_default_pool,
+    pool_execute,
+    pool_stata_info,
+    shutdown_default_pool,
+)
+from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.errors import classify_rc, suggestions_for
 from stata_code.core.runner import (
     get_graph,
@@ -136,6 +141,21 @@ def clear_cancel(session_id: str = "main") -> bool:
 def is_cancel_pending(session_id: str = "main") -> bool:
     """Whether the public API will cancel the next run for this session."""
     return get_default_pool().is_cancel_pending(session_id)
+
+
+def is_available() -> bool:
+    """Return whether Stata can be initialized without touching caller stdout.
+
+    This package-level check goes through the subprocess pool. The lower-level
+    ``stata_code.core._runtime.is_available`` still checks the in-process
+    runtime directly.
+    """
+    try:
+        pool_stata_info()
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
 
 __version__ = "0.6.2"
 

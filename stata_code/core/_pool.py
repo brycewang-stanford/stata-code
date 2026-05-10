@@ -584,6 +584,7 @@ class SessionPool:
                 return _build_cancelled_result(
                     session_id=session_id,
                     elapsed_ms=max(1, elapsed_ms),
+                    aborted_mid_run=True,
                 )
             return _build_adapter_crash_result(
                 session_id=session_id,
@@ -871,7 +872,12 @@ def _build_cancelled_result(
     *,
     session_id: str,
     elapsed_ms: int,
+    aborted_mid_run: bool = False,
 ) -> RunResult:
+    # Pre-run cancel: worker never received code, so the empty log is genuinely
+    # final. Mid-run cancel: worker was killed while Stata may have been
+    # emitting output we discarded, so match timeout/crash semantics.
+    log_complete = not aborted_mid_run
     err = ErrorInfo(
         kind=ErrorKind.CANCELLED,
         rc=-3,
@@ -908,7 +914,7 @@ def _build_cancelled_result(
             lines_total=0,
             bytes_total=0,
             truncated=False,
-            complete=True,
+            complete=log_complete,
             error_window=None,
             ref=None,
         ),
