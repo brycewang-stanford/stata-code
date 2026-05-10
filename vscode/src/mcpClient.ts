@@ -9,6 +9,11 @@ import * as vscode from "vscode";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+// resolveJsonModule (tsconfig.json) lets us read the published version
+// from package.json so the MCP handshake string never drifts from the
+// Marketplace artifact.
+import { version as extensionVersion } from "../package.json";
+
 import type { RunResult } from "./types/runResult";
 
 export interface StataServerLaunch {
@@ -105,7 +110,7 @@ export class StataMcpClient implements vscode.Disposable {
     });
 
     const client = new Client(
-      { name: "stata-code-vscode", version: "0.6.2" },
+      { name: "stata-code-vscode", version: extensionVersion },
       { capabilities: {} },
     );
     this.output.appendLine(`[stata-code] launching MCP server: ${formatLaunch(candidate)}`);

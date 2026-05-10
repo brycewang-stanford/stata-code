@@ -264,6 +264,24 @@ class TestDispatch:
             "values": [[1.0]],
         }
 
+    def test_sessions_resource_includes_partial_warnings(self, monkeypatch):
+        from stata_code.mcp import server
+
+        payload = {
+            "sessions": [{"session_id": "main", "frame": "default", "n_obs": 0}],
+            "warnings": [{"session_id": "slow", "reason": "timeout"}],
+        }
+
+        class DetailedPool:
+            @staticmethod
+            def list_session_info_detailed():
+                return payload
+
+        monkeypatch.setattr(server, "get_default_pool", lambda: DetailedPool())
+
+        content = server._read_resource_payload("stata://sessions")
+        assert json.loads(content.content) == payload
+
     def test_get_prompt_renders_workflow_arguments(self):
         from stata_code.mcp.server import _get_mcp_prompt
 
@@ -291,6 +309,25 @@ class TestDispatch:
         assert out.isError is True
         body = _json_body(out)
         assert "error" in body
+
+    def test_stata_run_rejects_unknown_argument_before_execute(self, monkeypatch):
+        from stata_code.mcp import server
+
+        def should_not_run(*_args, **_kwargs):
+            raise AssertionError("pool_execute should not run")
+
+        monkeypatch.setattr(server, "pool_execute", should_not_run)
+
+        out = asyncio.run(
+            server._dispatch(
+                "stata_run",
+                {"code": "display 1", "originPath": "/tmp/example.do"},
+            )
+        )
+        assert out.isError is True
+        body = _json_body(out)
+        assert body["kind"] == "invalid_request"
+        assert "originPath" in body["error"]
 
     def test_stata_run_rejects_non_boolean_argument(self):
         """The schema declares ``include_full_log`` as boolean, but many MCP
@@ -382,10 +419,14 @@ class TestDispatch:
         assert cells[0]["source"] == "x=2"
 
     def test_stata_info_unavailable_shape(self, monkeypatch):
+        from stata_code.core._runtime import PystataNotAvailable
         from stata_code.mcp import server
 
-        monkeypatch.setattr(server, "is_available", lambda: False)
-        body = json.loads(server._info_payload())
+        def boom() -> dict:
+            raise PystataNotAvailable("pystata is not importable")
+
+        monkeypatch.setattr(server, "pool_stata_info", boom)
+        body = json.loads(server._info_payload_from_pool())
         assert body == {
             "available": False,
             "schema_version": "1.0",
@@ -393,26 +434,15 @@ class TestDispatch:
         }
 
     def test_stata_info_available_shape(self, monkeypatch):
-        from stata_code.core import _runtime
         from stata_code.mcp import server
 
-        class DummyToolkit:
-            @staticmethod
-            def macroExpand(value: str) -> str:
-                assert value == "`c(stata_version)'"
-                return "19.0"
+        monkeypatch.setattr(
+            server,
+            "pool_stata_info",
+            lambda: {"version": "19.0", "edition": "MP", "backend": "pystata"},
+        )
 
-        class DummySfi:
-            SFIToolkit = DummyToolkit
-
-        class DummyRuntime:
-            edition = "mp"
-            sfi = DummySfi()
-
-        monkeypatch.setattr(server, "is_available", lambda: True)
-        monkeypatch.setattr(_runtime, "get_runtime", lambda: DummyRuntime())
-
-        body = json.loads(server._info_payload())
+        body = json.loads(server._info_payload_from_pool())
         assert body["available"] is True
         assert body["stata"] == {
             "version": "19.0",
@@ -420,6 +450,9 @@ class TestDispatch:
             "backend": "pystata",
         }
         assert body["version"] == "19.0"
+        # Top-level alias mirrors stata.edition (the enum value) verbatim so
+        # both fields agree within the same payload.
+        assert body["edition"] == "MP"
         assert "matrix_ref" in body["capabilities"]
         # Phase 1-3 surface advertised so clients can feature-detect.
         for cap in (
@@ -631,9 +664,9 @@ class TestDispatch:
             "edition": "MP",
             "backend": "pystata",
         }
-        # Backward-compatible flat aliases use the lower-cased edition (matches
-        # the legacy raw rt.edition value).
-        assert body["edition"] == "mp"
+        # Backward-compatible flat alias mirrors stata.edition (the enum
+        # value) so both fields agree within the same payload.
+        assert body["edition"] == "MP"
         assert body["version"] == "19.0"
         assert "matrix_ref" in body["capabilities"]
         assert "subprocess_timeout" in body["capabilities"]

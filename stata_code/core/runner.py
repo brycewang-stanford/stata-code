@@ -79,13 +79,18 @@ _FILE_PATH_RE = re.compile(
 _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
 _UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
 
-# Cooperative cancellation: a per-session "cancel-pending" flag, settable
-# from any thread via `cancel(session_id)`. The flag is consumed by the
-# next `execute()` call for that session, which short-circuits and returns
-# a RunResult with `error.kind="cancelled"` instead of forwarding the code
-# to Stata. Cooperative semantics — does NOT interrupt code that is
-# already mid-`stata.run()`. Hard interruption requires the subprocess-
-# based runtime planned for v0.3+ (see SCHEMA.md §8).
+# Cooperative cancellation for the IN-PROCESS runner only. A per-session
+# "cancel-pending" flag, settable from any thread via `cancel(session_id)`.
+# The flag is consumed by the next `execute()` call for that session, which
+# short-circuits and returns a RunResult with `error.kind="cancelled"`
+# instead of forwarding the code to Stata. Cooperative semantics — does
+# NOT interrupt code that is already mid-`stata.run()`. Hard interruption
+# is provided by the subprocess pool (`SessionPool.request_cancel`).
+#
+# IMPORTANT: this set is DISJOINT from `SessionPool._cancel_pending`. The
+# top-level `stata_code.cancel()` only touches the pool's set, so calling
+# it does NOT short-circuit a direct `core.runner.execute()` call. Users
+# of the in-process API must import `cancel` from this module.
 _cancel_lock = threading.Lock()
 _cancel_pending: set[str] = set()
 
@@ -160,14 +165,35 @@ def _split_log(
     )
 
 
+class RefNotFound(KeyError):
+    """Raised by :func:`get_log` / :func:`get_graph` / :func:`get_matrix`
+    when a ref has expired, was never produced, or was dropped by a
+    session reset.
+
+    Subclasses :class:`KeyError` for backward compatibility — older
+    ``except KeyError:`` callers keep working — but exposes :pyattr:`ref`
+    and :pyattr:`kind` for typed handling.
+    """
+
+    def __init__(self, ref: str, *, kind: str = "unknown_ref") -> None:
+        self.ref = ref
+        self._kind = kind
+        super().__init__(f"{kind}: {ref!r}")
+
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+
 def get_log(ref: str) -> dict[str, Any]:
     """Auxiliary tool: fetch the full log behind a `log.ref`.
 
-    Per SCHEMA.md §5. Raises KeyError if the ref is unknown.
+    Per SCHEMA.md §5. Raises :class:`RefNotFound` (a ``KeyError`` subclass)
+    when the ref is unknown.
     """
     payload = _refs.get(ref)
     if payload is None:
-        raise KeyError(f"unknown log ref: {ref!r}")
+        raise RefNotFound(ref, kind="unknown_log_ref")
     return {
         "text": payload["text"],
         "lines_total": payload["lines_total"],
@@ -327,6 +353,14 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
     Matrices larger than ``MATRIX_INLINE_CELL_CAP`` cells are emitted with
     ``values=None`` and a ``matrix://<request_id>/<prefix>/<name>`` ref;
     callers fetch the values via :func:`get_matrix`.
+
+    Failure semantics: a per-name collection failure (sfi raises) is
+    silently coerced — scalars become ``None``, macros become ``""``,
+    matrices are dropped from the dict entirely. This is deliberate: the
+    caller has no actionable recourse for a Stata C-side error on a
+    single scalar, and bubbling it would mask the surrounding successful
+    fields. Agents that need to detect dropped matrices should compare
+    ``return list`` / ``ereturn list`` against the populated dict.
     """
     names = _list_returns(rt, prefix)
     sfi = rt.sfi
@@ -646,6 +680,16 @@ def _resolve_working_dir(
 
 
 def _change_stata_working_dir(rt: Any, directory: Path) -> None:
+    """Change Stata's working directory.
+
+    Note: the in-process runner does NOT restore the prior cwd on exit.
+    A subsequent ``execute()`` on the same in-process runtime that does
+    not pass ``origin_path`` / ``working_dir`` will inherit whatever the
+    previous call (or user code) left as ``c(pwd)``. Pool-mode callers
+    are immune because each session has its own subprocess. Notebook /
+    kernel callers should pass ``origin_path`` on every cell to pin
+    relative-path resolution to the source file.
+    """
     stata_path = str(directory).replace("\\", "/").replace('"', '""')
     with redirect_stdout(io.StringIO()):
         rt.stata.run(f'cd "{stata_path}"', quietly=True, echo=False)
@@ -1020,9 +1064,10 @@ def reset_session(session_id: str = "main") -> dict[str, Any]:
     with redirect_stdout(io.StringIO()):
         rt.stata.run("frame change default", quietly=True, echo=False)
         rt.stata.run(f"capture frame drop {target}", quietly=True, echo=False)
-    # Drop ref-store entries scoped to this session (best-effort).
-    _refs.clear_prefix(f"log://{session_id}-")
-    _refs.clear_prefix(f"graph://{session_id}-")
+    # Refs use `log://<request_id>` / `graph://<request_id>/<idx>` — no
+    # session prefix to clear. The LRU evicts naturally as the producer
+    # generates new requests. If session-scoped purge is ever needed,
+    # re-key refs as `log://<session_id>/<request_id>` first.
     return {"session_id": session_id, "dropped_frame": True}
 
 
@@ -1222,12 +1267,12 @@ def get_graph(ref: str, format: str | None = None) -> dict[str, Any]:
     """Auxiliary tool: fetch a graph's bytes and dimensions by ref.
 
     Per SCHEMA.md §5. Returns a dict with `format`, `bytes_b64`, `width`,
-    `height`. Raises KeyError if the ref is unknown (expired, never existed,
-    or session reset).
+    `height`. Raises :class:`RefNotFound` (a ``KeyError`` subclass) when
+    the ref is unknown (expired, never existed, or session reset).
     """
     payload = _refs.get(ref)
     if payload is None:
-        raise KeyError(f"unknown graph ref: {ref!r}")
+        raise RefNotFound(ref, kind="unknown_graph_ref")
     return {
         "format": payload["format"],
         "bytes_b64": _b64(payload["bytes"]),
@@ -1242,12 +1287,12 @@ def get_matrix(ref: str) -> dict[str, Any]:
     Per SCHEMA.md §5. Used when ``run()`` returns a Matrix with ``values=None``
     and a ``matrix://...`` ref because the matrix exceeded the inline cell
     cap (``MATRIX_INLINE_CELL_CAP`` = 10,000 cells by default). Returns a
-    dict with ``rows``, ``cols``, ``values``. Raises ``KeyError`` if the
-    ref is unknown (expired, never existed, or session reset).
+    dict with ``rows``, ``cols``, ``values``. Raises :class:`RefNotFound`
+    (a ``KeyError`` subclass) when the ref is unknown.
     """
     payload = _refs.get(ref)
     if payload is None:
-        raise KeyError(f"unknown matrix ref: {ref!r}")
+        raise RefNotFound(ref, kind="unknown_matrix_ref")
     return {
         "rows": payload["rows"],
         "cols": payload["cols"],

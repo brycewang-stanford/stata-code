@@ -59,7 +59,7 @@ except ImportError:  # pragma: no cover - environment without mcp installed
 
 from stata_code.core import _refs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
-from stata_code.core._runtime import PystataNotAvailable, is_available
+from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.notebook import (
     NotebookError,
 )
@@ -88,13 +88,14 @@ from stata_code.core.run_index import (
     list_runs as _list_runs,
 )
 from stata_code.core.runner import (
+    RefNotFound,
     get_graph,
     get_log,
     get_matrix,
 )
 from stata_code.core.schema import RunResult
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 SERVER_INSTRUCTIONS = (
     "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
@@ -113,13 +114,30 @@ APP: Any = (
 def _object_schema(
     properties: dict[str, Any],
     required: list[str] | None = None,
+    *,
+    additional_properties: bool = True,
 ) -> dict[str, Any]:
     return {
         "type": "object",
         "properties": properties,
         "required": required or [],
-        "additionalProperties": True,
+        "additionalProperties": additional_properties,
     }
+
+
+def _strict_input_schema(
+    properties: dict[str, Any],
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    """Tool inputSchema with strict typo-detection on undeclared keys.
+
+    Many MCP clients pass arguments verbatim from agent JSON — a stray
+    ``originPath`` (camelCase) or misspelled ``log_lin_head`` would
+    otherwise be silently ignored. Strict mode lets the server reject the
+    call up-front with a typed validation error instead of producing a
+    silently-wrong run.
+    """
+    return _object_schema(properties, required, additional_properties=False)
 
 
 _INFO_OUTPUT_SCHEMA = _object_schema(
@@ -186,20 +204,40 @@ _SESSIONS_OUTPUT_SCHEMA = _object_schema(
                 },
                 ["session_id", "frame", "n_obs"],
             ),
-        }
+        },
+        # Optional: emitted only when one or more workers failed to respond
+        # to the list-sessions probe. Each entry has the worker's session
+        # key and a short reason string ("timeout" or "worker_error: …").
+        "warnings": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "session_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                ["session_id", "reason"],
+            ),
+        },
     },
     ["sessions"],
 )
 
-_SESSION_MUTATION_OUTPUT_SCHEMA = _object_schema(
+_CANCEL_SESSION_OUTPUT_SCHEMA = _object_schema(
     {
         "session_id": {"type": "string"},
         "was_pending": {"type": "boolean"},
         "is_pending": {"type": "boolean"},
         "killed_worker": {"type": "boolean"},
+    },
+    ["session_id", "was_pending", "is_pending", "killed_worker"],
+)
+
+_RESET_SESSION_OUTPUT_SCHEMA = _object_schema(
+    {
+        "session_id": {"type": "string"},
         "dropped_frame": {"type": "boolean"},
     },
-    ["session_id"],
+    ["session_id", "dropped_frame"],
 )
 
 _NOTEBOOK_CELL_OUTLINE_ITEM_SCHEMA = _object_schema(
@@ -399,6 +437,10 @@ _LIST_RUNS_OUTPUT_SCHEMA = _object_schema(
         "match_count": {"type": "integer"},
         "skipped_count": {"type": "integer"},
         "limit": {"type": "integer"},
+        # Echoed only when the original ``limit`` exceeded the server-side
+        # max (``_LIMIT_MAX``) and was clamped — lets callers distinguish a
+        # genuine "more rows than asked for" truncation from a silent clamp.
+        "requested_limit": {"type": "integer"},
         "truncated": {"type": "boolean"},
         "runs": {"type": "array", "items": _LIST_RUNS_ENTRY_SCHEMA},
     },
@@ -438,6 +480,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "code": {
                         "type": "string",
@@ -563,7 +606,11 @@ def _tool_definitions() -> list[Tool]:
                 "Report installed Stata edition, version, backend, and "
                 "whether the runtime is initialized."
             ),
-            inputSchema={"type": "object", "properties": {}},
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
             outputSchema=_INFO_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(
                 title="Inspect Stata Runtime",
@@ -583,6 +630,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {"ref": {"type": "string"}},
                 "required": ["ref"],
             },
@@ -605,6 +653,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "ref": {"type": "string"},
                     "format": {
@@ -634,6 +683,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {"ref": {"type": "string"}},
                 "required": ["ref"],
             },
@@ -653,7 +703,11 @@ def _tool_definitions() -> list[Tool]:
                 "Enumerate live sessions. Each entry has session_id, frame "
                 "(Stata frame name), and n_obs."
             ),
-            inputSchema={"type": "object", "properties": {}},
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
             outputSchema=_SESSIONS_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(
                 title="List Stata Sessions",
@@ -676,11 +730,12 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "session_id": {"type": "string", "default": "main"},
                 },
             },
-            outputSchema=_SESSION_MUTATION_OUTPUT_SCHEMA,
+            outputSchema=_CANCEL_SESSION_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(
                 title="Cancel Stata Session",
                 readOnlyHint=False,
@@ -699,11 +754,12 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "session_id": {"type": "string", "default": "main"},
                 },
             },
-            outputSchema=_SESSION_MUTATION_OUTPUT_SCHEMA,
+            outputSchema=_RESET_SESSION_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(
                 title="Reset Stata Session",
                 readOnlyHint=False,
@@ -726,6 +782,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {
                         "type": "string",
@@ -765,6 +822,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {
                         "type": "string",
@@ -811,6 +869,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {
                         "type": "string",
@@ -886,6 +945,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {"type": "string"},
                     "cell_id": {
@@ -929,6 +989,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {"type": "string"},
                     "source": {"type": "string"},
@@ -974,6 +1035,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "path": {"type": "string"},
                     "cell_id": {"type": "string"},
@@ -1005,6 +1067,7 @@ def _tool_definitions() -> list[Tool]:
             ),
             inputSchema={
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "log_dir": {
                         "type": "string",
@@ -1141,9 +1204,25 @@ def _resource_for_ref(ref: str, payload: Any) -> Resource | None:
     return None
 
 
+_LIST_RESOURCES_REFS_CAP = 256
+
+
 def _list_mcp_resources() -> list[Resource]:
+    """Enumerate static resources plus the most recent ref-backed payloads.
+
+    The ref store is unbounded by time and bounded by capacity (it evicts
+    LRU). Returning every entry from a long-lived server would balloon a
+    `list_resources` reply with stale logs from sessions the agent has
+    already abandoned. ``_LIST_RESOURCES_REFS_CAP`` keeps the wire
+    payload compact and biased toward the most recently used refs.
+    """
     resources = _static_resources()
-    for ref, payload in _refs.snapshot():
+    # `_refs.snapshot()` returns entries in LRU order (oldest first); take
+    # the tail so the most-recently-touched refs survive when we cap.
+    snapshot = _refs.snapshot()
+    if len(snapshot) > _LIST_RESOURCES_REFS_CAP:
+        snapshot = snapshot[-_LIST_RESOURCES_REFS_CAP:]
+    for ref, payload in snapshot:
         resource = _resource_for_ref(ref, payload)
         if resource is not None:
             resources.append(resource)
@@ -1170,6 +1249,15 @@ def _read_resource_payload(uri: str) -> ReadResourceContents:
                 tmpl.model_dump(mode="json", by_alias=True)
                 for tmpl in _resource_templates()
             ],
+            # Prompts live behind a separate ``list_prompts`` round-trip,
+            # but clients reading the capabilities resource expect a
+            # single discoverability snapshot. Embed the prompt manifest
+            # here so they don't need a second request to enumerate the
+            # full surface area.
+            "prompts": [
+                prompt.model_dump(mode="json", by_alias=True)
+                for prompt in _prompt_definitions()
+            ],
         }
         return ReadResourceContents(
             content=json.dumps(payload),
@@ -1177,7 +1265,7 @@ def _read_resource_payload(uri: str) -> ReadResourceContents:
         )
     if uri == "stata://sessions":
         return ReadResourceContents(
-            content=json.dumps({"sessions": get_default_pool().list_session_info()}),
+            content=json.dumps(_list_sessions_payload(get_default_pool())),
             mime_type="application/json",
         )
     if uri.startswith("log://"):
@@ -1543,6 +1631,28 @@ _GRAPH_MIME = {
 }
 
 
+def _list_sessions_payload(pool: Any) -> dict[str, Any]:
+    """Build the ``list_sessions`` MCP response from a pool.
+
+    Prefers the detailed view (which carries per-worker warnings) when the
+    pool exposes it; falls back to the flat list for legacy mocks /
+    older pool implementations. Warnings are omitted when empty so the
+    happy-path response shape stays compact.
+    """
+    detailed = getattr(pool, "list_session_info_detailed", None)
+    if callable(detailed):
+        info = detailed()
+        sessions = list(info.get("sessions") or [])
+        warnings = list(info.get("warnings") or [])
+    else:
+        sessions = list(pool.list_session_info() or [])
+        warnings = []
+    payload: dict[str, Any] = {"sessions": sessions}
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
+
+
 def _json_result(payload: dict[str, Any], text_payload: Any | None = None) -> Any:
     """Return structured MCP content while preserving a JSON text block."""
     return CallToolResult(
@@ -1566,7 +1676,37 @@ def _error_result(message: str, *, kind: str = "tool_error") -> Any:
     )
 
 
+def _validate_tool_arguments(name: str, arguments: dict[str, Any]) -> Any | None:
+    """Reject undeclared top-level tool arguments before dispatch.
+
+    ``inputSchema`` is primarily an advertised contract; not every MCP
+    client validates it before sending a call. Enforcing the same
+    top-level ``additionalProperties: false`` rule here keeps typo
+    detection server-side and deterministic.
+    """
+    for tool in _tool_definitions():
+        if tool.name != name:
+            continue
+        schema = tool.inputSchema or {}
+        if schema.get("additionalProperties") is not False:
+            return None
+        allowed = set((schema.get("properties") or {}).keys())
+        unknown = sorted(set(arguments) - allowed)
+        if not unknown:
+            return None
+        joined = ", ".join(unknown)
+        return _error_result(
+            f"Unknown argument(s) for {name}: {joined}",
+            kind="invalid_request",
+        )
+    return None
+
+
 async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
+    validation_error = _validate_tool_arguments(name, arguments)
+    if validation_error is not None:
+        return validation_error
+
     try:
         if name == "stata_run":
             return await asyncio.to_thread(_run_tool, arguments)
@@ -1604,13 +1744,16 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # process, so the parent's `list_sessions()` (which queries the
             # parent's pystata frames) is empty. Authoritative source is
             # `pool.list_session_info()`, which round-trips a no-payload
-            # `list_sessions` op to each live worker and aggregates. Dead
-            # or unresponsive workers are skipped silently — partial info
-            # beats failing the whole list call.
-            sessions = await asyncio.to_thread(
-                lambda: get_default_pool().list_session_info()
+            # `list_sessions` op to each live worker and aggregates. The
+            # detailed variant additionally surfaces a `warnings` list
+            # populated by workers that failed to respond, so callers can
+            # distinguish "no other sessions" from "some workers timed
+            # out". The plain `list_session_info()` method is still
+            # advertised for older callers.
+            result = await asyncio.to_thread(
+                lambda: _list_sessions_payload(get_default_pool())
             )
-            return _json_result({"sessions": sessions}, text_payload=sessions)
+            return _json_result(result, text_payload=result["sessions"])
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
             registered, killed_worker = await asyncio.to_thread(
@@ -1658,15 +1801,15 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _list_runs_tool(arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
-        # Message starts with a stable kind prefix like "notebook_not_found:".
-        msg = str(exc)
-        kind, _, _ = msg.partition(":")
-        return _error_result(msg, kind=kind or "notebook_error")
+        return _error_result(str(exc), kind=exc.kind)
     except RunIndexError as exc:
-        msg = str(exc)
-        kind, _, _ = msg.partition(":")
-        return _error_result(msg, kind=kind or "run_index_error")
+        return _error_result(str(exc), kind=exc.kind)
+    except RefNotFound as exc:
+        return _error_result(f"Unknown ref: {exc.ref}", kind=exc.kind)
     except KeyError as exc:
+        # Defensive: a plain KeyError from refs (shouldn't happen after the
+        # RefNotFound migration, but keep the safety net so we never bubble
+        # a stack trace out of the MCP server).
         return _error_result(f"Unknown ref: {exc}", kind="unknown_ref")
     except PystataNotAvailable as exc:
         return _error_result(f"Stata not available: {exc}", kind="stata_unavailable")
@@ -1968,8 +2111,10 @@ def _info_payload_from_pool() -> str:
             payload["error"] = f"{type(exc).__name__}: {exc}"
         return json.dumps(payload)
 
-    edition = stata.get("edition")
-    edition_alias = edition.lower() if isinstance(edition, str) else None
+    # `stata.edition` is the StataEdition enum value (e.g. "MP"). Mirror it
+    # at the top level for backward-compat consumers; lowercasing here would
+    # contradict `stata.edition` in the same payload.
+    edition_alias = stata.get("edition") if isinstance(stata.get("edition"), str) else None
     return _info_payload_from_stata(stata, edition_alias=edition_alias)
 
 
@@ -1988,40 +2133,6 @@ def _is_pystata_unavailable_error(exc: BaseException) -> bool:
     text = str(exc)
     name = PystataNotAvailable.__name__
     return f"{name}:" in text or text == name
-
-
-def _info_payload() -> str:
-    if not is_available():
-        return json.dumps(
-            {
-                "available": False,
-                "schema_version": "1.0",
-                "capabilities": [],
-            }
-        )
-    from stata_code.core._runtime import get_runtime
-
-    rt = get_runtime()
-    try:
-        version = rt.sfi.SFIToolkit.macroExpand("`c(stata_version)'") or None
-    except Exception:  # noqa: BLE001
-        version = None
-    edition = {
-        "mp": "MP",
-        "se": "SE",
-        "ic": "IC",
-        "be": "BE",
-    }.get((rt.edition or "").lower(), "unknown")
-    stata = {
-        "version": version,
-        "edition": edition,
-        "backend": "pystata",
-    }
-    return _info_payload_from_stata(
-        stata,
-        edition_alias=rt.edition,
-        version_alias=version,
-    )
 
 
 def _info_payload_from_stata(

@@ -97,17 +97,26 @@ class PystataRuntime:
                 "pystata is not importable; install Stata 17+ or set PYTHONPATH"
             ) from exc
 
-        last_err: Exception | None = None
+        # `pystata.config.init` succeeds for whichever edition is licensed;
+        # we try the most-feature-rich first. When all attempts fail, surface
+        # every error rather than only the last one — collapsing to the
+        # final error makes "MP errored on license, SE errored on disk
+        # space, BE errored on lock" look like a single BE failure.
+        edition_errors: list[tuple[str, Exception]] = []
         for ed in ("mp", "se", "be"):
             try:
                 cfg.init(ed, splash=False)
                 self._edition = ed
                 break
             except Exception as exc:  # noqa: BLE001
-                last_err = exc
+                edition_errors.append((ed, exc))
         else:
+            trail = "; ".join(
+                f"{ed}: {type(exc).__name__}: {exc}"
+                for ed, exc in edition_errors
+            )
             raise PystataNotAvailable(
-                f"pystata.config.init failed for all editions: {last_err}"
+                f"pystata.config.init failed for all editions ({trail})"
             )
 
         cfg.set_graph_show(False)

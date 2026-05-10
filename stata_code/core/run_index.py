@@ -44,8 +44,20 @@ class RunIndexError(ValueError):
 
     Like :class:`stata_code.core.notebook.NotebookError`, the message starts
     with a stable ``kind:`` prefix so MCP dispatchers can map it to a typed
-    error without parsing free text.
+    error without parsing free text. Use the :pyattr:`kind` property
+    instead of slicing the message manually.
     """
+
+    @property
+    def kind(self) -> str:
+        """Return the kind token, or ``"run_index_error"`` if the message
+        does not follow the ``"<kind>: …"`` convention."""
+        message = str(self)
+        token, sep, _ = message.partition(":")
+        token = token.strip()
+        if not sep or not token:
+            return "run_index_error"
+        return token
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,6 +262,7 @@ def list_runs(
     # `isinstance(limit, int)` and silently mean `limit=1`. Reject explicitly.
     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise RunIndexError("limit_invalid: limit must be a positive integer")
+    requested_limit = limit
     if limit > _LIMIT_MAX:
         limit = _LIMIT_MAX
 
@@ -267,7 +280,7 @@ def list_runs(
     if not target.exists() or not target.is_dir():
         # Empty result, not an error — a notebook that has never been run
         # legitimately has no log-files dir.
-        return {
+        empty: dict[str, Any] = {
             "log_dir": str(target),
             "scanned_count": 0,
             "match_count": 0,
@@ -276,6 +289,9 @@ def list_runs(
             "truncated": False,
             "runs": [],
         }
+        if requested_limit != limit:
+            empty["requested_limit"] = requested_limit
+        return empty
 
     scanned = 0
     skipped = 0
@@ -308,7 +324,7 @@ def list_runs(
 
     matched.sort(key=_sort_key, reverse=True)
 
-    return {
+    payload: dict[str, Any] = {
         "log_dir": str(target),
         "scanned_count": scanned,
         "match_count": len(matched),
@@ -317,3 +333,11 @@ def list_runs(
         "truncated": len(matched) > limit,
         "runs": matched[:limit],
     }
+    if requested_limit != limit:
+        # Caller asked for more than ``_LIMIT_MAX``. Echo the original so a
+        # ``truncated=True`` response is unambiguous: did the manifest dir
+        # really hold more rows than ``limit``, or did the server silently
+        # clamp the request? With ``requested_limit`` present the agent can
+        # tell, and either widen the scan or accept the cap.
+        payload["requested_limit"] = requested_limit
+    return payload

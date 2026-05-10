@@ -47,7 +47,12 @@ RC_TO_KIND: dict[int, ErrorKind] = {
     1400: ErrorKind.ESTIMATION_SAMPLE_EMPTY,
     1401: ErrorKind.ESTIMATION_FAILURE,
     1402: ErrorKind.ESTIMATION_FAILURE,
-    # Observations
+    # Observations. Stata distinguishes rc 2000 ("no observations") from
+    # rc 2001 ("insufficient observations") — currently both map to the
+    # same kind to keep the schema enum compact. If a downstream consumer
+    # needs to react differently to "filter excluded everything" vs
+    # "estimator needs more rows", split into a new ``INSUFFICIENT_OBSERVATIONS``
+    # kind and bump the schema version.
     2000: ErrorKind.NO_OBSERVATIONS,
     2001: ErrorKind.NO_OBSERVATIONS,
     # Data state
@@ -120,9 +125,14 @@ COMMON_STATA_COMMANDS: tuple[str, ...] = (
     # Postestimation
     "predict", "estimates", "margins", "test", "testparm",
     "lincom", "nlcom",
-    # Programming primitives
-    "mat", "matrix", "scalar", "local", "global",
-    "di", "display", "set", "clear", "exit", "do", "run",
+    # Programming primitives. Note: `cap`/`qui`/`noi`/`mat`/`di` are
+    # accepted by Stata as short forms of the spelled-out versions
+    # listed here. We register only the canonical long forms because
+    # difflib's fuzzy match returns at most ``n=3`` candidates per
+    # mistyped token — including both short and long would crowd out
+    # legitimate "did you mean" alternatives with near-duplicates.
+    "matrix", "scalar", "local", "global",
+    "display", "set", "clear", "exit", "do", "run",
     "capture", "quietly", "noisily",
     "foreach", "forvalues", "while", "if", "else",
     "program", "return", "ereturn",
@@ -130,7 +140,6 @@ COMMON_STATA_COMMANDS: tuple[str, ...] = (
     "putexcel", "putdocx", "file",
     # Logging / I/O / shell
     "log", "cmdlog", "cd", "pwd", "mkdir", "dir", "ls",
-    "cap", "qui", "noi",
     # Versions / help / packages
     "version", "which", "ssc", "net", "search", "help", "findit",
     "view", "browse", "edit",
@@ -439,9 +448,9 @@ def _file_not_found_suggestions(path: str | None) -> list[Suggestion]:
             Suggestion(
                 action=(
                     f"`{path}` has no file extension. "
-                    "If you meant a Stata dataset, try `{path}.dta`. "
-                    "If you meant a do-file, try `{path}.do`."
-                ).replace("{path}", path),
+                    f"If you meant a Stata dataset, try `{path}.dta`. "
+                    f"If you meant a do-file, try `{path}.do`."
+                ),
             )
         )
     return out

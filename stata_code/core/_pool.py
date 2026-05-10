@@ -560,6 +560,16 @@ class SessionPool:
         # for observability, even though the real enforcement is parent-side.
         worker_options.setdefault("timeout_ms", timeout_ms)
         worker = self._get_or_spawn(session_id)
+        # A cancel could land in the gap between the first `_consume_cancel`
+        # and now — `request_cancel` adds to `_cancel_pending` but cannot
+        # observe a worker that does not yet exist. Re-check here so a
+        # cancel issued during spawn fires on THIS call, not the next one.
+        # No need to kill the worker — it has not yet been asked to do work.
+        if self._consume_cancel(session_id):
+            return _build_cancelled_result(
+                session_id=session_id,
+                elapsed_ms=max(1, int((time.monotonic() - started) * 1000)),
+            )
         try:
             result_dict, ref_blobs = worker.execute(
                 code, worker_options, timeout_ms=timeout_ms
@@ -671,39 +681,56 @@ class SessionPool:
     ) -> list[dict[str, Any]]:
         """Aggregate live-session info across all workers.
 
-        For each worker that's alive, sends ``op=list_sessions`` and pulls
-        back ``[{session_id, frame, n_obs}, ...]`` from that worker's
-        pystata. The pool dedupes by ``session_id`` (first writer wins) and
-        returns the union.
+        Backward-compatible flat-list view. Returns just the sessions list;
+        any per-worker failures are silently dropped. Use
+        :meth:`list_session_info_detailed` when callers need to know whether
+        the result is partial.
+        """
+        return self.list_session_info_detailed(
+            per_worker_timeout_ms=per_worker_timeout_ms
+        )["sessions"]
 
-        Workers that are dead, that fail to respond within
-        ``per_worker_timeout_ms``, or that raise a protocol error are
-        silently skipped — partial information is better than failing the
-        whole list call. Workers that haven't yet served an ``execute``
-        will pay the pystata-init cost on the next ``stata_run``, not here:
-        :meth:`WorkerProcess.send_simple_op` deliberately does **not**
-        respawn dead workers.
+    def list_session_info_detailed(
+        self,
+        *,
+        per_worker_timeout_ms: int = 5000,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Same as :meth:`list_session_info` but surfaces partial failures.
+
+        Returns ``{"sessions": [...], "warnings": [...]}``. Each warning is
+        ``{"session_id": str, "reason": str}`` describing a worker that
+        failed to respond to ``list_sessions`` within
+        ``per_worker_timeout_ms`` or raised a protocol error. Without this
+        view, a caller could not distinguish "no other sessions" from
+        "some workers timed out".
         """
         with self._lock:
             workers = list(self._workers.items())
         sessions: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for _sid, worker in workers:
+        for sid, worker in workers:
             if not worker.is_alive():
                 continue
             try:
                 response = worker.send_simple_op(
                     "list_sessions", timeout_ms=per_worker_timeout_ms
                 )
-            except (_WorkerError, _WorkerTimeout):
+            except _WorkerTimeout:
+                warnings.append({"session_id": sid, "reason": "timeout"})
+                continue
+            except _WorkerError as exc:
+                warnings.append(
+                    {"session_id": sid, "reason": f"worker_error: {exc}"}
+                )
                 continue
             for entry in response.get("sessions") or []:
-                sid = entry.get("session_id")
-                if sid is None or sid in seen:
+                inner_sid = entry.get("session_id")
+                if inner_sid is None or inner_sid in seen:
                     continue
-                seen.add(sid)
+                seen.add(inner_sid)
                 sessions.append(entry)
-        return sessions
+        return {"sessions": sessions, "warnings": warnings}
 
     def stata_info(
         self,

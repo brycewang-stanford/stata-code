@@ -36,7 +36,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--tag",
-        help="Optional Git tag to compare against, e.g. v0.6.2 or vscode-v0.6.2.",
+        help="Optional Git tag to compare against, e.g. vX.Y.Z or vscode-vX.Y.Z.",
     )
     args = parser.parse_args()
 
@@ -51,11 +51,26 @@ def main() -> int:
             "stata_code/mcp/server.py", r'(?m)^__version__\s*=\s*"([^"]+)"'
         ),
         "vscode/package.json": json.loads(_read("vscode/package.json"))["version"],
-        "vscode/src/mcpClient.ts": _extract(
-            "vscode/src/mcpClient.ts",
-            r'\{\s*name:\s*"stata-code-vscode",\s*version:\s*"([^"]+)"\s*\}',
-        ),
     }
+
+    # mcpClient.ts used to carry a literal version; we now resolve it at
+    # build time via ``import { version } from "../package.json"``. If the
+    # import is present, there is no separate sync site. If someone later
+    # reverts to a literal, parse it back so the alignment check still
+    # catches drift.
+    mcp_client_src = _read("vscode/src/mcpClient.ts")
+    if 'from "../package.json"' not in mcp_client_src:
+        match = re.search(
+            r'\{\s*name:\s*"stata-code-vscode",\s*version:\s*"([^"]+)"\s*\}',
+            mcp_client_src,
+        )
+        if match is None:
+            raise RuntimeError(
+                "vscode/src/mcpClient.ts no longer imports the version from "
+                "../package.json AND does not declare a literal — restore "
+                "either form."
+            )
+        versions["vscode/src/mcpClient.ts"] = match.group(1)
 
     unique = sorted(set(versions.values()))
     ok = len(unique) == 1

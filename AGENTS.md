@@ -19,14 +19,17 @@ A unified release ships **four artifacts under the same version number**:
 | VS Code Marketplace (`stata-code-vscode`) | `vscode-vX.Y.Z` | [.github/workflows/vscode-release.yml](.github/workflows/vscode-release.yml) |
 | GitHub Release | `vX.Y.Z` | tail end of `release.yml` |
 
-Five files hold version literals — bump all of them together, or the release will
+Four files hold version literals — bump all of them together, or the release will
 ship inconsistent metadata:
 
 1. `pyproject.toml` → `[project] version`
 2. `stata_code/__init__.py` → `__version__`
 3. `stata_code/mcp/server.py` → `__version__`
 4. `vscode/package.json` → `version`
-5. `vscode/src/mcpClient.ts` → handshake version string
+
+`vscode/src/mcpClient.ts` imports the extension version from
+`vscode/package.json` for the MCP handshake, so it should not carry a separate
+literal.
 
 ## PyPI / TestPyPI Trusted Publishing — what to know
 

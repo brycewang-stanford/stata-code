@@ -802,7 +802,7 @@
       "type": "object"
     }
   },
-  "$id": "https://github.com/brycewang-stanford/stata_code/schema/run_result.schema.json",
+  "$id": "https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/schema/run_result.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "description": "Machine-readable JSON Schema for the v1.0 result envelope returned by stata_code.run(). The normative contract is SCHEMA.md; this file is auto-generated from stata_code.core.schema.RunResult and kept in sync by tests/test_schema_artifact.py.",

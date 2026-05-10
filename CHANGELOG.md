@@ -6,6 +6,100 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.6.3 — 2026-05-10
+
+### Added
+
+- **`RefNotFound` exception** — `get_log` / `get_graph` / `get_matrix` now
+  raise a typed `RefNotFound` (subclass of `KeyError`) carrying the bad
+  ref and a stable `kind` token (`unknown_log_ref` / `unknown_graph_ref` /
+  `unknown_matrix_ref`). MCP dispatch maps it to a typed error response
+  without string-parsing.
+- **`NotebookError.kind` / `RunIndexError.kind`** — both classes now
+  expose a `kind` property so callers don't have to slice the message
+  prefix manually.
+- **`SessionPool.list_session_info_detailed`** — partial-failure-aware
+  variant of `list_session_info()` that surfaces per-worker `warnings`
+  alongside the aggregated `sessions` list. The MCP `list_sessions`
+  tool's output schema now includes the optional `warnings` field.
+- **`list_runs.requested_limit`** — echoes the original requested limit
+  when the server clamps it to `_LIMIT_MAX`, so a caller asking for
+  `limit=1000` can distinguish "scan was capped at 500 rows" from "the
+  manifest dir really has more than 500 rows".
+- **Server capabilities resource now includes prompts.** Reading
+  `stata://server/capabilities` returns tools, resource templates, AND
+  prompts in a single document — clients no longer need a follow-up
+  `list_prompts` round-trip just to enumerate the full surface.
+
+### Changed
+
+- **Test hygiene** — a `tests/conftest.py` snapshot/restores `_refs._store`
+  per test and shuts the default subprocess pool down at session end.
+  Closes a class of intermittent cross-test failures caused by ref-store
+  pollution from earlier MCP / pool tests.
+- **Subprocess cancellation race** — `SessionPool.execute()` now
+  re-checks `_cancel_pending` after `_get_or_spawn` so a `request_cancel`
+  that lands during worker spawn fires on the in-flight call instead of
+  the next one.
+- **`stata_info` edition casing is now consistent** — the top-level
+  `edition` field mirrors `stata.edition` (the enum value, e.g. `MP`)
+  verbatim. Previously the pool path lowercased it to `mp` while the
+  in-process path emitted `MP`, so the same payload could disagree with
+  itself.
+- **All MCP tool input schemas now declare `additionalProperties: false`.**
+  Typos like `originPath` (camelCase) or misspelled `log_lin_head` are
+  now rejected up-front with a typed validation error instead of silently
+  producing a wrong run.
+- **`cancel_session` and `reset_session` output schemas split.** Each
+  tool now advertises only the fields it actually returns; the previous
+  shared schema overpromised on one side and underpromised on the other.
+- **`list_resources` caps ref-backed entries at 256.** Long-lived
+  servers no longer return thousands of stale ref resources from
+  forgotten sessions — the most recently used 256 win.
+- **Pystata edition init now preserves the full error trail.** When all
+  three editions (MP / SE / BE) fail, the `PystataNotAvailable` message
+  lists each attempt's error rather than collapsing to the last one.
+
+### Fixed
+
+- **Jupyter kernel `implementation_version`** is now derived from
+  `stata_code.__version__` rather than a separate `0.2.0` literal.
+- **Jupyter kernel mypy `Invalid base class`** error — the dynamic
+  `Kernel if _HAS_IPYKERNEL else object` base class confused mypy.
+  Hidden behind a `TYPE_CHECKING` gate now; runtime behavior unchanged.
+- **`do_execute` / `do_inspect` signatures** are now LSP-compatible
+  with the latest `ipykernel.kernelbase.Kernel` (accepts `cell_meta`,
+  `cell_id`, `omit_sections`).
+- **Schema `$id` URL** corrected from `stata_code` to `stata-code`
+  (matches the actual GitHub repository name).
+- **VS Code MCP handshake** version is now read from `package.json`
+  via `resolveJsonModule`, removing the former fifth sync site.
+  `check_versions.py` still validates the literal form
+  when present, so reverting to a hardcoded string fails CI.
+- **Release tag glob tightened** — `v[0-9]*.[0-9]*.[0-9]*` instead of
+  `v[0-9]*` so stray tags without semver-style dot separators no longer
+  trigger the release workflow.
+- **Release pipeline now gates on ruff** so a direct push to `main`
+  cannot ship un-linted code.
+- **Mypy CI now covers `stata_code/mcp` and `stata_code/kernel`** in
+  addition to `core`, with the optional `mcp` / `kernel` extras
+  installed so `Server`, `Tool`, and `Kernel` symbols resolve.
+- **`COMMON_STATA_COMMANDS` deduplicated** — dropped the short forms
+  (`cap` / `qui` / `noi` / `mat` / `di`) that were producing
+  near-duplicate "did you mean" hits from `difflib`. The long forms
+  cover the same fuzzy-match neighbourhood.
+- **`_unique_dir` / `_unique_file`** fall back to a UUID suffix after
+  998 collisions instead of raising `FileExistsError`. The original
+  behaviour blocked the run on conditions that almost always indicate a
+  filesystem issue rather than a name clash.
+- **Dead code removed** — `_info_payload` (orphaned helper) in the MCP
+  server, `_truncate` in `notebook.py`, and the unused `index` / `source`
+  parameters on `_ensure_native_id`.
+
+## 0.6.2 — 2026-05-08
+
+Aggregated from the prior `Unreleased` section; covers 0.6.1 and 0.6.2.
+
 ### Added
 
 - **Release version guard.** `scripts/check_versions.py` and the CI /
@@ -21,6 +115,9 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 - **VS Code extension bundling.** The extension now bundles its TypeScript
   entrypoint with `esbuild`, excluding `node_modules` and test/build support
   files from the shipped VSIX.
+- **VS Code bundled dependency notices.** `THIRD_PARTY_NOTICES.md` now lists
+  the npm packages included in the bundled extension output and their license
+  terms.
 - **PyPI publish verification.** The release workflow now polls PyPI's
   per-version JSON endpoint after the official publish job, so trusted
   publisher failures surface as a failed release run instead of being hidden
@@ -38,6 +135,9 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 - **VS Code npm installs are locked.** The extension now ships
   `package-lock.json`, and CI / release workflows use `npm ci` for reproducible
   dependency installs.
+- **VS Code bundle target matches the extension host floor.** The esbuild
+  target is `node18`, keeping the published bundle aligned with the current
+  `engines.vscode` lower bound.
 - **Python 3.13 is in the support matrix.** CI now runs the no-Stata test
   suite on Python 3.13, and package metadata advertises the 3.13 classifier.
 

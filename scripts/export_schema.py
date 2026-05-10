@@ -31,7 +31,10 @@ def build_schema() -> dict:
     schema = RunResult.model_json_schema()
     # Stable, human-friendly framing for downstream consumers.
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
-    schema["$id"] = "https://github.com/brycewang-stanford/stata_code/schema/run_result.schema.json"
+    schema["$id"] = (
+        "https://raw.githubusercontent.com/brycewang-stanford/stata-code/"
+        "main/schema/run_result.schema.json"
+    )
     schema["title"] = "stata_code RunResult (v1.0)"
     schema["description"] = (
         "Machine-readable JSON Schema for the v1.0 result envelope returned by "

@@ -31,6 +31,7 @@ from stata_code.core._pool import (
 from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.errors import classify_rc, suggestions_for
 from stata_code.core.runner import (
+    RefNotFound,
     get_graph,
     get_log,
     get_matrix,
@@ -126,20 +127,36 @@ def reset_session(session_id: str = "main") -> dict[str, object]:
 def cancel(session_id: str = "main") -> bool:
     """Request cancellation for a public API session.
 
-    Returns ``True`` when this call registered a new cancellation request.
-    If the session is currently running, its worker process is also killed.
+    Returns ``True`` when this call registered a new cancellation request,
+    ``False`` when one was already pending (idempotent).
+
+    Only affects the subprocess-pool path used by ``stata_code.run()``. The
+    in-process runner exposes its own independent cancellation domain via
+    ``stata_code.core.runner.cancel`` — calling this function does not
+    short-circuit a direct ``core.runner.execute()`` invocation.
+
+    If the worker is currently running, the worker process is killed as
+    part of the request; the in-flight run terminates with an error of
+    ``kind="cancelled"``.
     """
     registered, _killed_worker = get_default_pool().request_cancel(session_id)
     return registered
 
 
 def clear_cancel(session_id: str = "main") -> bool:
-    """Clear a pending public API cancellation request."""
+    """Clear a pending public API cancellation request.
+
+    Returns ``True`` if a pending cancel was cleared, ``False`` otherwise.
+    Affects only the subprocess-pool path (see :func:`cancel`).
+    """
     return get_default_pool().clear_cancel(session_id)
 
 
 def is_cancel_pending(session_id: str = "main") -> bool:
-    """Whether the public API will cancel the next run for this session."""
+    """Whether the public API will cancel the next run for this session.
+
+    Reflects only the subprocess-pool path (see :func:`cancel`).
+    """
     return get_default_pool().is_cancel_pending(session_id)
 
 
@@ -157,7 +174,7 @@ def is_available() -> bool:
     return True
 
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 __all__ = [
     # Primary entry points
@@ -178,6 +195,7 @@ __all__ = [
     # Availability check
     "is_available",
     "PystataNotAvailable",
+    "RefNotFound",
     # Schema enums and component types
     "Backend",
     "DatasetInfo",

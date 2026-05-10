@@ -1,7 +1,7 @@
 name: release
 
-# Builds an sdist + wheel on every tag matching v*, publishes to PyPI via
-# Trusted Publishing (no API tokens stored in repo secrets), and creates a
+# Builds an sdist + wheel on Python release tags (vX.Y.Z*), publishes to PyPI
+# via Trusted Publishing (no API tokens stored in repo secrets), and creates a
 # GitHub Release with the artifacts attached.
 #
 # One-time setup is documented in PUBLISHING.md.
@@ -9,8 +9,11 @@ name: release
 on:
   push:
     tags:
-      # Match v0.x.x but NOT vscode-v* (which has its own workflow).
-      - "v[0-9]*"
+      # GitHub Actions tag filters are glob-style, not regex. This catches
+      # release-looking Python tags such as v1.0.0 and v1.0.0rc1 while leaving
+      # vscode-v* to its own workflow; scripts/check_versions.py performs the
+      # authoritative version match before any artifact is built.
+      - "v[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
 
 # Avoid two release runs racing for the same tag.
@@ -35,10 +38,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build twine
+          pip install -e ".[dev,mcp,kernel]"
 
       - name: Verify tag matches project versions
         if: startsWith(github.ref, 'refs/tags/v')
         run: python scripts/check_versions.py --tag "$GITHUB_REF_NAME"
+
+      - name: ruff check (gate release on lint)
+        # `test.yml` runs ruff on every PR, but a merge directly to `main`
+        # could bypass it (admin override / pushed branch). Running here
+        # guarantees no release ships unlinted code.
+        run: ruff check stata_code tests scripts
 
       - name: Build sdist + wheel
         run: python -m build

@@ -65,8 +65,15 @@ jobs:
       - name: ruff check
         run: ruff check stata_code tests scripts
 
-      - name: mypy (core only — frontends pull in optional deps)
+      - name: mypy core
         run: mypy stata_code/core
+
+      - name: mypy MCP + kernel frontends
+        # Frontends are checked with their optional deps installed so the
+        # `Server`, `Tool`, `Kernel` symbols are resolvable. Splitting them
+        # into a separate step makes it easy to see which side broke when
+        # CI fails.
+        run: mypy stata_code/mcp stata_code/kernel
 
   vscode:
     name: VS Code extension

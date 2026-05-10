@@ -18,19 +18,31 @@ import sys
 import traceback
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from stata_code import __version__ as _PACKAGE_VERSION
 from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.runner import execute
 from stata_code.core.schema import RunResult
 
-try:
-    from ipykernel.kernelbase import Kernel
+# Static base for type-checkers; the runtime base is resolved below. mypy
+# can't follow `Kernel if _HAS_IPYKERNEL else object`, so we hide the
+# branch behind a TYPE_CHECKING gate and the runtime fallback only matters
+# when ipykernel is missing (e.g. on the agent / non-notebook install
+# path).
+if TYPE_CHECKING:
+    from ipykernel.kernelbase import Kernel as _KernelBase
+else:
+    try:
+        from ipykernel.kernelbase import Kernel as _KernelBase
 
+        _HAS_IPYKERNEL = True
+    except ImportError:
+        _KernelBase = object  # type: ignore[misc,assignment]
+        _HAS_IPYKERNEL = False
+
+if TYPE_CHECKING:
     _HAS_IPYKERNEL = True
-except ImportError:
-    Kernel = object  # type: ignore[misc,assignment]
-    _HAS_IPYKERNEL = False
 
 # Bundled kernelspec resources (logo files) shipped alongside this module.
 # Copied into the kernelspec dir at install time so VS Code's Jupyter extension
@@ -95,10 +107,10 @@ def _word_at_cursor(code: str, cursor_pos: int) -> tuple[str, int, int]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class StataKernel(Kernel if _HAS_IPYKERNEL else object):
+class StataKernel(_KernelBase):
     protocol_version = "5.3"
     implementation = "stata_code.kernel"
-    implementation_version = "0.2.0"
+    implementation_version = _PACKAGE_VERSION
     language_info: dict[str, Any] = {
         "name": "stata",
         "codemirror_mode": "stata",
@@ -121,6 +133,9 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
         store_history: bool = True,
         user_expressions: dict[str, Any] | None = None,
         allow_stdin: bool = False,
+        *,
+        cell_meta: Any = None,
+        cell_id: Any = None,
     ) -> dict[str, Any]:
         if not _HAS_IPYKERNEL:
             return self._error_reply("ipykernel not installed")
@@ -244,9 +259,19 @@ class StataKernel(Kernel if _HAS_IPYKERNEL else object):
         }
 
     def do_inspect(
-        self, code: str, cursor_pos: int, detail_level: int = 0
+        self,
+        code: Any,
+        cursor_pos: Any,
+        detail_level: Any = 0,
+        omit_sections: Any = (),
     ) -> dict[str, Any]:
-        word, word_start, word_end = _word_at_cursor(code, cursor_pos)
+        code_text = code if isinstance(code, str) else str(code)
+        try:
+            cursor = int(cursor_pos)
+        except (TypeError, ValueError):
+            cursor = 0
+
+        word, word_start, word_end = _word_at_cursor(code_text, cursor)
         if not word:
             return {"status": "ok", "found": False}
         if self._last_result and self._last_result.dataset.variables:

@@ -59,7 +59,23 @@ _PREVIEW_CHARS_PER_LINE = 120
 
 
 class NotebookError(ValueError):
-    """Raised for any problem reading or interpreting a notebook file."""
+    """Raised for any problem reading or interpreting a notebook file.
+
+    The message always starts with a stable kind token followed by ``": "``
+    (e.g. ``"notebook_not_found: …"``). Use the :pyattr:`kind` property to
+    map it to a typed enum without parsing the message yourself.
+    """
+
+    @property
+    def kind(self) -> str:
+        """Return the kind token, or ``"notebook_error"`` if the message
+        does not follow the ``"<kind>: …"`` convention."""
+        message = str(self)
+        token, sep, _ = message.partition(":")
+        token = token.strip()
+        if not sep or not token:
+            return "notebook_error"
+        return token
 
 
 def load_notebook(path: str | Path) -> dict[str, Any]:
@@ -241,12 +257,6 @@ def outline_notebook(
 # ─────────────────────────────────────────────────────────────────────────────
 # Single-cell detail
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def _truncate(text: str, limit: int) -> tuple[str, bool]:
-    if len(text) <= limit:
-        return text, False
-    return text[:limit] + "…[truncated]", True
 
 
 def _output_text_payload(output: dict[str, Any]) -> str | None:
@@ -765,7 +775,7 @@ def _build_cell(
     return cell
 
 
-def _ensure_native_id(cell: dict[str, Any], index: int, source: str) -> str:
+def _ensure_native_id(cell: dict[str, Any]) -> str:
     """Make sure a cell has a real ``id`` field. Returns the id we used.
 
     If the notebook is pre-4.5 (cell lacks ``id``), upgrade the cell in place
@@ -839,7 +849,12 @@ def edit_cell(
             "re-read the cell before editing"
         )
 
-    actual_id = _ensure_native_id(cell, index, current_source)
+    # Only upgrade the cell we are about to mutate. ``insert_cell`` and
+    # ``delete_cell`` upgrade the whole notebook because they shift array
+    # indices; ``edit_cell`` does not change cell positions, so leaving
+    # the other pre-4.5 synthetic ids stable preserves any other handles
+    # the caller is holding.
+    actual_id = _ensure_native_id(cell)
     ctype = _cell_type(cell)
     cell["source"] = new_source
     if ctype == "code":
