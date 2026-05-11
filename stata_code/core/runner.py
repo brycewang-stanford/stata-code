@@ -18,16 +18,16 @@ in SCHEMA.md §8.
 
 from __future__ import annotations
 
-import io
+import functools
 import re
 import tempfile
 import threading
 import time
 import uuid
-from contextlib import redirect_stdout
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 from stata_code.core import _refs
 from stata_code.core._runtime import PystataNotAvailable, get_runtime
@@ -95,6 +95,20 @@ _UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
 # of the in-process API must import `cancel` from this module.
 _cancel_lock = threading.Lock()
 _cancel_pending: set[str] = set()
+_stata_state_lock = threading.RLock()
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _serialize_stata_state(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Serialize entrypoints that mutate or inspect process-global Stata state."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with _stata_state_lock:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 # Cap on `dataset.variables` to avoid pathological return sizes (per SCHEMA §3.5).
 _DATASET_VAR_CAP = 200
@@ -340,13 +354,10 @@ def _list_returns(rt: Any, prefix: str) -> dict[str, list[str]]:
     captures its output into a dedicated buffer (separate from the user log).
     """
     cmd = "ereturn list" if prefix == "e" else "return list"
-    buf = io.StringIO()
-    try:
-        with redirect_stdout(buf):
-            rt.stata.run(cmd, quietly=False, echo=False)
-    except Exception:  # noqa: BLE001
+    stdout, rc, _err = rt.run_capture(cmd)
+    if rc != 0:
         return {"scalars": [], "macros": [], "matrices": []}
-    return _parse_return_list(buf.getvalue())
+    return _parse_return_list(stdout)
 
 
 def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
@@ -693,8 +704,7 @@ def _change_stata_working_dir(rt: Any, directory: Path) -> None:
     relative-path resolution to the source file.
     """
     stata_path = str(directory).replace("\\", "/").replace('"', '""')
-    with redirect_stdout(io.StringIO()):
-        rt.stata.run(f'cd "{stata_path}"', quietly=True, echo=False)
+    rt.run_suppressed(f'cd "{stata_path}"')
 
 
 def _persist_graph_artifacts(
@@ -726,6 +736,7 @@ def _safe_file_stem(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")[:64]
 
 
+@_serialize_stata_state
 def execute(
     code: str,
     *,
@@ -1022,13 +1033,12 @@ def _ensure_session(rt: Any, session_id: str) -> None:
     target = _frame_for_session(session_id)
     existing = _list_frame_names(rt)
     if target not in existing:
-        with redirect_stdout(io.StringIO()):
-            rt.stata.run(f"frame create {target}", quietly=True, echo=False)
+        rt.run_suppressed(f"frame create {target}")
     # Switch (no-op if already on it; cheap)
-    with redirect_stdout(io.StringIO()):
-        rt.stata.run(f"frame change {target}", quietly=True, echo=False)
+    rt.run_suppressed(f"frame change {target}")
 
 
+@_serialize_stata_state
 def list_sessions() -> list[dict[str, Any]]:
     """Auxiliary tool: enumerate live sessions (mapped from Stata frames)."""
     try:
@@ -1041,13 +1051,13 @@ def list_sessions() -> list[dict[str, Any]]:
         # n_obs from each frame; switching is needed since Frame helpers
         # operate on the current working frame for getObsTotal indirectly.
         # Easier: query c(N) after switching.
-        with redirect_stdout(io.StringIO()):
-            rt.stata.run(f"frame change {fname}", quietly=True, echo=False)
+        rt.run_suppressed(f"frame change {fname}")
         n_obs = int(rt.sfi.Data.getObsTotal())
         sessions.append({"session_id": sid, "frame": fname, "n_obs": n_obs})
     return sessions
 
 
+@_serialize_stata_state
 def reset_session(session_id: str = "main") -> dict[str, Any]:
     """Auxiliary tool: drop a session's data (and its frame, except `main`).
 
@@ -1058,14 +1068,12 @@ def reset_session(session_id: str = "main") -> dict[str, Any]:
     target = _frame_for_session(session_id)
     if session_id == "main":
         # Switch in, clear, return
-        with redirect_stdout(io.StringIO()):
-            rt.stata.run("frame change default", quietly=True, echo=False)
-            rt.stata.run("clear all", quietly=True, echo=False)
+        rt.run_suppressed("frame change default")
+        rt.run_suppressed("clear all")
         return {"session_id": "main", "dropped_frame": False}
     # Drop a non-main frame. Must switch off it first.
-    with redirect_stdout(io.StringIO()):
-        rt.stata.run("frame change default", quietly=True, echo=False)
-        rt.stata.run(f"capture frame drop {target}", quietly=True, echo=False)
+    rt.run_suppressed("frame change default")
+    rt.run_suppressed(f"capture frame drop {target}")
     # Refs use `log://<request_id>` / `graph://<request_id>/<idx>` — no
     # session prefix to clear. The LRU evicts naturally as the producer
     # generates new requests. If session-scoped purge is ever needed,
@@ -1173,8 +1181,9 @@ def _png_dimensions(data: bytes) -> tuple[int | None, int | None]:
 def _list_graph_names(rt: Any) -> list[str]:
     """Run `graph dir` (silently) and return current in-memory graph names."""
     try:
-        with redirect_stdout(io.StringIO()):
-            rt.stata.run("graph dir", quietly=False, echo=False)
+        _stdout, rc, _err = rt.run_capture("graph dir")
+        if rc != 0:
+            return []
         raw = rt.sfi.SFIToolkit.macroExpand("`r(list)'") or ""
         return raw.split()
     except Exception:  # noqa: BLE001
@@ -1207,13 +1216,10 @@ def _collect_graphs(
         for idx, gname in enumerate(new_names):
             target = tmpdir / f"{idx}.{fmt_str}"
             try:
-                with redirect_stdout(io.StringIO()):
-                    rt.stata.run(f"graph display {gname}", quietly=True, echo=False)
-                    rt.stata.run(
-                        f'graph export "{target}", as({fmt_str}) replace',
-                        quietly=True,
-                        echo=False,
-                    )
+                rt.run_suppressed(f"graph display {gname}")
+                rt.run_suppressed(
+                    f'graph export "{target}", as({fmt_str}) replace'
+                )
             except SystemError:
                 # Stata refused — skip this graph (e.g., window not found)
                 continue

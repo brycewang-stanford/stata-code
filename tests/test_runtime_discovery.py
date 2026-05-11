@@ -79,3 +79,148 @@ def test_find_pystata_path_uses_env_candidate(monkeypatch, tmp_path):
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     assert PystataRuntime._find_pystata_path() == str(utilities)
+
+
+def test_run_capture_collects_stdout_and_rc() -> None:
+    from stata_code.core._runtime import PystataRuntime
+
+    class FakeStata:
+        @staticmethod
+        def run(code: str, *, quietly: bool, echo: bool) -> None:
+            assert quietly is False
+            assert echo is False
+            print(f"ran: {code}")
+
+    rt = PystataRuntime()
+    rt._stata = FakeStata()  # noqa: SLF001
+
+    stdout, rc, err = rt.run_capture("display 1")
+
+    assert stdout == "ran: display 1\n"
+    assert rc == 0
+    assert err is None
+
+
+def test_run_capture_parses_stata_system_error() -> None:
+    from stata_code.core._runtime import PystataRuntime
+
+    class FakeStata:
+        @staticmethod
+        def run(_code: str, *, quietly: bool, echo: bool) -> None:
+            print("before error")
+            raise SystemError("variable mpgg not found\nr(111);")
+
+    rt = PystataRuntime()
+    rt._stata = FakeStata()  # noqa: SLF001
+
+    stdout, rc, err = rt.run_capture("summarize mpgg")
+
+    assert stdout == "before error\n"
+    assert rc == 111
+    assert err == "variable mpgg not found\nr(111);"
+
+
+def test_run_capture_drains_late_output_buffer() -> None:
+    from stata_code.core._runtime import PystataRuntime
+
+    class FakeStata:
+        @staticmethod
+        def run(_code: str, *, quietly: bool, echo: bool) -> None:
+            return
+
+    class FakeConfig:
+        def __init__(self) -> None:
+            self.outputs = ["late line\n", ""]
+
+        def get_output(self) -> str:
+            return self.outputs.pop(0) if self.outputs else ""
+
+    rt = PystataRuntime()
+    rt._stata = FakeStata()  # noqa: SLF001
+    rt._config = FakeConfig()  # noqa: SLF001
+
+    stdout, rc, err = rt.run_capture('display "late line"')
+
+    assert stdout == "late line\n"
+    assert rc == 0
+    assert err is None
+
+
+def test_run_capture_serializes_pystata_calls() -> None:
+    import threading
+    import time
+
+    from stata_code.core._runtime import PystataRuntime
+
+    active = 0
+    max_active = 0
+    guard = threading.Lock()
+    start = threading.Event()
+
+    class FakeStata:
+        @staticmethod
+        def run(code: str, *, quietly: bool, echo: bool) -> None:
+            nonlocal active, max_active
+            with guard:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.02)
+                print(f"done: {code}")
+            finally:
+                with guard:
+                    active -= 1
+
+    rt = PystataRuntime()
+    rt._stata = FakeStata()  # noqa: SLF001
+    outputs: list[tuple[str, int, str | None]] = []
+
+    def worker(code: str) -> None:
+        start.wait()
+        outputs.append(rt.run_capture(code))
+
+    threads = [
+        threading.Thread(target=worker, args=("display 1",)),
+        threading.Thread(target=worker, args=("display 2",)),
+    ]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join()
+
+    assert max_active == 1
+    assert sorted(out for out, _rc, _err in outputs) == [
+        "done: display 1\n",
+        "done: display 2\n",
+    ]
+    assert [rc for _out, rc, _err in outputs] == [0, 0]
+    assert [err for _out, _rc, err in outputs] == [None, None]
+
+
+def test_run_suppressed_discards_stdout_and_raises_on_stata_rc(capsys) -> None:
+    from stata_code.core._runtime import PystataRuntime
+
+    class FakeStata:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(self, code: str, *, quietly: bool, echo: bool) -> None:
+            self.calls += 1
+            print(f"hidden: {code}")
+            if self.calls == 2:
+                raise SystemError("syntax error\nr(198);")
+
+    fake = FakeStata()
+    rt = PystataRuntime()
+    rt._stata = fake  # noqa: SLF001
+
+    rt.run_suppressed("frame change default")
+    assert capsys.readouterr().out == ""
+
+    try:
+        rt.run_suppressed("bad command")
+    except SystemError as exc:
+        assert "r(198)" in str(exc)
+    else:  # pragma: no cover - assertion readability
+        raise AssertionError("run_suppressed should raise on non-zero Stata rc")

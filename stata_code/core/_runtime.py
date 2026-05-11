@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import threading
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ _PYSTATA_SEARCH_PATHS: tuple[str, ...] = (
 )
 
 _RC_RE = re.compile(r"r\((-?\d+)\);")
+_LATE_OUTPUT_SLEEP_S = 0.005
 
 _lock = threading.Lock()
 _runtime: PystataRuntime | None = None
@@ -70,6 +72,7 @@ class PystataRuntime:
         self._config: Any = None
         self._sfi: Any = None
         self._edition: str = ""
+        self._run_lock = threading.RLock()
 
     @staticmethod
     def _find_pystata_path() -> str | None:
@@ -154,18 +157,97 @@ class PystataRuntime:
         - rc == -1 is an adapter-level crash (non-Stata exception).
         - error_message is None on success, non-None on failure.
         """
+        return self._run_redirected(code, quietly=False, echo=False)
+
+    def run_suppressed(
+        self,
+        code: str,
+        *,
+        quietly: bool = True,
+        echo: bool = False,
+    ) -> None:
+        """Run Stata code while discarding stdout.
+
+        This is for runner-internal housekeeping commands such as frame
+        switching, working-directory changes, and graph export. It preserves
+        the old ``stata.run`` failure behavior by raising on non-zero Stata rc.
+        """
+        _stdout, rc, err_text = self._run_redirected(
+            code,
+            quietly=quietly,
+            echo=echo,
+        )
+        if rc == 0:
+            return
+        if rc == -1:
+            raise RuntimeError(err_text or "Stata adapter failed")
+        raise SystemError(err_text or f"r({rc});")
+
+    def _run_redirected(
+        self,
+        code: str,
+        *,
+        quietly: bool,
+        echo: bool,
+    ) -> tuple[str, int, str | None]:
+        """Run ``pystata.stata.run`` under the runtime's process-wide lock.
+
+        ``redirect_stdout`` mutates ``sys.stdout`` for the whole process, and
+        pystata itself is process-global. Serializing every in-process call
+        prevents helper commands and user code from stealing each other's log
+        capture in direct-runner and Jupyter-kernel use.
+        """
         buf = io.StringIO()
-        try:
-            with redirect_stdout(buf):
-                self._stata.run(code, quietly=False, echo=False)
-            return buf.getvalue(), 0, None
-        except SystemError as exc:
-            err_text = str(exc.args[0]) if exc.args else str(exc)
-            m = _RC_RE.search(err_text)
-            rc = int(m.group(1)) if m else -1
-            return buf.getvalue(), rc, err_text.strip()
-        except Exception as exc:  # noqa: BLE001
-            return buf.getvalue(), -1, f"{type(exc).__name__}: {exc}"
+        with self._run_lock:
+            try:
+                with redirect_stdout(buf):
+                    self._stata.run(code, quietly=quietly, echo=echo)
+                    self._drain_output_buffer(buf, wait_if_empty=not quietly)
+                return buf.getvalue(), 0, None
+            except SystemError as exc:
+                self._drain_output_buffer(buf, wait_if_empty=False)
+                err_text = str(exc.args[0]) if exc.args else str(exc)
+                m = _RC_RE.search(err_text)
+                rc = int(m.group(1)) if m else -1
+                return buf.getvalue(), rc, err_text.strip()
+            except Exception as exc:  # noqa: BLE001
+                return buf.getvalue(), -1, f"{type(exc).__name__}: {exc}"
+
+    def _drain_output_buffer(
+        self,
+        buf: io.StringIO,
+        *,
+        wait_if_empty: bool,
+    ) -> None:
+        """Best-effort drain of pystata's C-side output buffer.
+
+        Official ``pystata.stata.run`` already drains this buffer in the common
+        path, but real Stata integration tests have shown occasional successful
+        runs where Python stdout only sees an empty line. A short second drain
+        catches late-buffered output without rerunning user code.
+        """
+        if self._config is None:
+            return
+
+        drained_any = self._drain_output_buffer_once(buf)
+        has_substantive_stdout = bool(buf.getvalue().strip())
+        if drained_any or not wait_if_empty or has_substantive_stdout:
+            return
+
+        time.sleep(_LATE_OUTPUT_SLEEP_S)
+        self._drain_output_buffer_once(buf)
+
+    def _drain_output_buffer_once(self, buf: io.StringIO) -> bool:
+        drained_any = False
+        while True:
+            try:
+                output = self._config.get_output()
+            except Exception:  # noqa: BLE001
+                return drained_any
+            if not output:
+                return drained_any
+            buf.write(output)
+            drained_any = True
 
 
 def get_runtime() -> PystataRuntime:
