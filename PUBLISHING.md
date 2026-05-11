@@ -66,16 +66,24 @@ The environment doesn't need any secrets — Trusted Publishing handles auth.
 
 Once the one-time setup above is done, every release is just:
 
-1. **Bump the version** in `pyproject.toml` (`[project] version`).
-2. **Update `CHANGELOG.md`**: move the `[Unreleased]` entries under a new
+1. **Bump the version everywhere**:
+   - `pyproject.toml` → `[project] version`
+   - `stata_code/__init__.py` → `__version__`
+   - `stata_code/mcp/server.py` → `__version__`
+   - `vscode/package.json` → `version`
+2. **Run the version guard** before tagging:
+   ```bash
+   python scripts/check_versions.py
+   ```
+3. **Update `CHANGELOG.md`**: move the `[Unreleased]` entries under a new
    `## [X.Y.Z] - YYYY-MM-DD` heading, leaving an empty `[Unreleased]` shell
    on top.
-3. **Commit** the bump:
+4. **Commit** the bump:
    ```bash
-   git add pyproject.toml CHANGELOG.md
+   git add pyproject.toml stata_code/__init__.py stata_code/mcp/server.py vscode/package.json CHANGELOG.md
    git commit -m "release: vX.Y.Z"
    ```
-4. **Tag and push**:
+5. **Tag and push**:
    ```bash
    git tag vX.Y.Z
    git push origin main

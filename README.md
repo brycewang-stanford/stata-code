@@ -45,7 +45,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.6 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. Current test suite: 329 passing tests across schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules. License: **MIT**.
+**Status: v0.6 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. The test suite covers schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
 Two workflows v0.6 explicitly supports for end users:
 
@@ -200,7 +200,7 @@ The MCP server registers 15 tools:
 | `get_graph` | Fetch graph bytes behind a `graph://` ref (`ImageContent`) |
 | `get_matrix` | Fetch matrix payloads behind a `matrix://` ref |
 | `list_sessions` | Enumerate live sessions |
-| `cancel_session` | Cooperatively cancel the next `stata_run` for a session |
+| `cancel_session` | Cancel a session; the subprocess-backed path terminates in-flight runs and short-circuits pending ones |
 | `reset_session` | Drop a session's data |
 | `notebook_outline` | Compact per-cell index of a `.ipynb` (cell_id, type, preview) |
 | `notebook_get_cell` | One cell's full source plus a token-economic outputs summary |
@@ -358,7 +358,7 @@ stata_code/
 - MCP server: 15 tools, including notebook navigation / search / atomic edits and the run-bundle index (`list_runs`)
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
-- Cooperative cancellation: `cancel(session_id)` / MCP `cancel_session`
+- Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
 - Per-cell repair loop on `.ipynb` via `notebook_outline` / `notebook_get_cell` / `notebook_edit_cell` with optimistic-concurrency `expected_source` guards and `origin_cell_id` echo on `RunResult`
 - Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok)
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
@@ -368,8 +368,8 @@ stata_code/
 ### Next Up
 
 - Console fallback for Stata 11–16, re-implemented against the v1.0 schema
-- Hard timeout / mid-Stata interrupt; design and tradeoffs in [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md)
-- Extra VS Code polish (esbuild bundle, lighter VSIX, command palette UX)
+- Decide whether to move the Jupyter kernel from the direct in-process runner to the subprocess pool, or keep documenting the current interactivity-first tradeoff
+- Extra VS Code polish: extension-host end-to-end tests, first-run diagnostics, and command palette UX
 - **v1.0** — Stable schema, broader Stata edition coverage
 
 See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
@@ -380,9 +380,9 @@ See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite (310 tests)
+pytest                              # full suite, including Stata tests when Stata is available
 pytest -m "not stata_required"      # CI subset; no Stata needed
-pytest -m "stata_required" -v       # Stata-only integration tests
+pytest -m "stata_required" -v       # real-Stata integration tests only
 ```
 
 The `stata_required` marker tags the real-Stata integration tests. CI uses `pytest -m "not stata_required"` so it does not collect them. Locally without Stata, those tests skip cleanly with the `"pystata / Stata 17+ not available"` message.

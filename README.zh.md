@@ -45,7 +45,7 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.6（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件：329 个 passing tests，覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块。许可证：**MIT**。
+**当前状态：v0.6（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
 
 v0.6 明确支持的两种用户工作流：
 
@@ -198,7 +198,7 @@ MCP server 注册了 15 个工具：
 | `get_graph` | 通过 `graph://` ref 获取图形 bytes（`ImageContent`） |
 | `get_matrix` | 通过 `matrix://` ref 获取矩阵 `{rows, cols, values}` |
 | `list_sessions` | 列出 live sessions |
-| `cancel_session` | 协作式取消某个 session 的下一次 `stata_run` |
+| `cancel_session` | 取消某个 session；subprocess-backed 路径会终止运行中的 worker，也会短路尚未开始的运行 |
 | `reset_session` | 清空某个 session 的数据 |
 | `notebook_outline` | `.ipynb` 的 cell 索引（cell_id、类型、源代码预览） |
 | `notebook_get_cell` | 单个 cell 的完整源代码 + 节流版输出摘要 |
@@ -354,7 +354,7 @@ stata_code/
 - MCP server：15 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
-- 协作式取消：`cancel(session_id)` / MCP `cancel_session`
+- 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`
 - `.ipynb` 单 cell 修复闭环：`notebook_outline` / `notebook_get_cell` / `notebook_edit_cell`，并通过 `expected_source` 做乐观并发控制；`stata_run` 回显 `origin_cell_id`
 - 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
@@ -364,8 +364,8 @@ stata_code/
 ### 下一步
 
 - Stata 11–16 的 console fallback，按 v1.0 schema 重新实现
-- 硬超时 / Stata 执行中断；设计与权衡见 [`docs/design/hard_timeout.md`](docs/design/hard_timeout.md)
-- VS Code 体验打磨（esbuild 打包、更轻的 VSIX、命令面板 UX）
+- 决定 Jupyter kernel 是否也迁到 subprocess pool，或者继续清楚记录当前为了交互性保留 in-process runner 的取舍
+- VS Code 体验打磨：Extension Host 端到端测试、首次启动诊断、命令面板 UX
 - **v1.0** —— 稳定 schema，覆盖更广的 Stata edition
 
 明确不做的范围见 [SCHEMA.md §7](SCHEMA.md)。
@@ -376,7 +376,7 @@ stata_code/
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # 完整测试集（310 个）
+pytest                              # 完整测试集；本机有 Stata 时包含真实 Stata 集成测试
 pytest -m "not stata_required"      # CI 子集，不需要 Stata
 pytest -m "stata_required" -v       # 仅 Stata 集成测试
 ```

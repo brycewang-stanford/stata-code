@@ -9,9 +9,11 @@ collected via sfi (native types). Multi-session is implemented through
 Stata frames (session_id="main" ↔ default frame). Per-line error
 attribution comes from parsing pystata's transcript.
 
-For deferred items (hard timeout, cooperative cancellation, get_matrix
-ref mode, console fallback for Stata 11–16, streaming logs), see
-SCHEMA.md §8.
+This direct in-process runner does not enforce hard timeouts once execution
+has entered `pystata`; use the package-level `stata_code.run()` or the MCP
+server for the subprocess-backed timeout/cancellation path. Still-deferred
+items such as console fallback for Stata 11–16 and streaming logs are tracked
+in SCHEMA.md §8.
 """
 
 from __future__ import annotations
@@ -734,7 +736,7 @@ def execute(
     include_graphs: str = "ref",  # "ref" | "inline" | "none"
     graph_format: str = "png",
     include_dataset_variables: bool = True,
-    timeout_ms: int | None = 600_000,  # accepted but not yet enforced (v0.1)
+    timeout_ms: int | None = 600_000,  # metadata only here; enforced by _pool
     persist_log_files: bool = False,
     persist_generated_files: bool = True,
     origin_path: str | None = None,
@@ -813,9 +815,9 @@ def execute(
     stdout_text, rc, err_msg = rt.run_capture(code)
 
     elapsed_total_ms = max(1, int((time.monotonic() - started) * 1000))
-    # v0.1: stata_elapsed_ms is the same as elapsed_ms (no IPC overhead to
-    # subtract; pystata is in-process). We still report it separately so the
-    # field is exercised end-to-end.
+    # The in-process runner has no IPC overhead to subtract. We still report
+    # Stata elapsed time separately so frontends exercise the schema field
+    # consistently across in-process and subprocess-backed paths.
     stata_elapsed_ms = elapsed_total_ms
 
     log = _split_log(
@@ -1238,7 +1240,7 @@ def _collect_graphs(
                     format=fmt,
                     width=width,
                     height=height,
-                    source_command=None,  # v0.1: not yet pinpointing
+                    source_command=None,  # graph source attribution is not yet pinpointed
                     source_line=None,
                     inline=_b64(data) if inline else None,
                 )

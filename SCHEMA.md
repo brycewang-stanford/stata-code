@@ -430,7 +430,7 @@ Suggestions are best-effort; agents should treat them as hints, not directives. 
 | `stata_limit` | 901, 902, 903 | Edition / matsize / similar Stata-imposed caps. Distinct from OS OOM. Suggestion: `set maxvar` or upgrade edition. |
 | `out_of_memory` | 480, 909 | OS-level memory exhaustion. |
 | `interrupt` | 1 | User Break / Ctrl-C from a frontend. |
-| `cancelled` | (synthetic `rc: -3`) | Cooperative cancellation: a prior `cancel(session_id)` short-circuited this run before Stata received the code. |
+| `cancelled` | (synthetic `rc: -3`) | Cancellation was requested. Subprocess-backed producers may terminate an in-flight worker; the direct in-process runner only short-circuits before Stata receives code. |
 | `timeout` | (synthetic `rc: -2`) | Adapter-imposed time limit exceeded. |
 | `adapter_crash` | (synthetic `rc: -1`) | Producer-side failure (pystata exception, IPC death). |
 | `unknown` | any unmapped rc | Catch-all. Agents fall back to `message`. We aim to shrink this over time. |

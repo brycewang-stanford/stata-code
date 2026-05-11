@@ -1,14 +1,16 @@
 # Design note: hard timeout / mid-Stata interrupt
 
-> Status: **deferred** — not implemented in v0.2/early-v0.3. This document
-> exists so the next person picking it up has the constraints written
-> down. After this lands, `cooperative cancellation` (shipping in this
-> push) covers the "abort the next call" case; the gap is killing a
-> Stata command that is already executing.
+> Status: **partially shipped**. The public Python API and MCP server now use
+> the subprocess-worker architecture described below (`stata_code.core._pool`),
+> so `timeout_ms` and in-flight `cancel_session` terminate the worker and return
+> structured `timeout` / `cancelled` results. The remaining gap is the direct
+> in-process runner (`stata_code.core.runner.execute`) and the Jupyter kernel,
+> which still use `pystata` in-process for interactivity. This note is retained
+> as the rationale for that boundary.
 
 ## The constraint
 
-`stata_code` runs Stata via **pystata, in-process**. The runner imports
+The direct runner runs Stata via **pystata, in-process**. It imports
 `pystata.config`, calls `pystata.config.init(edition)`, then submits
 code through `stata.run(code)`. That call is a synchronous, blocking C
 call into Stata's runtime. From Python's perspective, the interpreter
@@ -26,7 +28,7 @@ There is **no public pystata API** to:
   is process-wide; a second `init()` is rejected. Frames give us
   data isolation, not control isolation.
 
-So `timeout_ms` cannot be enforced in the current architecture.
+So `timeout_ms` cannot be enforced in the direct in-process runner.
 `cancel(session_id)` (cooperative) catches the case where the agent
 hasn't yet submitted the next command, but if the agent already issued
 `bootstrap, reps(10000): regress …` and is mid-flight, nothing on the
@@ -43,7 +45,7 @@ and a synthetic `rc: -2` for exactly this case.
 
 ## Options considered
 
-### Option A — Subprocess pystata worker (recommended)
+### Option A — Subprocess pystata worker (shipped for public API / MCP)
 
 Move pystata out of the main Python process. One persistent worker
 subprocess per session, with a small JSON-over-stdio protocol:
@@ -140,22 +142,13 @@ When Option A is approved, the rough work breakdown is:
 
 Total: ~8–10 days of focused work.
 
-## Why not now
+## Why not in the direct runner / kernel yet
 
-This v0.3 push deliberately scoped to changes that do not require
-restructuring `_runtime.py`. Shipping Option A as a side-effect of a
-multi-feature push would leave it under-tested and ill-thought-through.
-It deserves its own milestone where (a) the design above is reviewed
-and confirmed, (b) the work is tracked across at least one full
-development week, and (c) any breaking change to the runtime model
-is announced ahead of time so downstream callers can plan.
-
-In the meantime the ground we did cover is real:
-
-- Cooperative cancellation (`cancel(session_id)`) — in this push.
-- Token economy preserved end-to-end (refs, not bytes) — in this push.
-- VSCode webview that exercises the same MCP surface a hard-timeout
-  agent would — in this push.
-
-The hardest piece is still ahead. This document exists so the next
-person picking it up doesn't have to rediscover the constraints.
+The subprocess pool is now the default for the package-level API and MCP
+server. The lower-level `core.runner.execute()` remains available as an
+explicit in-process escape hatch, and the Jupyter kernel still calls it so
+notebook cells can use inline logs and graphs without paying the worker
+round-trip or changing notebook semantics. Moving the kernel onto the pool is
+possible, but should be treated as a separate UX decision: hard interruption
+would improve resilience, while worker death would discard in-memory Stata
+state after timeouts or cancels.
