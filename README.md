@@ -170,9 +170,29 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
 
 `uvx` will resolve and cache `stata-code` on first launch. Note: `pystata` is **not** on PyPI, so it still has to be locatable on the host. The runner adds the standard Stata install path (e.g. `/Applications/Stata/utilities/pystata` on macOS) to `sys.path` automatically; if your Stata lives elsewhere, set `PYTHONPATH` in the env block.
 
-#### Manual JSON config (Cursor / Claude Desktop / fallback)
+#### Claude Code via plugin marketplace
 
-For clients without a `mcp add` CLI, edit the config file directly (`~/.claude/mcp.json`, Cursor settings, Claude Desktop `claude_desktop_config.json`, etc.):
+This repository also ships a Claude Code plugin manifest (`.claude-plugin/`). Once you've added the marketplace to your Claude Code config, two commands wire up both the MCP server and the agent skill that teaches Claude the v1.0 result schema:
+
+```bash
+claude plugin marketplace add brycewang-stanford/stata-code
+claude plugin install stata-code
+```
+
+The plugin registers the `stata-code` MCP server and installs the [`stata-code` skill](skills/stata-code/SKILL.md) so Claude branches on `error.kind`, calls `get_log(ref)` lazily, and uses the notebook-edit tools without you re-explaining them every session.
+
+#### Other MCP clients (Cursor / Claude Desktop / Cline / Continue / Windsurf / Antigravity)
+
+Most non-Claude-Code MCP clients accept the same JSON snippet. Drop it into the client's MCP config file:
+
+| Client | Config file |
+| --- | --- |
+| Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json` (user) or `<workspace>/.cursor/mcp.json` (project) |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Cline (VS Code) | settings: `cline.mcpServers` |
+| Continue | `~/.continue/config.json` under `experimental.modelContextProtocolServers` |
+| Antigravity / generic | `~/.claude/mcp.json` or whatever the client documents |
 
 ```json
 {
@@ -184,11 +204,25 @@ For clients without a `mcp add` CLI, edit the config file directly (`~/.claude/m
 }
 ```
 
-Or run it as a module if the binary is not on `PATH`:
+Or, when the binary is not on `PATH`, run it as a module:
 
 ```bash
 python -m stata_code.mcp
 ```
+
+When `stata-code-mcp` lives inside a project virtualenv (recommended for reproducibility), point the client at the absolute path:
+
+```json
+{
+  "mcpServers": {
+    "stata-code": {
+      "command": "/abs/path/to/.venv/bin/stata-code-mcp"
+    }
+  }
+}
+```
+
+For `uvx`-only setups, set `"command": "uvx"` and `"args": ["--from", "stata-code", "stata-code-mcp"]`.
 
 The MCP server registers 15 tools:
 
@@ -265,7 +299,20 @@ The companion extension is on the Marketplace as [`brycewang-stanford.stata-code
 code --install-extension brycewang-stanford.stata-code-vscode
 ```
 
-Or open the **Extensions** sidebar in VS Code and search `stata-code`.
+Or open the **Extensions** sidebar in VS Code and search `stata-code`. The extension is also available from [Open VSX](https://open-vsx.org/) so Cursor, Windsurf, and other VS Code-compatible editors can install it without going through the Microsoft Marketplace.
+
+On first activation the extension probes for `stata-code-mcp` on `PATH` (and in any workspace `.venv` / `venv`). If nothing resolves, it shows a one-time install hint with the exact `pip install "stata-code[mcp]"` command — choose **Don't show again** to silence it for the installed extension version.
+
+#### Cell and section conventions
+
+The extension recognizes two complementary structural markers inside `.do` files. Either can be mixed in the same file; they do not conflict.
+
+| Marker | Purpose | Example |
+| --- | --- | --- |
+| `* %% [title]` | Cell boundary. Each marker gets a **▶ Run Cell** code-lens; "Run Cell" submits the lines between this marker and the next one. Compatible with the Jupyter-style cell convention used by `kylebutts/vscode-stata`. | `* %% 02 model fit` |
+| `**# title` … `**###### title` | Section heading, 1–6 levels deep. Each heading gets a **▶ Run Section** code-lens and contributes to the Outline view. "Run Section" submits the heading through the next equal- or higher-level heading, matching the hierarchical execution model from `ZihaoVistonWang.stata-all-in-one`. | `**## DiD specification` |
+
+`program define … end` blocks are also surfaced in the Outline, nested under whichever section contains them.
 
 The extension still requires the MCP extra on your system Python (`pip install "stata-code[mcp]"`), so that `stata-code-mcp` resolves on `PATH` and can import the MCP SDK. Stata 17+ and a valid Stata license are required as for any other frontend.
 

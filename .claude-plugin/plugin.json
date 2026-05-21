@@ -1,0 +1,30 @@
+{
+  "name": "stata-code",
+  "version": "0.6.3",
+  "description": "Agent-native Stata bridge for Claude Code. Bundles an MCP server (15 tools, token-economy result schema, typed errors, multi-session) and an agent skill that teaches Claude how to call it idiomatically.",
+  "author": {
+    "name": "Bryce Wang",
+    "email": "brycewang@stanford.edu",
+    "url": "https://github.com/brycewang-stanford"
+  },
+  "homepage": "https://github.com/brycewang-stanford/stata-code",
+  "repository": "https://github.com/brycewang-stanford/stata-code",
+  "license": "MIT",
+  "keywords": ["stata", "mcp", "pystata", "causal-inference", "econometrics"],
+  "mcpServers": {
+    "stata-code": {
+      "command": "stata-code-mcp",
+      "args": []
+    }
+  },
+  "installation": {
+    "notes": "Requires Stata 17+ (pystata ships with Stata) and Python 3.10+. Install the server binary first: `pip install \"stata-code[mcp]\"` or run ephemerally with `uvx --from stata-code stata-code-mcp`.",
+    "verify": "stata-code-mcp --help"
+  },
+  "skills": [
+    {
+      "name": "stata-code",
+      "path": "skills/stata-code"
+    }
+  ]
+}

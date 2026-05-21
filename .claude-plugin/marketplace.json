@@ -1,0 +1,36 @@
+{
+  "name": "stata-code",
+  "owner": {
+    "name": "brycewang-stanford",
+    "url": "https://github.com/brycewang-stanford"
+  },
+  "metadata": {
+    "description": "Agent-native Stata bridge — MCP server, Jupyter kernel, and VS Code extension sharing one v1.0 result schema.",
+    "version": "0.6.3"
+  },
+  "plugins": [
+    {
+      "name": "stata-code",
+      "source": ".",
+      "description": "Run Stata code from Claude Code through the stata-code MCP server (typed errors, token-economy logs/graphs, multi-session) and an agent skill that teaches Claude the result schema and Stata workflows.",
+      "version": "0.6.3",
+      "author": {
+        "name": "Bryce Wang",
+        "email": "brycewang@stanford.edu",
+        "url": "https://github.com/brycewang-stanford"
+      },
+      "homepage": "https://github.com/brycewang-stanford/stata-code",
+      "repository": "https://github.com/brycewang-stanford/stata-code",
+      "license": "MIT",
+      "category": "data-science",
+      "keywords": [
+        "stata",
+        "mcp",
+        "pystata",
+        "causal-inference",
+        "econometrics",
+        "jupyter"
+      ]
+    }
+  ]
+}

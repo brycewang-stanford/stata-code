@@ -7,11 +7,16 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 
+// resolveJsonModule (tsconfig.json) lets the install-hint check key its
+// "don't show again" state by the actual shipped extension version.
+import { version as extensionVersion } from "../package.json";
+
 import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
 import { buildServerLaunchCandidates, DEFAULT_SERVER_COMMAND } from "./serverLaunch";
+import { probeServerLaunch } from "./serverProbe";
 import {
   StataCompletionProvider,
   StataRenameProvider,
@@ -41,6 +46,9 @@ const HISTORY_CAP = 64;
 const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
 const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
+const INSTALL_HINT_DISMISSED_KEY = "stataCode.installHintDismissedFor";
+const INSTALL_COMMAND = 'pip install "stata-code[mcp]"';
+const INSTALL_DOC_URL = "https://github.com/brycewang-stanford/stata-code#install";
 
 const EXT_BY_FORMAT: Record<GraphFormat, string> = {
   png: "png",
@@ -143,6 +151,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider("stataCode.graphsHistory", graphsHistoryProvider),
   );
 
+  void maybePromptForServerInstall(context);
+
   context.subscriptions.push(
     vscode.commands.registerCommand("stataCode.runSelection", () =>
       runSelection(false),
@@ -194,23 +204,70 @@ function getClient(): StataMcpClient {
   if (client) return client;
   if (!output) throw new Error("output channel not initialized");
 
+  client = new StataMcpClient(buildLaunchCandidatesFromConfig(), output);
+  return client;
+}
+
+function buildLaunchCandidatesFromConfig() {
   const cfg = vscode.workspace.getConfiguration("stataCode");
   const pythonCfg = vscode.workspace.getConfiguration("python");
   const command = cfg.get<string>("serverCommand", DEFAULT_SERVER_COMMAND);
   const args = cfg.get<string[]>("serverArgs", []);
-  client = new StataMcpClient(
-    buildServerLaunchCandidates({
-      configuredCommand: command,
-      configuredArgs: args,
-      workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-      extensionRoot: extensionContext?.extensionUri.fsPath,
-      stataPythonPath: cfg.get<string>("pythonPath"),
-      pythonDefaultInterpreterPath: pythonCfg.get<string>("defaultInterpreterPath"),
-      pythonPythonPath: pythonCfg.get<string>("pythonPath"),
-    }),
-    output,
+  return buildServerLaunchCandidates({
+    configuredCommand: command,
+    configuredArgs: args,
+    workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    extensionRoot: extensionContext?.extensionUri.fsPath,
+    stataPythonPath: cfg.get<string>("pythonPath"),
+    pythonDefaultInterpreterPath: pythonCfg.get<string>("defaultInterpreterPath"),
+    pythonPythonPath: pythonCfg.get<string>("pythonPath"),
+  });
+}
+
+async function maybePromptForServerInstall(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const dismissedFor = context.globalState.get<string>(INSTALL_HINT_DISMISSED_KEY);
+  if (dismissedFor === extensionVersion) return;
+
+  let probe;
+  try {
+    probe = probeServerLaunch({ candidates: buildLaunchCandidatesFromConfig() });
+  } catch (err) {
+    output?.appendLine(
+      `[stata-code] install probe skipped: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+  if (probe.status === "found") {
+    output?.appendLine(
+      `[stata-code] MCP server resolved: ${probe.resolved?.command ?? "(unknown)"}`,
+    );
+    return;
+  }
+
+  output?.appendLine(
+    "[stata-code] MCP server not found on PATH or workspace venv; prompting user.",
   );
-  return client;
+
+  const COPY = "Copy install command";
+  const DOCS = "Open docs";
+  const DONT_ASK = "Don't show again";
+  const choice = await vscode.window.showWarningMessage(
+    `stata-code: the MCP server "stata-code-mcp" was not found. Install with: ${INSTALL_COMMAND}`,
+    COPY,
+    DOCS,
+    DONT_ASK,
+  );
+
+  if (choice === COPY) {
+    await vscode.env.clipboard.writeText(INSTALL_COMMAND);
+    vscode.window.showInformationMessage("stata-code: install command copied to clipboard.");
+  } else if (choice === DOCS) {
+    await vscode.env.openExternal(vscode.Uri.parse(INSTALL_DOC_URL));
+  } else if (choice === DONT_ASK) {
+    await context.globalState.update(INSTALL_HINT_DISMISSED_KEY, extensionVersion);
+  }
 }
 
 async function runSelection(wholeFile: boolean): Promise<void> {

@@ -6,6 +6,39 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+### Added
+
+- **Claude Code plugin marketplace manifest.** `.claude-plugin/marketplace.json`
+  + `.claude-plugin/plugin.json` expose the repo as a single-plugin
+  marketplace, so users can install everything (MCP server config + agent
+  skill) with `claude plugin marketplace add brycewang-stanford/stata-code`
+  followed by `claude plugin install stata-code`.
+- **`stata-code` agent skill.** `skills/stata-code/SKILL.md` teaches Claude
+  the v1.0 RunResult schema, the 15 MCP tools, the token-economy defaults,
+  the 32-kind error taxonomy, and the diagnose-only vs. fix-and-rerun
+  workflows. The plugin manifest auto-installs it alongside the MCP
+  server.
+- **VS Code install-hint probe.** On activation the extension now resolves
+  the configured `stata-code-mcp` candidate list against `PATH` and any
+  workspace `.venv` / `venv`; if nothing matches, a one-time notification
+  offers to copy the `pip install "stata-code[mcp]"` command or open the
+  install docs. "Don't show again" pins the dismissal to the installed
+  extension version. Backed by a new pure module `serverProbe.ts` with
+  unit tests.
+- **README multi-client section.** Cursor, Claude Desktop, Cline,
+  Continue, Windsurf, and Antigravity now have their config-file paths
+  spelled out next to the shared `stata-code-mcp` JSON snippet, plus
+  guidance for project-venv absolute paths and `uvx` setups.
+- **README cell + section reference.** Documents that the VS Code
+  extension recognizes both `* %%` Jupyter-style cell markers and
+  `**#` … `**######` six-level section headings in `.do` files, and how
+  each interacts with the code-lens and Outline view.
+- **Open VSX publish step.** `vscode-release.yml` now publishes the VSIX
+  to Open VSX on every `vscode-v*` tag. The step is gated on
+  `OVSX_PAT` being set at runtime and runs with `continue-on-error: true`,
+  so a missing or expired token never blocks the primary VS Code
+  Marketplace publish.
+
 ## 0.6.3 — 2026-05-10
 
 ### Added

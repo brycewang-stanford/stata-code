@@ -105,12 +105,30 @@ jobs:
           fi
           gh release upload "$TAG" stata-code.vsix --clobber
 
-      # Optional: also publish to Open VSX (for Cursor / VSCodium / Codespaces).
-      # Uncomment after creating https://open-vsx.org/ account + OVSX_PAT secret.
-      # - name: Publish to Open VSX
-      #   if: startsWith(github.ref, 'refs/tags/vscode-v')
-      #   env:
-      #     OVSX_PAT: ${{ secrets.OVSX_PAT }}
-      #   run: |
-      #     npm install -g ovsx
-      #     ovsx publish stata-code.vsix --pat "$OVSX_PAT"
+      # Also publish to Open VSX so Cursor, VSCodium, Gitpod, Code Server,
+      # and Windsurf can install the extension without going through the
+      # Microsoft Marketplace.
+      #
+      # Setup (one-time):
+      #   1. Sign in at https://open-vsx.org/ with the GitHub account that
+      #      owns the `brycewang-stanford` namespace (create the namespace
+      #      via the open-vsx CLI if it doesn't exist yet).
+      #   2. Generate a Personal Access Token at
+      #      https://open-vsx.org/user-settings/tokens
+      #   3. Add it as repo secret OVSX_PAT.
+      #
+      # The step is gated on the secret being set, and uses
+      # `continue-on-error: true` so a missing / expired Open VSX token
+      # never blocks the primary VS Code Marketplace publish.
+      - name: Publish to Open VSX
+        if: startsWith(github.ref, 'refs/tags/vscode-v')
+        continue-on-error: true
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::notice::OVSX_PAT not set; skipping Open VSX publish."
+            exit 0
+          fi
+          npm install -g ovsx
+          ovsx publish stata-code.vsix --pat "$OVSX_PAT"
