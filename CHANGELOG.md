@@ -6,6 +6,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.6.4 — 2026-05-21
+
 ### Added
 
 - **Claude Code plugin marketplace manifest.** `.claude-plugin/marketplace.json`
@@ -38,6 +40,16 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `OVSX_PAT` being set at runtime and runs with `continue-on-error: true`,
   so a missing or expired token never blocks the primary VS Code
   Marketplace publish.
+
+### Fixed
+
+- **Subprocess worker JSON protocol hardening.** Worker processes now keep
+  their private JSON protocol fds separate from real stdin/stdout and
+  redirect the real fd 0/1 pair to `os.devnull` before importing the
+  runner. The parent reader also ignores blank protocol noise while still
+  failing on non-empty non-JSON output. This prevents a pystata/Stata
+  initialization newline from surfacing as
+  `adapter_crash: worker emitted non-JSON: '\n'`.
 
 ## 0.6.3 — 2026-05-10
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stata-code"
-version = "0.6.3"
+version = "0.6.4"
 description = "Agent-native Stata bridge — one core, multiple frontends (MCP, Jupyter, VSCode)"
 readme = "README.md"
 license = "MIT"

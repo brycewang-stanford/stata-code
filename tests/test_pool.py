@@ -59,6 +59,34 @@ _ECHO_WORKER = textwrap.dedent(
 ).strip()
 
 
+_BLANK_PREFIX_WORKER = textwrap.dedent(
+    """
+    import json, sys
+    from stata_code.core._pool import _build_adapter_crash_result
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        sys.stdout.write("\\n")
+        sys.stdout.flush()
+        if req.get("op") == "ping":
+            resp = {"id": req["id"], "ok": True, "pong": True}
+        else:
+            sid = req.get("options", {}).get("session_id", "main")
+            r = _build_adapter_crash_result(session_id=sid, elapsed_ms=11, message="echo")
+            resp = {
+                "id": req["id"],
+                "ok": True,
+                "result": json.loads(r.model_dump_json()),
+                "ref_blobs": {},
+            }
+        sys.stdout.write(json.dumps(resp) + "\\n")
+        sys.stdout.flush()
+    """
+).strip()
+
+
 _SLOW_WORKER = textwrap.dedent(
     """
     import json, sys, time
@@ -151,6 +179,23 @@ class TestWorkerProcess:
             w.execute("b", {"session_id": "s1"}, timeout_ms=5000)
             pid_second = w._proc.pid  # noqa: SLF001
             assert pid_first == pid_second  # warm reuse
+        finally:
+            w.kill()
+
+    def test_blank_stdout_noise_before_execute_response_is_ignored(self):
+        w = WorkerProcess("s1", worker_cmd=_cmd_for(_BLANK_PREFIX_WORKER))
+        try:
+            result, blobs = w.execute("noop", {"session_id": "s1"}, timeout_ms=5000)
+            assert result["session_id"] == "s1"
+            assert blobs == {}
+        finally:
+            w.kill()
+
+    def test_blank_stdout_noise_before_simple_op_response_is_ignored(self):
+        w = WorkerProcess("s1", worker_cmd=_cmd_for(_BLANK_PREFIX_WORKER))
+        try:
+            response = w.send_simple_op("ping", timeout_ms=5000, spawn=True)
+            assert response["pong"] is True
         finally:
             w.kill()
 

@@ -1,8 +1,9 @@
-# Publishing `stata-code` to PyPI
+# Publishing `stata-code` to TestPyPI and PyPI
 
-This project publishes to PyPI via **GitHub Actions Trusted Publishing** (OIDC).
-There are **no API tokens** stored in GitHub repository secrets — PyPI verifies
-the OIDC identity of the workflow run instead.
+This project publishes to TestPyPI and PyPI via **GitHub Actions Trusted
+Publishing** (OIDC). There are **no API tokens** stored in GitHub repository
+secrets — each package index verifies the OIDC identity of the workflow run
+instead.
 
 The release pipeline is in [`.github/workflows/release.yml`](.github/workflows/release.yml).
 
@@ -28,25 +29,34 @@ Trusted Publishing has two modes:
 
 Either path lands you in the same place after the first run.
 
-### 2. Configure the Trusted Publisher on PyPI
+### 2. Configure the Trusted Publishers
 
-On the PyPI publishing page, add a GitHub publisher with these values:
+PyPI and TestPyPI are separate package indexes, so configure both publisher
+records independently:
 
-| Field | Value |
-| --- | --- |
-| Owner | `brycewang-stanford` |
-| Repository name | `stata-code` |
-| Workflow filename | `release.yml` |
-| Environment name | `pypi` |
+| Site | Manage URL | Environment |
+| --- | --- | --- |
+| PyPI | <https://pypi.org/manage/project/stata-code/settings/publishing/> | `pypi` |
+| TestPyPI | <https://test.pypi.org/manage/project/stata-code/settings/publishing/> | `testpypi` |
+
+Use the same GitHub publisher values on both sites:
+
+- Owner: `brycewang-stanford`
+- Repository name: `stata-code`
+- Workflow filename: `release.yml`
+- Environment name: `pypi` or `testpypi`, matching the site above
 
 The environment name is **required** and must match the `environment.name`
-declared in `release.yml` (`pypi`). PyPI uses it as an extra constraint:
+declared in `release.yml`. PyPI / TestPyPI use it as an extra constraint:
 even a malicious workflow change in the repo cannot publish unless it runs
-under that exact environment.
+under the exact environment configured for that index.
 
-### 3. Create the GitHub Environment
+### 3. Create the GitHub Environments
 
-In the GitHub repo: **Settings → Environments → New environment → name `pypi`**.
+In the GitHub repo: **Settings → Environments → New environment**. Create both:
+
+- `testpypi`
+- `pypi`
 
 Recommended hardening (all in the environment settings page):
 
@@ -71,6 +81,7 @@ Once the one-time setup above is done, every release is just:
    - `stata_code/__init__.py` → `__version__`
    - `stata_code/mcp/server.py` → `__version__`
    - `vscode/package.json` → `version`
+   - `vscode/package-lock.json` → root package `version`
 2. **Run the version guard** before tagging:
    ```bash
    python scripts/check_versions.py
@@ -80,7 +91,7 @@ Once the one-time setup above is done, every release is just:
    on top.
 4. **Commit** the bump:
    ```bash
-   git add pyproject.toml stata_code/__init__.py stata_code/mcp/server.py vscode/package.json CHANGELOG.md
+   git add pyproject.toml stata_code/__init__.py stata_code/mcp/server.py vscode/package.json vscode/package-lock.json CHANGELOG.md
    git commit -m "release: vX.Y.Z"
    ```
 5. **Tag and push**:
@@ -89,10 +100,14 @@ Once the one-time setup above is done, every release is just:
    git push origin main
    git push origin vX.Y.Z
    ```
-5. Watch the **`release` workflow** under the Actions tab. It will:
+6. Watch the **`release` workflow** under the Actions tab. It will:
    - build the sdist + wheel
    - run `twine check` on the artifacts
+   - publish to TestPyPI under the `testpypi` environment (no token needed)
    - publish to PyPI under the `pypi` environment (no token needed)
+   - poll PyPI's per-version JSON endpoint so a failed trusted-publisher
+     publish marks the workflow run failed even though the publish job itself
+     is `continue-on-error`
    - create a GitHub Release for the tag with the wheel + sdist attached and
      auto-generated release notes
 

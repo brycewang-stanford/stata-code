@@ -160,10 +160,15 @@ def _worker_main() -> int:
     #
     # Duping the file descriptors gives us a reader/writer rooted at a
     # *separate* FD that pystata cannot reach via the sys.* indirection.
+    # After the protocol streams are open, fd 0/1 themselves are redirected
+    # away from the protocol pipe so C-side Stata/pystata writes cannot leak
+    # blank/banner lines into the parent's JSON reader.
     saved_stdin_fd = os.dup(0)
     saved_stdout_fd = os.dup(1)
     proto_in = os.fdopen(saved_stdin_fd, "r", buffering=1, encoding="utf-8")
     proto_out = os.fdopen(saved_stdout_fd, "w", buffering=1, encoding="utf-8")
+    _redirect_standard_fd(0, os.O_RDONLY)
+    _redirect_standard_fd(1, os.O_WRONLY)
 
     # Imported here so `python -m stata_code.core._pool` can fail loudly
     # only if a request actually arrives — listing the worker as a tool
@@ -250,6 +255,20 @@ def _default_worker_cmd() -> list[str]:
     return [sys.executable, "-u", "-m", "stata_code.core._pool"]
 
 
+def _redirect_standard_fd(fd: int, flags: int) -> None:
+    """Point fd 0/1 at os.devnull after private protocol fds are duplicated."""
+    try:
+        devnull_fd = os.open(os.devnull, flags)
+        try:
+            os.dup2(devnull_fd, fd)
+        finally:
+            os.close(devnull_fd)
+    except OSError:
+        # Keep the worker usable even on an unusual platform where devnull
+        # redirection fails; the parent still guards against blank noise.
+        return
+
+
 class _WorkerError(RuntimeError):
     """Raised on worker-side execution failure (non-Stata, e.g., crash)."""
 
@@ -327,13 +346,8 @@ class WorkerProcess:
             deadline: float | None
             deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
 
-            line = self._readline_with_deadline(proc, deadline)
+            response = self._read_json_response_with_deadline(proc, deadline)
             self.last_used = time.monotonic()
-
-            try:
-                response = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise _WorkerError(f"worker emitted non-JSON: {line!r}") from exc
 
             if response.get("id") != req_id:
                 raise _WorkerError(
@@ -398,6 +412,30 @@ class WorkerProcess:
                 rc = proc.returncode
                 raise _WorkerError(_worker_exit_message(proc, rc))
 
+    @classmethod
+    def _read_json_response_with_deadline(
+        cls,
+        proc: subprocess.Popen[str],
+        deadline: float | None,
+    ) -> dict[str, Any]:
+        """Read the next non-blank JSON worker response.
+
+        A few Stata/pystata builds emit a lone newline while initializing. That
+        line is protocol noise, not a response, so tolerate blank lines only.
+        Non-empty non-JSON still indicates real protocol corruption.
+        """
+        while True:
+            line = cls._readline_with_deadline(proc, deadline)
+            if not line.strip():
+                continue
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise _WorkerError(f"worker emitted non-JSON: {line!r}") from exc
+            if not isinstance(response, dict):
+                raise _WorkerError(f"worker emitted non-object JSON: {line!r}")
+            return response
+
     def send_simple_op(
         self,
         op: str,
@@ -432,13 +470,8 @@ class WorkerProcess:
             deadline: float | None
             deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
 
-            line = self._readline_with_deadline(proc, deadline)
+            response = self._read_json_response_with_deadline(proc, deadline)
             self.last_used = time.monotonic()
-
-            try:
-                response = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise _WorkerError(f"worker emitted non-JSON: {line!r}") from exc
 
             if response.get("id") != req_id:
                 raise _WorkerError(
