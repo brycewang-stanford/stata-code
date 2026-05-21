@@ -188,6 +188,16 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
 python -m stata_code.mcp
 ```
 
+如果 `stata-code-mcp` 安装在项目内 virtualenv（推荐用于可复现环境），建议在
+client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`。
+
+#### MCP 故障排查
+
+如果 `stata_run` 返回 `adapter_crash`，并出现 `worker emitted non-JSON: '\n'`，
+请升级到 `stata-code>=0.6.4`，然后重启 MCP client，让它启动新的 server 进程。
+同时确认 client 解析到的是预期的 `stata-code-mcp`；项目内 virtualenv 安装
+应使用 `.venv/bin/stata-code-mcp` 的绝对路径，不要依赖全局 `PATH`。
+
 MCP server 注册了 15 个工具：
 
 | 工具 | 用途 |

@@ -224,6 +224,14 @@ When `stata-code-mcp` lives inside a project virtualenv (recommended for reprodu
 
 For `uvx`-only setups, set `"command": "uvx"` and `"args": ["--from", "stata-code", "stata-code-mcp"]`.
 
+#### MCP troubleshooting
+
+If `stata_run` reports `adapter_crash` with `worker emitted non-JSON: '\n'`,
+upgrade to `stata-code>=0.6.4`, then restart the MCP client so it launches a
+fresh server process. Also check that the client is resolving the expected
+`stata-code-mcp` binary; project virtualenv installs should use the absolute
+`.venv/bin/stata-code-mcp` path instead of relying on a global `PATH` entry.
+
 The MCP server registers 15 tools:
 
 | Tool | Purpose |
