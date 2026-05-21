@@ -14,6 +14,7 @@ export interface ServerLaunchConfig {
   stataPythonPath?: string;
   pythonDefaultInterpreterPath?: string;
   pythonPythonPath?: string;
+  processEnv?: NodeJS.ProcessEnv;
   envPath?: string;
   envPythonPath?: string;
   homeDir?: string;
@@ -27,16 +28,24 @@ export function buildServerLaunchCandidates(config: ServerLaunchConfig): StataSe
     configuredArgs,
     workspaceRoot,
     extensionRoot,
-    envPath = process.env.PATH,
-    envPythonPath = process.env.PYTHONPATH,
+    processEnv = process.env,
     homeDir = os.homedir(),
     platform = process.platform,
     exists = fs.existsSync,
   } = config;
+  const envPath = config.envPath ?? processEnv.PATH ?? processEnv.Path;
+  const envPythonPath = config.envPythonPath ?? processEnv.PYTHONPATH;
   const cwd = workspaceRoot;
   const sourceRoots = localSourceRoots(workspaceRoot, extensionRoot, exists);
   const venvDirs = localVenvDirs(workspaceRoot, sourceRoots);
-  const env = serverEnvironment(sourceRoots, envPath, envPythonPath, homeDir, platform);
+  const env = serverEnvironment(
+    sourceRoots,
+    envPath,
+    envPythonPath,
+    homeDir,
+    platform,
+    processEnv,
+  );
   const [command, inlineArgs] = normalizeConfiguredCommand(
     configuredCommand,
     configuredArgs,
@@ -121,13 +130,15 @@ export function parseCommandLine(value: string): string[] {
   let quote: "'" | "\"" | undefined;
   let escaping = false;
 
-  for (const ch of value) {
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
     if (escaping) {
       current += ch;
       escaping = false;
       continue;
     }
-    if (ch === "\\") {
+    const next = value[i + 1];
+    if (ch === "\\" && shouldEscapeNext(next)) {
       escaping = true;
       continue;
     }
@@ -158,14 +169,20 @@ export function parseCommandLine(value: string): string[] {
   return parts;
 }
 
+function shouldEscapeNext(next: string | undefined): boolean {
+  return next !== undefined && (/\s/.test(next) || next === "\\" || next === "'" || next === "\"");
+}
+
 function serverEnvironment(
   sourceRoots: string[],
   envPath: string | undefined,
   envPythonPath: string | undefined,
   homeDir: string,
   platform: NodeJS.Platform,
+  processEnv: NodeJS.ProcessEnv,
 ): Record<string, string> {
   const env: Record<string, string> = {
+    ...runtimeEnvironment(processEnv),
     PATH: expandedPath(envPath, homeDir, platform),
   };
   const pythonPath = uniqueStrings([...sourceRoots, ...splitPathList(envPythonPath)]);
@@ -175,18 +192,41 @@ function serverEnvironment(
   return env;
 }
 
+function runtimeEnvironment(processEnv: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {};
+  const exactKeys = new Set([
+    "PYTHONHOME",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "CONDA_DEFAULT_ENV",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+  ]);
+  for (const [key, value] of Object.entries(processEnv)) {
+    if (value === undefined) continue;
+    const upper = key.toUpperCase();
+    if (upper.startsWith("STATA") || upper.startsWith("PYSTATA") || exactKeys.has(upper)) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 function expandedPath(
   envPath: string | undefined,
   homeDir: string,
   platform: NodeJS.Platform,
 ): string {
-  const entries = [
-    ...splitPathList(envPath),
-    path.join(homeDir, ".local", "bin"),
-    ...pythonUserScriptDirs(homeDir, platform),
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-  ].filter((entry): entry is string => Boolean(entry));
+  const entries = [...splitPathList(envPath)];
+  if (platform === "win32") {
+    entries.push(...pythonUserScriptDirs(homeDir, platform));
+  } else {
+    entries.push(path.join(homeDir, ".local", "bin"));
+    entries.push(...pythonUserScriptDirs(homeDir, platform));
+    if (platform === "darwin") {
+      entries.push("/opt/homebrew/bin", "/usr/local/bin");
+    }
+  }
   return uniqueStrings(entries).join(path.delimiter);
 }
 
@@ -227,8 +267,17 @@ function uniqueStrings(values: string[]): string[] {
 }
 
 function pythonUserScriptDirs(homeDir: string, platform: NodeJS.Platform): string[] {
-  if (platform === "win32") return [];
   const versions = ["3.13", "3.12", "3.11", "3.10"];
+  if (platform === "win32") {
+    return versions.flatMap((version) => {
+      const compact = version.replace(".", "");
+      return [
+        path.join(homeDir, "AppData", "Roaming", "Python", `Python${compact}`, "Scripts"),
+        path.join(homeDir, "AppData", "Local", "Programs", "Python", `Python${compact}`, "Scripts"),
+      ];
+    });
+  }
+  if (platform !== "darwin") return [];
   return versions.map((version) =>
     path.join(homeDir, "Library", "Python", version, "bin"),
   );

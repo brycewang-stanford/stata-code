@@ -41,6 +41,7 @@ _PYSTATA_SEARCH_PATHS: tuple[str, ...] = (
     "/usr/local/stata19/utilities",
     "/usr/local/stata18/utilities",
     "/usr/local/stata17/utilities",
+    r"C:\Program Files\StataNow\utilities",
     r"C:\Program Files\Stata19\utilities",
     r"C:\Program Files\Stata18\utilities",
     r"C:\Program Files\Stata17\utilities",
@@ -97,7 +98,9 @@ class PystataRuntime:
             from pystata import config as cfg
         except ImportError as exc:
             raise PystataNotAvailable(
-                "pystata is not importable; install Stata 17+ or set PYTHONPATH"
+                "pystata is not importable; install Stata 17+ or set "
+                "STATA_CODE_PYSTATA_PATH/PYSTATA_PATH to Stata's utilities "
+                f"directory. Checked: {_format_checked_paths(_candidate_pystata_paths())}"
             ) from exc
 
         # `pystata.config.init` succeeds for whichever edition is licensed;
@@ -383,3 +386,11 @@ def _dedupe(values: list[str] | tuple[str, ...]) -> list[str]:
         seen.add(value)
         out.append(value)
     return out
+
+
+def _format_checked_paths(paths: list[str], *, limit: int = 8) -> str:
+    if not paths:
+        return "<none>"
+    shown = paths[:limit]
+    suffix = "" if len(paths) <= limit else f"; ... +{len(paths) - limit} more"
+    return "; ".join(shown) + suffix

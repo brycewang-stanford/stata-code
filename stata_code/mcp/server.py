@@ -2175,7 +2175,7 @@ def _info_payload_from_stata(
 async def main() -> None:
     if not _MCP_AVAILABLE:
         print(
-            "ERROR: mcp package not installed. Install with: pip install mcp",
+            'ERROR: MCP support is not installed. Install with: python -m pip install "stata-code[mcp]"',
             file=sys.stderr,
         )
         sys.exit(1)

@@ -165,7 +165,7 @@ If you want the repair loop, say so explicitly. Otherwise, treat failed runs as 
 If you prefer not to `pip install stata-code` globally, run it ephemerally through [`uv`](https://github.com/astral-sh/uv):
 
 ```bash
-claude mcp add stata-code --scope user -- uvx --from stata-code stata-code-mcp
+claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
 ```
 
 `uvx` will resolve and cache `stata-code` on first launch. Note: `pystata` is **not** on PyPI, so it still has to be locatable on the host. The runner adds the standard Stata install path (e.g. `/Applications/Stata/utilities/pystata` on macOS) to `sys.path` automatically; if your Stata lives elsewhere, set `PYTHONPATH` in the env block.

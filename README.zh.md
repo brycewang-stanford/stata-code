@@ -163,7 +163,7 @@ claude mcp add stata-code --scope project -- stata-code-mcp
 如果不想全局 `pip install stata-code`，可以用 [`uv`](https://github.com/astral-sh/uv) 临时运行：
 
 ```bash
-claude mcp add stata-code --scope user -- uvx --from stata-code stata-code-mcp
+claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
 ```
 
 `uvx` 会在首次启动时下载并缓存 `stata-code`。注意：`pystata` **不在 PyPI 上**，仍需要在宿主机上能找到。runner 会自动把标准 Stata 安装路径（macOS 上的 `/Applications/Stata/utilities/pystata` 等）加到 `sys.path`；如果你的 Stata 在别处，请用 env 设置 `PYTHONPATH`。

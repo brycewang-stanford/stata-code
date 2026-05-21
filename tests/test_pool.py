@@ -82,6 +82,15 @@ _CRASH_WORKER = textwrap.dedent(
 ).strip()
 
 
+_STDERR_CRASH_WORKER = textwrap.dedent(
+    """
+    import sys
+    print("boom from worker stderr", file=sys.stderr)
+    sys.exit(9)
+    """
+).strip()
+
+
 _FERRY_WORKER = textwrap.dedent(
     """
     import base64, json, sys
@@ -158,6 +167,14 @@ class TestWorkerProcess:
         try:
             # Worker exits before reading anything; either write fails or read sees EOF.
             with pytest.raises(_WorkerError):
+                w.execute("anything", {"session_id": "s1"}, timeout_ms=5000)
+        finally:
+            w.kill()
+
+    def test_worker_crash_includes_stderr_tail(self):
+        w = WorkerProcess("s1", worker_cmd=_cmd_for(_STDERR_CRASH_WORKER))
+        try:
+            with pytest.raises(_WorkerError, match="boom from worker stderr"):
                 w.execute("anything", {"session_id": "s1"}, timeout_ms=5000)
         finally:
             w.kill()

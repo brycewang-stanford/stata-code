@@ -81,6 +81,12 @@ def test_find_pystata_path_uses_env_candidate(monkeypatch, tmp_path):
     assert PystataRuntime._find_pystata_path() == str(utilities)
 
 
+def test_default_candidates_include_statanow_windows_path():
+    from stata_code.core import _runtime
+
+    assert r"C:\Program Files\StataNow\utilities" in _runtime._candidate_pystata_paths()
+
+
 def test_run_capture_collects_stdout_and_rc() -> None:
     from stata_code.core._runtime import PystataRuntime
 

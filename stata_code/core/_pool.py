@@ -387,7 +387,7 @@ class WorkerProcess:
                 if not line:
                     # EOF — worker exited or pipe closed unexpectedly.
                     rc = proc.poll()
-                    raise _WorkerError(f"worker exited (returncode={rc}) before responding")
+                    raise _WorkerError(_worker_exit_message(proc, rc))
                 return line
             # Worker still running but no line yet. If the process died, surface that.
             if proc.poll() is not None:
@@ -396,7 +396,7 @@ class WorkerProcess:
                 if "line" in result and isinstance(result["line"], str) and result["line"]:
                     return result["line"]
                 rc = proc.returncode
-                raise _WorkerError(f"worker exited (returncode={rc}) before responding")
+                raise _WorkerError(_worker_exit_message(proc, rc))
 
     def send_simple_op(
         self,
@@ -483,6 +483,31 @@ class WorkerProcess:
             pass
         if self._proc is proc:
             self._proc = None
+
+
+def _worker_exit_message(proc: subprocess.Popen[str], rc: int | None) -> str:
+    message = f"worker exited (returncode={rc}) before responding"
+    if rc is None:
+        return message
+    stderr = _read_process_stderr_tail(proc)
+    if not stderr:
+        return message
+    return f"{message}; stderr: {stderr}"
+
+
+def _read_process_stderr_tail(
+    proc: subprocess.Popen[str],
+    *,
+    max_chars: int = 4000,
+) -> str:
+    """Best-effort stderr tail for a worker that has already exited."""
+    if proc.stderr is None:
+        return ""
+    try:
+        text = proc.stderr.read()
+    except Exception:  # noqa: BLE001
+        return ""
+    return text.strip()[-max_chars:]
 
 
 class SessionPool:

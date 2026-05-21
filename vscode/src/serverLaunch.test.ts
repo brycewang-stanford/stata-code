@@ -26,6 +26,13 @@ describe("buildServerLaunchCandidates", () => {
       pythonPythonPath: "/legacy/python",
       envPath: "/bin",
       envPythonPath: "/existing/pythonpath",
+      processEnv: {
+        PATH: "/ignored/path",
+        PYTHONPATH: "/ignored/pythonpath",
+        STATA_HOME: "/Applications/StataNow",
+        PYSTATA_PATH: "/Applications/StataNow/utilities",
+        API_TOKEN: "not-forwarded",
+      },
       homeDir: "/home/user",
       platform: "darwin",
       exists: (target) => existing.has(target),
@@ -38,6 +45,9 @@ describe("buildServerLaunchCandidates", () => {
       candidates[0].env?.PYTHONPATH,
       ["/work/project", "/existing/pythonpath"].join(path.delimiter),
     );
+    assert.equal(candidates[0].env?.STATA_HOME, "/Applications/StataNow");
+    assert.equal(candidates[0].env?.PYSTATA_PATH, "/Applications/StataNow/utilities");
+    assert.equal(candidates[0].env?.API_TOKEN, undefined);
 
     assert.ok(
       candidates.some(
@@ -103,6 +113,11 @@ describe("parseCommandLine", () => {
     );
     assert.deepEqual(parseCommandLine("python\\ 3 -m stata_code.mcp"), [
       "python 3",
+      "-m",
+      "stata_code.mcp",
+    ]);
+    assert.deepEqual(parseCommandLine(String.raw`C:\Python312\python.exe -m stata_code.mcp`), [
+      String.raw`C:\Python312\python.exe`,
       "-m",
       "stata_code.mcp",
     ]);
