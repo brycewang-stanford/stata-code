@@ -87,30 +87,33 @@ class TestToolRegistry:
         assert gg.annotations is not None
         assert gg.annotations.readOnlyHint is True
 
-    def test_notebook_locate_schema_oneof(self):
+    def test_tool_input_schemas_avoid_openai_forbidden_top_level_keywords(self):
+        from stata_code.mcp.server import _tool_definitions
+
+        forbidden = {"oneOf", "anyOf", "allOf", "enum", "not"}
+        for tool in _tool_definitions():
+            schema = tool.inputSchema
+            assert schema is not None
+            assert schema.get("type") == "object"
+            assert forbidden.isdisjoint(schema), tool.name
+
+    def test_notebook_locate_schema_keeps_query_fields_optional(self):
         from stata_code.mcp.server import _tool_definitions
 
         loc = next(t for t in _tool_definitions() if t.name == "notebook_locate")
         schema = loc.inputSchema
-        assert "oneOf" in schema
-        required_sets = [tuple(sorted(o.get("required", []))) for o in schema["oneOf"]]
-        assert ("snippet",) in required_sets
-        assert ("regex",) in required_sets
-        assert ("error_text",) in required_sets
+        assert schema["required"] == ["path"]
+        assert {"snippet", "regex", "error_text"} <= set(schema["properties"])
 
-    def test_notebook_insert_cell_schema_oneof(self):
+    def test_notebook_insert_cell_schema_keeps_anchor_fields_optional(self):
         from stata_code.mcp.server import _tool_definitions
 
         ins = next(t for t in _tool_definitions() if t.name == "notebook_insert_cell")
         schema = ins.inputSchema
-        assert "oneOf" in schema
-        anchors = {tuple(sorted(o.get("required", []))) for o in schema["oneOf"]}
-        assert anchors == {
-            ("after_cell_id",),
-            ("before_cell_id",),
-            ("at_start",),
-            ("at_end",),
-        }
+        assert schema["required"] == ["path", "source"]
+        assert {"after_cell_id", "before_cell_id", "at_start", "at_end"} <= set(
+            schema["properties"]
+        )
 
     def test_resource_templates_include_ref_shapes(self):
         from stata_code.mcp.server import _resource_templates

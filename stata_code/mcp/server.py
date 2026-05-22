@@ -894,15 +894,6 @@ def _tool_definitions() -> list[Tool]:
                     },
                 },
                 "required": ["path"],
-                # Schema-level expression of the "exactly one of snippet /
-                # regex / error_text" rule. The runtime guard in
-                # notebook.locate_cells still enforces this for clients that
-                # don't validate inputs against the schema.
-                "oneOf": [
-                    {"required": ["snippet"]},
-                    {"required": ["regex"]},
-                    {"required": ["error_text"]},
-                ],
             },
             outputSchema=_NOTEBOOK_LOCATE_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(
@@ -989,17 +980,6 @@ def _tool_definitions() -> list[Tool]:
                     "at_end": {"type": "boolean"},
                 },
                 "required": ["path", "source"],
-                # Exactly one anchor must be present. Booleans for
-                # at_start/at_end must additionally be `true` to count as
-                # "specified" — the JSON Schema below treats them as
-                # required-presence; the runtime guard in
-                # notebook.insert_cell additionally rejects the false-y form.
-                "oneOf": [
-                    {"required": ["after_cell_id"]},
-                    {"required": ["before_cell_id"]},
-                    {"required": ["at_start"]},
-                    {"required": ["at_end"]},
-                ],
             },
             outputSchema=_NOTEBOOK_INSERT_OUTPUT_SCHEMA,
             annotations=ToolAnnotations(

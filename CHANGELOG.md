@@ -6,6 +6,14 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+### Fixed
+
+- **OpenAI tool-schema compatibility.** `notebook_locate` and
+  `notebook_insert_cell` no longer advertise top-level `oneOf` constraints in
+  their MCP input schemas. OpenAI rejects those schemas during tool
+  registration, while the server-side runtime guards still enforce the
+  "exactly one query/anchor" rules.
+
 ## 0.6.4 — 2026-05-21
 
 ### Added
