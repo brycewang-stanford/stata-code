@@ -232,6 +232,11 @@ fresh server process. Also check that the client is resolving the expected
 `stata-code-mcp` binary; project virtualenv installs should use the absolute
 `.venv/bin/stata-code-mcp` path instead of relying on a global `PATH` entry.
 
+If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
+'mcp__stata-code__notebook_insert_cell'` and mentions a top-level `oneOf`,
+upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
+processes keep advertising the stale schema until they are restarted.
+
 The MCP server registers 15 tools:
 
 | Tool | Purpose |

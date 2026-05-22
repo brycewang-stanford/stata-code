@@ -198,6 +198,11 @@ client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`
 同时确认 client 解析到的是预期的 `stata-code-mcp`；项目内 virtualenv 安装
 应使用 `.venv/bin/stata-code-mcp` 的绝对路径，不要依赖全局 `PATH`。
 
+如果 OpenAI 系客户端返回 `API Error: 400 Invalid schema for function
+'mcp__stata-code__notebook_insert_cell'`，并提到顶层 `oneOf`，请升级到
+`stata-code>=0.6.5`，然后重启 MCP client。旧 server 进程在重启前仍会继续
+暴露旧 schema。
+
 MCP server 注册了 15 个工具：
 
 | 工具 | 用途 |

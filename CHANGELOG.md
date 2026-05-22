@@ -6,6 +6,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.6.5 — 2026-05-22
+
 ### Fixed
 
 - **OpenAI tool-schema compatibility.** `notebook_locate` and
