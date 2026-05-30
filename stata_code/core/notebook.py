@@ -1017,7 +1017,6 @@ def edit_cell(
     # indices; ``edit_cell`` does not change cell positions, so leaving
     # the other pre-4.5 synthetic ids stable preserves any other handles
     # the caller is holding.
-    cell_lacked_id = not (isinstance(cell.get("id"), str) and cell.get("id"))
     actual_id = _ensure_native_id(cell)
     if _all_cells_have_native_ids(cells):
         # The notebook is fully id'd, so it is valid to declare nbformat 4.5.
