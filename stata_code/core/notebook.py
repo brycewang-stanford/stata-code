@@ -575,7 +575,12 @@ def _score_error_text(source: str, error_text: str) -> tuple[float, int | None]:
         idx = source.find(s)
         if idx >= 0:
             line_no, _ = _line_with_match(source, idx)
-            return min(1.0, len(s) / 80.0 + 0.5), line_no
+            # Capped strictly below 1.0: an error-text fingerprint is a fuzzy,
+            # heuristic match, never as certain as an exact snippet or a regex
+            # hit (both of which score 1.0). Keeping it below 1.0 lets an agent
+            # comparing results across calls tell "located by fingerprint" from
+            # "located exactly" instead of treating them as equally confident.
+            return min(0.95, len(s) / 80.0 + 0.5), line_no
     return 0.0, None
 
 

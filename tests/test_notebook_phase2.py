@@ -111,6 +111,23 @@ def test_locate_error_text_uses_longest_codey_line(tmp_path: Path) -> None:
     assert out["matches"][0]["cell_id"] == "a"
 
 
+def test_locate_error_text_score_capped_below_exact_match(tmp_path: Path) -> None:
+    """An error-text fingerprint is a fuzzy match and must score < 1.0, so an
+    agent never confuses it with an exact snippet/regex hit (which score 1.0)."""
+    long_line = "regress outcome treatment covariate1 covariate2 covariate3 covariate4"
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": long_line + "\n",
+          "metadata": {}, "outputs": []}],
+    )
+    err = f"r(111);\nsome failure\n. {long_line}\n"
+    out = locate_cells(path, error_text=err)
+    assert out["match_count"] == 1
+    score = out["matches"][0]["score"]
+    assert score < 1.0
+    assert score == 0.95
+
+
 def test_locate_query_required(tmp_path: Path) -> None:
     path = _write_nb(tmp_path, [])
     with pytest.raises(NotebookError, match="locate_query_required"):
