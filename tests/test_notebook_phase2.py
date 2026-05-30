@@ -244,6 +244,33 @@ def test_edit_cell_drift_match_succeeds(tmp_path: Path) -> None:
     assert cell["source"] == "next"
 
 
+def test_edit_drift_guard_tolerates_crlf_vs_lf(tmp_path: Path) -> None:
+    """A Windows-authored cell stores CRLF; the agent reconstructs
+    expected_source with LF. Same content must not read as drift."""
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "line1\r\nline2",
+          "metadata": {}, "outputs": []}],
+    )
+    edit_cell(path, cell_id="a", new_source="updated",
+              expected_source="line1\nline2")
+    assert _read(path)["cells"][0]["source"] == "updated"
+
+
+def test_delete_drift_guard_tolerates_crlf_vs_lf(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "a", "source": "x\r\ny",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "b", "source": "keep",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    delete_cell(path, cell_id="a", expected_source="x\ny")
+    assert [c["id"] for c in _read(path)["cells"]] == ["b"]
+
+
 def test_edit_cell_synth_id_upgrades_to_real_uuid(tmp_path: Path) -> None:
     path = _write_nb(
         tmp_path,

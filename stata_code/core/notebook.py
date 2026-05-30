@@ -127,6 +127,17 @@ def _source_to_str(src: Any) -> str:
     return ""
 
 
+def _normalize_newlines(text: str) -> str:
+    """Collapse CRLF / CR to LF.
+
+    Used to compare ``expected_source`` against the on-disk source: a notebook
+    authored on Windows may carry ``\\r\\n`` line endings while the agent
+    reconstructs ``expected_source`` with ``\\n`` (or vice versa). Comparing
+    raw would raise a spurious ``*_source_drift`` even though the content is
+    identical, which is a frequent false alarm in a Windows repair loop."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _synth_cell_id(index: int, source: str) -> str:
     """Deterministic id for pre-nbformat-4.5 cells (no native ``id`` field).
 
@@ -950,7 +961,9 @@ def edit_cell(
     ``expected_source`` is an optional optimistic-concurrency guard: when
     provided, the call fails with ``edit_source_drift`` if the current
     on-disk source differs. Use this when the agent read the cell some
-    time ago — it prevents clobbering edits the user made in between.
+    time ago — it prevents clobbering edits the user made in between. The
+    comparison is newline-insensitive (CRLF/LF/CR are normalised) so a
+    Windows line-ending mismatch doesn't read as content drift.
 
     Returns the updated cell summary (same shape as :func:`get_cell`'s
     return, minus ``outputs_summary`` since outputs were cleared).
@@ -967,7 +980,9 @@ def edit_cell(
     index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
     current_source = _source_to_str(cell.get("source"))
 
-    if expected_source is not None and expected_source != current_source:
+    if expected_source is not None and _normalize_newlines(
+        expected_source
+    ) != _normalize_newlines(current_source):
         raise NotebookError(
             "edit_source_drift: on-disk source no longer matches expected_source; "
             "re-read the cell before editing"
@@ -1121,7 +1136,9 @@ def delete_cell(
     cells = nb["cells"]
     index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
     current_source = _source_to_str(cell.get("source"))
-    if expected_source is not None and expected_source != current_source:
+    if expected_source is not None and _normalize_newlines(
+        expected_source
+    ) != _normalize_newlines(current_source):
         raise NotebookError(
             "delete_source_drift: on-disk source no longer matches expected_source"
         )
