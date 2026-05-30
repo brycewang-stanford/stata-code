@@ -6,6 +6,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.7.0 — 2026-05-30
+
 ### Added
 
 - **Schema-compatible public session ids end to end.** Runner, pool, MCP,
