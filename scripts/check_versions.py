@@ -32,13 +32,17 @@ def _tag_version(tag: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check pyproject/Python/MCP/VS Code version literals."
+        description="Check Python, MCP, VS Code, and plugin version literals."
     )
     parser.add_argument(
         "--tag",
         help="Optional Git tag to compare against, e.g. vX.Y.Z or vscode-vX.Y.Z.",
     )
     args = parser.parse_args()
+
+    vscode_lock = json.loads(_read("vscode/package-lock.json"))
+    plugin_manifest = json.loads(_read(".claude-plugin/plugin.json"))
+    marketplace_manifest = json.loads(_read(".claude-plugin/marketplace.json"))
 
     versions = {
         "pyproject.toml": _extract(
@@ -51,7 +55,18 @@ def main() -> int:
             "stata_code/mcp/server.py", r'(?m)^__version__\s*=\s*"([^"]+)"'
         ),
         "vscode/package.json": json.loads(_read("vscode/package.json"))["version"],
+        "vscode/package-lock.json": vscode_lock["version"],
+        "vscode/package-lock.json packages['']": vscode_lock["packages"][""]["version"],
+        ".claude-plugin/plugin.json": plugin_manifest["version"],
+        ".claude-plugin/marketplace.json metadata": marketplace_manifest["metadata"][
+            "version"
+        ],
     }
+    for idx, plugin in enumerate(marketplace_manifest.get("plugins", [])):
+        if isinstance(plugin, dict) and "version" in plugin:
+            versions[f".claude-plugin/marketplace.json plugins[{idx}]"] = plugin[
+                "version"
+            ]
 
     # mcpClient.ts used to carry a literal version; we now resolve it at
     # build time via ``import { version } from "../package.json"``. If the

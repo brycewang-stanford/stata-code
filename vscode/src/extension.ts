@@ -13,10 +13,17 @@ import { version as extensionVersion } from "../package.json";
 
 import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
+import {
+  formatDataPreviewDocument,
+  formatLogDocument,
+  inlineLogText,
+  matrixToTsv,
+} from "./formatters";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
 import { buildServerLaunchCandidates, DEFAULT_SERVER_COMMAND } from "./serverLaunch";
 import { probeServerLaunch } from "./serverProbe";
+import { nextSessionName, SESSION_ID_RE, validateSessionId } from "./sessionIds";
 import {
   StataCompletionProvider,
   StataRenameProvider,
@@ -45,7 +52,6 @@ import type { GraphFormat, GraphInfo, Matrix, RunResult } from "./types/runResul
 const HISTORY_CAP = 64;
 const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
-const SESSION_ID_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
 const INSTALL_HINT_DISMISSED_KEY = "stataCode.installHintDismissedFor";
 const INSTALL_COMMAND = 'pip install "stata-code[mcp]"';
 const INSTALL_DOC_URL = "https://github.com/brycewang-stanford/stata-code#install";
@@ -659,7 +665,7 @@ async function viewDataPreview(): Promise<void> {
 
   const doc = await vscode.workspace.openTextDocument({
     language: "plaintext",
-    content: formatDataPreviewDocument(result, inlineLogText(result)),
+    content: formatDataPreviewDocument(result, inlineLogText(result), DATA_PREVIEW_OBS),
   });
   await vscode.window.showTextDocument(doc, {
     preview: false,
@@ -844,74 +850,6 @@ async function getLogText(result: RunResult): Promise<string> {
   return inlineLogText(result);
 }
 
-function inlineLogText(result: RunResult): string {
-  const chunks: string[] = [];
-  if (result.log.head) chunks.push(result.log.head);
-  if (result.log.truncated && result.log.tail && result.log.tail !== result.log.head) {
-    chunks.push(`... (${result.log.lines_total} lines total; full log unavailable) ...`);
-    chunks.push(result.log.tail);
-  } else if (!result.log.head && result.log.tail) {
-    chunks.push(result.log.tail);
-  }
-  return chunks.join("\n");
-}
-
-function formatLogDocument(result: RunResult, text: string): string {
-  const status = result.ok ? "OK" : `FAIL rc=${result.rc}`;
-  return [
-    "stata-code log",
-    `status: ${status}`,
-    `session: ${result.session_id}`,
-    `request: ${result.request_id}`,
-    `started: ${result.started_at}`,
-    `elapsed_ms: ${result.elapsed_ms}`,
-    `lines: ${result.log.lines_total}`,
-    ...(result.log.files
-      ? [
-          ...(result.log.files.working_dir ? [`working_dir: ${result.log.files.working_dir}`] : []),
-          `log_file: ${result.log.files.log_path}`,
-          `smcl_file: ${result.log.files.smcl_path}`,
-          ...(result.log.files.graph_paths?.length
-            ? [`graphs_dir: ${result.log.files.graphs_dir ?? ""}`]
-            : []),
-          ...(result.log.files.output_paths?.length
-            ? [`outputs_dir: ${result.log.files.outputs_dir ?? ""}`]
-            : []),
-        ]
-      : []),
-    "",
-    "-".repeat(72),
-    text,
-  ].join("\n");
-}
-
-function formatDataPreviewDocument(result: RunResult, text: string): string {
-  const ds = result.dataset;
-  const status = result.ok ? "OK" : `FAIL rc=${result.rc}`;
-  const rowsShown = result.ok ? Math.min(ds.n_obs, DATA_PREVIEW_OBS) : 0;
-  const body = text.trim() || (ds.n_vars === 0 ? "(no variables in memory)" : "(no preview output)");
-  const variableLines = (ds.variables ?? []).map(
-    (v) => `  ${v.name}\t${v.type}${v.label ? `\t${v.label}` : ""}`,
-  );
-
-  return [
-    "stata-code data preview",
-    `status: ${status}`,
-    `session: ${result.session_id}`,
-    `request: ${result.request_id}`,
-    `dataset: ${ds.n_obs} obs · ${ds.n_vars} vars · frame ${ds.frame}`,
-    ds.filename ? `file: ${ds.filename}` : "file: (memory)",
-    `showing: ${rowsShown} of ${ds.n_obs} observations`,
-    "",
-    "-".repeat(72),
-    body,
-    "",
-    "-".repeat(72),
-    "variables",
-    variableLines.length ? variableLines.join("\n") : "  (none)",
-  ].join("\n");
-}
-
 async function statusBarMenu(): Promise<void> {
   const sid = currentSessionId();
   const items = [
@@ -1055,7 +993,7 @@ async function runUtilityCode(code: string, label: string): Promise<RunResult | 
 async function newSession(): Promise<void> {
   const chosen = await vscode.window.showInputBox({
     prompt: "New Stata tab/session id",
-    value: nextSessionName(),
+    value: nextSessionName(knownSessionIds),
     validateInput: validateSessionId,
   });
   if (!chosen) return;
@@ -1263,20 +1201,6 @@ async function persistKnownSessionIds(): Promise<void> {
   await extensionContext?.workspaceState.update(SESSION_IDS_KEY, ids);
 }
 
-function validateSessionId(value: string): string | null {
-  return SESSION_ID_RE.test(value)
-    ? null
-    : "session id must match [A-Za-z_][A-Za-z0-9_]{0,31}";
-}
-
-function nextSessionName(): string {
-  for (let i = 1; i < 1000; i++) {
-    const candidate = `session${i}`;
-    if (!knownSessionIds.has(candidate)) return candidate;
-  }
-  return "session";
-}
-
 function sessionSortKey(sessionId: string, current: string): string {
   if (sessionId === current) return `0-${sessionId}`;
   if (sessionId === "main") return "1-main";
@@ -1429,21 +1353,4 @@ function bundleDirectoryName(entry: RunHistoryEntry): string {
 
 function escapeStataPath(fsPath: string): string {
   return fsPath.replace(/\\/g, "/").replace(/"/g, '""');
-}
-
-function matrixToTsv(name: string, matrix: Matrix): string {
-  const rows = matrix.rows ?? [];
-  const cols = matrix.cols ?? [];
-  const values = matrix.values ?? [];
-  const lines = [`# ${name}`, ["", ...cols].join("\t")];
-  for (let i = 0; i < values.length; i++) {
-    const rowLabel = rows[i] ?? String(i + 1);
-    lines.push([rowLabel, ...values[i].map(formatMatrixValue)].join("\t"));
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function formatMatrixValue(value: number | null): string {
-  if (value === null) return "";
-  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(12)));
 }

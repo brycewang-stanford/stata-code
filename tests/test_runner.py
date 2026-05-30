@@ -237,6 +237,8 @@ class TestGraphCapture:
         assert g.ref.startswith("graph://")
         assert g.ref.endswith("/0")
         assert g.inline is None  # ref mode is the default
+        assert g.source_command == "scatter price mpg, name(g_test_single)"
+        assert g.source_line == 1
         # PNG dimensions parsed
         assert g.width and g.width > 0
         assert g.height and g.height > 0
@@ -255,6 +257,11 @@ class TestGraphCapture:
         assert len(r.graphs) == 2
         names = {g.name for g in r.graphs}
         assert names == {"g_a", "g_b"}
+        by_name = {g.name: g for g in r.graphs}
+        assert by_name["g_a"].source_command == "scatter price mpg, name(g_a)"
+        assert by_name["g_b"].source_command == "histogram weight, name(g_b)"
+        assert by_name["g_a"].source_line == 2
+        assert by_name["g_b"].source_line == 3
         # refs are unique per index
         assert len({g.ref for g in r.graphs}) == 2
 
@@ -609,16 +616,31 @@ class TestMultiSession:
         r3 = execute('display "still here"', session_id="alt")
         assert r3.dataset.n_obs == 74
 
+    def test_schema_compatible_session_ids_are_supported(self):
+        from stata_code.core.runner import execute, list_sessions
+
+        r_dash = execute('display "x"', session_id="my-session")
+        assert r_dash.ok
+        assert r_dash.session_id == "my-session"
+        assert r_dash.dataset.frame.startswith("_sc_")
+
+        r_digit = execute('display "x"', session_id="9abc")
+        assert r_digit.ok
+        assert r_digit.session_id == "9abc"
+        assert r_digit.dataset.frame.startswith("_sc_")
+
+        ids = {s["session_id"] for s in list_sessions()}
+        assert "my-session" in ids
+        assert "9abc" in ids
+
     def test_invalid_session_id_rejected(self):
         from stata_code.core.runner import execute
 
-        # `-` is permitted by the schema regex but not by Stata frame names
-        with pytest.raises(ValueError):
-            execute('display "x"', session_id="my-session")
+        with pytest.raises(ValueError, match=r"\[A-Za-z0-9_-\]"):
+            execute('display "x"', session_id="my session")
 
-        # leading digit
-        with pytest.raises(ValueError):
-            execute('display "x"', session_id="9abc")
+        with pytest.raises(ValueError, match=r"\[A-Za-z0-9_-\]"):
+            execute('display "x"', session_id="host-7:main")
 
     def test_list_sessions_includes_main_plus_named(self):
         from stata_code.core.runner import execute, list_sessions

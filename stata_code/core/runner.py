@@ -19,6 +19,7 @@ in SCHEMA.md §8.
 from __future__ import annotations
 
 import functools
+import hashlib
 import re
 import tempfile
 import threading
@@ -762,8 +763,9 @@ def execute(
     Raises PystataNotAvailable if Stata cannot be initialized.
 
     Multi-session: `session_id="main"` routes to Stata's master frame
-    (`default`); any other valid Stata-name routes to a same-named Stata
-    frame, created on demand. Frames isolate **data** (variables and
+    (`default`); other schema-compatible ids route to same-named Stata
+    frames when possible, or to deterministic private frame names when the
+    public id is not legal in Stata. Frames isolate **data** (variables and
     observations), but `r()`, `e()`, scalars, and macros remain global
     across frames — agents needing full isolation should use separate
     processes.
@@ -821,6 +823,9 @@ def execute(
     # will overwrite r() if they care about return values.
     pre_graphs = (
         _list_graph_names(rt) if include_graphs != "none" else []
+    )
+    graph_source_hints, unnamed_graph_source_hints = (
+        _graph_source_hints(code) if include_graphs != "none" else ({}, [])
     )
 
     stdout_text, rc, err_msg = rt.run_capture(code)
@@ -890,6 +895,8 @@ def execute(
             pre_existing=pre_graphs,
             fmt=gfmt,
             inline=(include_graphs == "inline"),
+            source_hints=graph_source_hints,
+            unnamed_source_hints=unnamed_graph_source_hints,
         )
     else:
         graphs = []
@@ -1001,25 +1008,44 @@ def _last_estimation_cmd(rt: Any) -> str | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _STATA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_MAPPED_FRAME_PREFIX = "_sc_"
+_session_frame_map: dict[str, str] = {}
+_frame_session_map: dict[str, str] = {}
 
 
 def _frame_for_session(session_id: str) -> str:
     """Map a session_id to a Stata frame name.
 
-    `"main"` → Stata's master frame `"default"`. Any other id must be a
-    Stata-valid name (`[A-Za-z_][A-Za-z0-9_]*`). The schema permits `-` in
-    session_id, but Stata frame names disallow it; v0.1 rejects.
+    ``"main"`` maps to Stata's master frame ``"default"``. Public session
+    ids follow the schema pattern ``[A-Za-z0-9_-]+``; ids that are not legal
+    Stata frame names are routed through a deterministic private frame name.
     """
     if session_id == "main":
         return "default"
-    if not _STATA_NAME_RE.match(session_id):
+    if not _SESSION_ID_RE.fullmatch(session_id):
         raise ValueError(
-            f"session_id {session_id!r} is not a valid Stata frame name. "
-            "Use only letters, digits, and underscore; first char must be "
-            "a letter or underscore. (v0.1 limitation.)"
+            f"session_id must match [A-Za-z0-9_-]+; got {session_id!r}. "
+            "':' is reserved for future remote prefixing."
         )
-    return session_id
+    if _STATA_NAME_RE.fullmatch(session_id) and not session_id.startswith(
+        _MAPPED_FRAME_PREFIX
+    ):
+        return session_id
+    mapped = _session_frame_map.get(session_id)
+    if mapped is None:
+        digest = hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:24]
+        mapped = f"{_MAPPED_FRAME_PREFIX}{digest}"
+        _session_frame_map[session_id] = mapped
+        _frame_session_map[mapped] = session_id
+    return mapped
+
+
+def _session_for_frame(frame_name: str) -> str:
+    if frame_name == "default":
+        return "main"
+    return _frame_session_map.get(frame_name, frame_name)
 
 
 def _list_frame_names(rt: Any) -> list[str]:
@@ -1047,7 +1073,7 @@ def list_sessions() -> list[dict[str, Any]]:
         return []
     sessions: list[dict[str, Any]] = []
     for fname in _list_frame_names(rt):
-        sid = "main" if fname == "default" else fname
+        sid = _session_for_frame(fname)
         # n_obs from each frame; switching is needed since Frame helpers
         # operate on the current working frame for getObsTotal indirectly.
         # Easier: query c(N) after switching.
@@ -1168,6 +1194,43 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+_GRAPH_NAME_RE = re.compile(r"\bname\(\s*([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+_GRAPH_COMMAND_RE = re.compile(
+    r"^\s*(?:"
+    r"graph\s+\w+|"
+    r"twoway|scatter|line|connected|histogram|kdensity|lowess|lfit|qfit|"
+    r"coefplot|binscatter"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _graph_source_hints(code: str) -> tuple[dict[str, tuple[str, int]], list[tuple[str, int]]]:
+    """Best-effort map from graph names to the submitted source line.
+
+    Stata does not expose a graph's source command after creation, so this is
+    intentionally heuristic. Named graphs are reliable because the `name(...)`
+    option is echoed in the user code. Unnamed graph commands are retained in
+    order and only attached when there is exactly one new graph, or when the
+    number of unnamed hints matches the number of otherwise-unattributed new
+    graphs.
+    """
+    named: dict[str, tuple[str, int]] = {}
+    unnamed: list[tuple[str, int]] = []
+    for line_no, raw in enumerate(code.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("*", "//")):
+            continue
+        if not _GRAPH_COMMAND_RE.search(stripped):
+            continue
+        name_match = _GRAPH_NAME_RE.search(stripped)
+        if name_match:
+            named[name_match.group(1)] = (stripped, line_no)
+        else:
+            unnamed.append((stripped, line_no))
+    return named, unnamed
+
+
 def _png_dimensions(data: bytes) -> tuple[int | None, int | None]:
     """Best-effort width/height from a PNG IHDR chunk."""
     if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
@@ -1196,6 +1259,8 @@ def _collect_graphs(
     pre_existing: list[str],
     fmt: GraphFormat,
     inline: bool,
+    source_hints: dict[str, tuple[str, int]] | None = None,
+    unnamed_source_hints: list[tuple[str, int]] | None = None,
 ) -> list[GraphInfo]:
     """Capture graphs that user code newly created.
 
@@ -1208,6 +1273,12 @@ def _collect_graphs(
     new_names = [n for n in after_names if n not in pre_existing]
     if not new_names:
         return []
+    source_hints = source_hints or {}
+    unnamed_source_hints = unnamed_source_hints or []
+    unattributed_names = [n for n in new_names if n not in source_hints]
+    unnamed_by_graph: dict[str, tuple[str, int]] = {}
+    if len(unattributed_names) == len(unnamed_source_hints):
+        unnamed_by_graph = dict(zip(unattributed_names, unnamed_source_hints, strict=False))
 
     fmt_str = fmt.value
     out: list[GraphInfo] = []
@@ -1239,6 +1310,7 @@ def _collect_graphs(
                     "height": height,
                 },
             )
+            source = source_hints.get(gname) or unnamed_by_graph.get(gname)
             out.append(
                 GraphInfo(
                     ref=ref,
@@ -1246,8 +1318,8 @@ def _collect_graphs(
                     format=fmt,
                     width=width,
                     height=height,
-                    source_command=None,  # graph source attribution is not yet pinpointed
-                    source_line=None,
+                    source_command=source[0] if source else None,
+                    source_line=source[1] if source else None,
                     inline=_b64(data) if inline else None,
                 )
             )

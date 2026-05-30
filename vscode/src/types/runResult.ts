@@ -151,9 +151,16 @@ export interface StataWarning {
 }
 
 export interface StataInfo {
-  version: string;
+  version: string | null;
   edition: StataEdition;
   backend: Backend;
+}
+
+export interface OriginInfo {
+  path: string | null;
+  kind: string | null;
+  label: string | null;
+  cell_id: string | null;
 }
 
 export interface RunResult {
@@ -163,7 +170,7 @@ export interface RunResult {
   request_id: string;
   started_at: string; // ISO 8601 UTC ms
   elapsed_ms: number;
-  stata_elapsed_ms: number;
+  stata_elapsed_ms: number | null;
   stata: StataInfo;
   log: LogInfo;
   results: ResultsInfo;
@@ -171,6 +178,7 @@ export interface RunResult {
   graphs: GraphInfo[];
   warnings: StataWarning[];
   error: ErrorInfo | null;
+  origin?: OriginInfo | null;
   schema_version: string;
   capabilities: string[];
 }

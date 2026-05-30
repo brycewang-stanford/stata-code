@@ -119,6 +119,26 @@ _STDERR_CRASH_WORKER = textwrap.dedent(
 ).strip()
 
 
+_INVALID_REQUEST_WORKER = textwrap.dedent(
+    """
+    import json, sys
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        resp = {
+            "id": req["id"],
+            "ok": False,
+            "error": "ValueError: bad caller option",
+            "error_kind": "invalid_request",
+        }
+        sys.stdout.write(json.dumps(resp) + "\\n")
+        sys.stdout.flush()
+    """
+).strip()
+
+
 _FERRY_WORKER = textwrap.dedent(
     """
     import base64, json, sys
@@ -224,6 +244,22 @@ class TestWorkerProcess:
         finally:
             w.kill()
 
+    def test_worker_invalid_request_bubbles_as_value_error(self):
+        w = WorkerProcess("s1", worker_cmd=_cmd_for(_INVALID_REQUEST_WORKER))
+        try:
+            with pytest.raises(ValueError, match="bad caller option"):
+                w.execute("anything", {"session_id": "s1"}, timeout_ms=5000)
+        finally:
+            w.kill()
+
+    def test_simple_op_invalid_request_bubbles_as_value_error(self):
+        w = WorkerProcess("s1", worker_cmd=_cmd_for(_INVALID_REQUEST_WORKER))
+        try:
+            with pytest.raises(ValueError, match="bad caller option"):
+                w.send_simple_op("ping", timeout_ms=5000, spawn=True)
+        finally:
+            w.kill()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SessionPool: per-session workers, capacity, ref ferrying, error mapping.
@@ -314,6 +350,14 @@ class TestSessionPool:
             assert r.ok is False
             assert r.rc == -1
             assert r.error is not None and r.error.kind is ErrorKind.ADAPTER_CRASH
+        finally:
+            pool.shutdown()
+
+    def test_invalid_request_is_not_adapter_crash(self):
+        pool = SessionPool(worker_cmd=_cmd_for(_INVALID_REQUEST_WORKER))
+        try:
+            with pytest.raises(ValueError, match="bad caller option"):
+                pool.execute("noop", session_id="s", timeout_ms=5000)
         finally:
             pool.shutdown()
 
@@ -471,4 +515,14 @@ class TestEndToEndWithStata:
         # poison the session.
         r = pool_execute("display 2 + 2", session_id="e2e_recover", timeout_ms=60_000)
         assert r.ok is True
+        assert "4" in (r.log.head + r.log.tail)
+
+    def test_schema_compatible_session_id_with_dash(self):
+        r = pool_execute(
+            "display 2 + 2",
+            session_id="model-a",
+            timeout_ms=60_000,
+        )
+        assert r.ok is True
+        assert r.session_id == "model-a"
         assert "4" in (r.log.head + r.log.tail)

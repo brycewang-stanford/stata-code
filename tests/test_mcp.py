@@ -349,6 +349,54 @@ class TestDispatch:
         assert "include_full_log" in body["error"]
         assert "boolean" in body["error"].lower()
 
+    def test_stata_run_maps_pool_value_error_to_invalid_request(self, monkeypatch):
+        from stata_code.mcp import server
+
+        def reject(*_args, **_kwargs):
+            raise ValueError("bad caller option")
+
+        monkeypatch.setattr(server, "pool_execute", reject)
+
+        out = asyncio.run(server._dispatch("stata_run", {"code": "display 1"}))
+        assert out.isError is True
+        body = _json_body(out)
+        assert body["kind"] == "invalid_request"
+        assert "bad caller option" in body["error"]
+
+    def test_list_runs_rejects_bool_offset(self):
+        from stata_code.mcp.server import _dispatch
+
+        out = asyncio.run(_dispatch("list_runs", {"log_dir": "/tmp/x", "offset": True}))
+        assert out.isError is True
+        body = _json_body(out)
+        assert body["kind"] == "invalid_request"
+        assert "offset" in body["error"]
+
+    def test_list_runs_passes_offset(self, monkeypatch):
+        from stata_code.mcp import server
+
+        def fake_list_runs(**kwargs):
+            assert kwargs["offset"] == 2
+            return {
+                "log_dir": "/tmp/x",
+                "scanned_count": 0,
+                "match_count": 0,
+                "skipped_count": 0,
+                "limit": kwargs["limit"],
+                "offset": kwargs["offset"],
+                "truncated": False,
+                "runs": [],
+            }
+
+        monkeypatch.setattr(server, "_list_runs", fake_list_runs)
+
+        out = asyncio.run(
+            server._dispatch("list_runs", {"log_dir": "/tmp/x", "limit": 5, "offset": 2})
+        )
+        body = _json_body(out)
+        assert body["limit"] == 5
+        assert body["offset"] == 2
+
     def test_notebook_insert_cell_rejects_string_at_start(self, tmp_path):
         from stata_code.mcp.server import _dispatch
 

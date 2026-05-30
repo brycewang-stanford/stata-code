@@ -2,7 +2,7 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.5 (May 2026).** Full UI surface — orange Stata title-bar
+> **Status: v0.6 (May 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / run history / logs / graphs panels,
 > syntax highlighting, outline/section navigation, code-lens cells and sections,
@@ -166,8 +166,11 @@ when the default console script cannot be found.
 | `stataCode.serverCommand` | `stata-code-mcp` | Command to spawn the MCP server |
 | `stataCode.serverArgs` | `[]` | Extra args passed to the server process |
 | `stataCode.pythonPath` | `""` | Fallback Python interpreter for `-m stata_code.mcp` |
-| `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*) |
+| `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*). Must match `[A-Za-z0-9_-]+`. |
 | `stataCode.includeFullLog` | `false` | Inline full log instead of fetching via `get_log(ref)` |
+| `stataCode.persistLogFiles` | `true` | Save file-backed runs as immutable log bundles next to the source file |
+| `stataCode.persistGeneratedFiles` | `true` | Copy newly-created tables/exports and captured graphs into the run bundle |
+| `stataCode.useDoFileDirectory` | `true` | `cd` Stata to the source `.do` file's directory before file-backed runs |
 
 ## TypeScript types
 
@@ -210,9 +213,8 @@ UI modules:
 | `src/diagnostics.ts` | inline error squigglies |
 | `src/graphPanel.ts` | graph webview (Save / Open / Refresh) |
 
-## Status / not yet shipped
+## Status / planned polish
 
-- Marketplace publishing
 - `.do` notebook editor (kept deliberately minimal in favor of code-lens cells)
 - Full paged/filterable dataset table view (the current button is a first-100-row preview)
 - Rich matrix formatting beyond TSV

@@ -255,7 +255,7 @@ The MCP server registers 15 tools:
 | `notebook_edit_cell` | Atomically replace one cell's source (preserves id, clears outputs) |
 | `notebook_insert_cell` | Insert a new cell with a fresh nbformat 4.5+ UUID |
 | `notebook_delete_cell` | Remove a cell by id |
-| `list_runs` | Query run-bundle manifests (filter by notebook / cell_id / session / since / ok) |
+| `list_runs` | Query run-bundle manifests (filter by notebook / cell_id / session / since / ok, page with limit / offset) |
 
 For modern MCP clients, these tools now return structured results through
 `structuredContent` with `outputSchema` metadata, while still keeping the
@@ -409,9 +409,9 @@ stata_code/
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - `pystata`-based runner with native-typed `r()`, `e()`, and matrices
-- Multi-session via Stata frames
+- Multi-session via Stata frames (`session_id` accepts `[A-Za-z0-9_-]+`; ids such as `model-a` are mapped to private legal frame names internally while the public id is echoed back)
 - Per-line error attribution: line number, context, commands_executed
-- Graph capture: `png` / `svg` / `pdf` with ref store
+- Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 32-kind error taxonomy with canonical suggestions
@@ -420,7 +420,7 @@ stata_code/
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
 - Per-cell repair loop on `.ipynb` via `notebook_outline` / `notebook_get_cell` / `notebook_edit_cell` with optimistic-concurrency `expected_source` guards and `origin_cell_id` echo on `RunResult`
-- Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok)
+- Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok; page with limit / offset)
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, sidebar (sessions / last result / run history / logs / graphs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))

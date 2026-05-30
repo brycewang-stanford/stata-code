@@ -6,6 +6,40 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+### Added
+
+- **Schema-compatible public session ids end to end.** Runner, pool, MCP,
+  and VS Code now accept the schema's `[A-Za-z0-9_-]+` session ids. Values
+  that Stata cannot use as frame names, such as `model-a` or `9abc`, are
+  mapped to deterministic private frame names internally while results and
+  session listings keep echoing the public id.
+- **Graph source attribution.** Captured graphs now receive best-effort
+  `source_command` / `source_line` metadata from the submitted code for
+  named graphs and unambiguous unnamed graph creation.
+- **VS Code pure formatter/session helpers.** Log/data-preview/matrix
+  formatting and session-id rules moved out of `extension.ts` into small
+  tested modules, reducing the monolithic extension entrypoint.
+- **Run-index pagination.** `list_runs` now accepts `offset` alongside
+  `limit` so agents can page through long run-bundle histories.
+
+### Fixed
+
+- **Release-version drift guard.** `scripts/check_versions.py` now checks
+  `vscode/package-lock.json` plus the Claude plugin marketplace manifests,
+  and has regression tests for those release surfaces.
+- **Pool invalid-request classification.** Worker-side `ValueError` and
+  `NotImplementedError` now propagate as caller errors instead of being
+  wrapped as `adapter_crash`.
+- **VS Code RunResult type drift.** The hand-written TypeScript type now
+  includes `origin` and nullable schema fields such as `stata.version` and
+  `stata_elapsed_ms`.
+- **Run-index `since` filtering.** Date-only and seconds-only `since`
+  values are normalized to canonical millisecond UTC before comparison, and
+  malformed values now raise a typed `since_invalid` error.
+- **Run-bundle manifest writes.** Manifest creation and post-run artifact
+  rewrites now use temp-file-and-rename writes with fsync so concurrent
+  `list_runs` readers do not observe torn JSON.
+
 ## 0.6.5 — 2026-05-22
 
 ### Fixed

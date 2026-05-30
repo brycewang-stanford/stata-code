@@ -221,7 +221,7 @@ MCP server 注册了 15 个工具：
 | `notebook_edit_cell` | 原子替换 cell 源代码（保留 id，清空 outputs） |
 | `notebook_insert_cell` | 插入新 cell，分配新的 nbformat 4.5+ UUID |
 | `notebook_delete_cell` | 按 id 删除 cell |
-| `list_runs` | 查询 run-bundle manifest（按 notebook / cell_id / session / since / ok 过滤） |
+| `list_runs` | 查询 run-bundle manifest（按 notebook / cell_id / session / since / ok 过滤，用 limit / offset 翻页） |
 
 对于新版 MCP 客户端，这些工具会返回 `structuredContent`，并在 tool
 metadata 里声明 `outputSchema`；同时仍保留序列化 JSON text block，兼容旧客户端。
@@ -360,9 +360,9 @@ stata_code/
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - 基于 `pystata` 的 runner，原生类型化的 `r()`、`e()` 和矩阵
-- 通过 Stata frames 支持多 session
+- 通过 Stata frames 支持多 session（`session_id` 接受 `[A-Za-z0-9_-]+`；例如 `model-a` 这类 id 会在内部映射到合法的私有 frame 名，但返回结果仍回显公开 id）
 - 行级错误归属：line number、context、commands_executed
-- 图形捕获：`png` / `svg` / `pdf` + ref store
+- 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 32 类错误分类法 + 标准化建议
@@ -371,7 +371,7 @@ stata_code/
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`
 - `.ipynb` 单 cell 修复闭环：`notebook_outline` / `notebook_get_cell` / `notebook_edit_cell`，并通过 `expected_source` 做乐观并发控制；`stata_run` 回显 `origin_cell_id`
-- 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`
+- 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`，并用 limit / offset 翻页
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、侧边栏（sessions / last result / run history / logs / graphs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))

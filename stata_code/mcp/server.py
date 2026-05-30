@@ -422,6 +422,7 @@ _LIST_RUNS_OUTPUT_SCHEMA = _object_schema(
         "match_count": {"type": "integer"},
         "skipped_count": {"type": "integer"},
         "limit": {"type": "integer"},
+        "offset": {"type": "integer"},
         # Echoed only when the original ``limit`` exceeded the server-side
         # max (``_LIMIT_MAX``) and was clamped — lets callers distinguish a
         # genuine "more rows than asked for" truncation from a silent clamp.
@@ -435,6 +436,7 @@ _LIST_RUNS_OUTPUT_SCHEMA = _object_schema(
         "match_count",
         "skipped_count",
         "limit",
+        "offset",
         "truncated",
         "runs",
     ],
@@ -476,8 +478,11 @@ def _tool_definitions() -> list[Tool]:
                         "default": "main",
                         "description": (
                             "Session name. 'main' is the master frame; "
-                            "other names create/route to that Stata frame "
-                            "(data isolation only; r()/e() remain global)."
+                            "other names create/route to a persistent "
+                            "session. Values must match [A-Za-z0-9_-]+; "
+                            "ids that are not legal Stata frame names are "
+                            "mapped internally (data isolation only; "
+                            "r()/e() remain global in the direct runner)."
                         ),
                     },
                     "include_graphs": {
@@ -1026,9 +1031,10 @@ def _tool_definitions() -> list[Tool]:
                 "(then the dir is inferred as <origin_path parent>/log-"
                 "files). Filters compose with AND: cell_id, session_id, "
                 "ok, since (ISO 8601 UTC, lexicographic compare on "
-                "started_at). Read-only; never re-runs anything. Returns "
-                "compact summaries newest-first; callers fetch the full "
-                "manifest from the returned manifest_path if needed."
+                "started_at), limit, and offset. Read-only; never re-runs "
+                "anything. Returns compact summaries newest-first; callers "
+                "fetch the full manifest from the returned manifest_path if "
+                "needed."
             ),
             inputSchema={
                 "type": "object",
@@ -1058,9 +1064,9 @@ def _tool_definitions() -> list[Tool]:
                         "type": "string",
                         "description": (
                             "ISO 8601 UTC string, e.g. "
-                            "'2026-05-08T01:00:00.000Z'. Lexicographic "
-                            "compare against started_at; the boundary is "
-                            "inclusive (runs at exactly `since` are returned)."
+                            "'2026-05-08T01:00:00.000Z'. Date-only and "
+                            "seconds-only forms are accepted and normalized; "
+                            "the boundary is inclusive."
                         ),
                     },
                     "limit": {
@@ -1068,6 +1074,11 @@ def _tool_definitions() -> list[Tool]:
                         "default": 50,
                         "minimum": 1,
                         "maximum": 500,
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
                     },
                 },
             },
@@ -2049,6 +2060,10 @@ def _list_runs_tool(arguments: dict[str, Any]) -> Any:
     if isinstance(limit, bool) or not isinstance(limit, int):
         return _error_result("limit must be an integer", kind="invalid_request")
 
+    offset = arguments.get("offset", 0)
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        return _error_result("offset must be an integer", kind="invalid_request")
+
     payload = _list_runs(
         log_dir=log_dir,
         origin_path=origin_path,
@@ -2057,6 +2072,7 @@ def _list_runs_tool(arguments: dict[str, Any]) -> Any:
         ok=ok,
         since=since,
         limit=limit,
+        offset=offset,
     )
     return _json_result(payload)
 

@@ -185,7 +185,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | --- | --- | --- | --- |
 | `ok` | `bool` | yes | The authoritative success bit. Producers MUST keep `ok`, `rc`, and `error`-presence consistent. Consumers branch on `ok` first. |
 | `rc` | `int` | yes | Stata's `_rc` after the last user-submitted command (after any `capture` masking). `0` on success. Synthetic codes are negative: `-1` adapter crash, `-2` timeout, `-3` cancellation. |
-| `session_id` | `string` | yes | Defaults to `"main"`. MUST match `[A-Za-z0-9_:-]+`. The character `:` is reserved for future remote-prefixing (e.g., `host-7:main`), so v1 producers MUST NOT emit colons. |
+| `session_id` | `string` | yes | Defaults to `"main"`. MUST match `[A-Za-z0-9_-]+`. The character `:` is reserved for future remote-prefixing (e.g., `host-7:main`), so v1 producers MUST NOT emit colons. Producers may map ids that are not legal Stata frame names (for example `model-a` or `9abc`) to private frame names internally, but MUST echo the caller's `session_id` in the result. |
 | `request_id` | `string` | yes | Producer-generated, unique per call. Recommended format: ULID or UUIDv7 (sortable). Consumers use this for log correlation and `ref` lookup. |
 | `started_at` | `string` (ISO 8601 UTC) | yes | Timestamp at which the producer began handling the call, e.g. `"2026-04-30T14:22:08.123Z"`. Always UTC, always with millisecond precision. |
 | `elapsed_ms` | `int` | yes | Wall-clock duration of the call, in milliseconds. Minimum reported value is `1`; sub-millisecond calls round up. |
@@ -326,7 +326,7 @@ A summary of the active Stata frame *after* the command ran. Always populated.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `frame` | `string` | Active frame name. Stata's master frame is named `"default"`. ⚠ Note this is unrelated to `session_id == "main"`. |
+| `frame` | `string` | Active Stata frame name. Stata's master frame is named `"default"`. For session ids that are not legal Stata frame names, this may be a private generated frame name. ⚠ Note this is unrelated to `session_id == "main"`. |
 | `n_obs` | `int` | `_N`. |
 | `n_vars` | `int` | `c(k)`. |
 | `changed` | `bool` | `c(changed)`. ⚠ Stata sets this on *any* dataset-touching command, including no-op replaces — treat as a "may be dirty" hint, not a guarantee. |
@@ -481,7 +481,7 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | Option | Type | Default | Effect |
 | --- | --- | --- | --- |
 | `code` | `string` | — | The Stata code to run. |
-| `session_id` | `string` | `"main"` | Routes to a named persistent session. Pattern: `[A-Za-z0-9_-]+` (no colons in v1). |
+| `session_id` | `string` | `"main"` | Routes to a named persistent session. Pattern: `[A-Za-z0-9_-]+` (no colons in v1). The public id is stable even when the backend maps it to a private Stata frame name. |
 | `log_lines_head` | `int` | `20` | Lines to retain at the start of `log.head`. `0` disables. |
 | `log_lines_tail` | `int` | `20` | Lines to retain at the end of `log.tail`. `0` disables. |
 | `include_full_log` | `bool` | `false` | If `true`, the full log is placed inline in `log.head` regardless of size; `truncated: false`, `ref: null`. Use when token budget is generous and follow-up calls are expensive. |
@@ -514,7 +514,7 @@ The schema implies a small set of follow-up calls. Frontends expose them under c
 | `list_sessions()` | Enumerate live sessions. | `[{session_id, started_at, last_used_at, n_obs}, ...]` |
 | `reset_session(session_id?)` | Hard-reset a session (`clear all`). Invalidates all refs scoped to it. | `Result` with the cleared state. |
 | `stata_info()` | Report installed Stata. | `{stata: {...}, available: bool, capabilities: [...]}` |
-| `list_runs(log_dir or origin_path, cell_id?, session_id?, ok?, since?, limit?)` | Read-only query over persisted run-bundle manifests. Returns newest-first compact summaries of prior runs that landed under `<origin dir>/log-files/`. | `{log_dir, scanned_count, match_count, skipped_count, limit, truncated, runs: [...]}` |
+| `list_runs(log_dir or origin_path, cell_id?, session_id?, ok?, since?, limit?, offset?)` | Read-only query over persisted run-bundle manifests. Returns newest-first compact summaries of prior runs that landed under `<origin dir>/log-files/`. `since` accepts canonical millisecond UTC plus common date/seconds shorthands; `offset` pages through matches. | `{log_dir, scanned_count, match_count, skipped_count, limit, offset, truncated, runs: [...]}` |
 
 These are *additions* to `run()`. A minimal client only needs `run()` plus whichever auxiliaries match the truncation/ref behavior the producer can emit.
 
@@ -610,8 +610,9 @@ This section tracks how much of the schema is wired up in code. Not normative
 - `dataset` block — `n_obs`, `n_vars`, `frame`, `changed`, `filename`,
   and `variables` (capped at 200 entries).
 - `graphs[]` with `ref` + on-disk capture pipeline; format restricted to
-  `png` / `svg` / `pdf`; PNG `width` / `height` parsed from IHDR.
-  `inline` populated when `include_graphs="inline"`.
+  `png` / `svg` / `pdf`; PNG `width` / `height` parsed from IHDR;
+  best-effort `source_command` / `source_line` attribution from the
+  submitted code. `inline` populated when `include_graphs="inline"`.
 - Structured `error` — 32-kind enum, `varname` / `path` / `name`
   extracted from Stata's English error text by regex, structured
   `context` (`{before, failing, after}`), `commands_executed` parsed
@@ -620,7 +621,9 @@ This section tracks how much of the schema is wired up in code. Not normative
 - `request_id` (uuid4 hex), `started_at` (ISO 8601 UTC ms),
   `stata_elapsed_ms`, `capabilities`.
 - Multi-session via Stata frames — `session_id="main"` ↔ `default`
-  frame; other ids create / route to same-named frames.
+  frame; other ids create / route to same-named frames when Stata allows
+  it, or deterministic private frame names when the public id needs
+  mapping.
 - `Warning` is `{kind, message}`; five built-in patterns
   (`omitted_collinear`, `convergence`, `singular`, `boundary`, generic
   `note`) + dedup.

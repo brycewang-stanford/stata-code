@@ -38,7 +38,7 @@ Confirm the MCP server is wired up with `stata_info()` once per session. If it r
 | `notebook_edit_cell(path, cell_id, source, expected_source?)` | Atomic cell replace. Pass `expected_source` for optimistic concurrency. |
 | `notebook_insert_cell(path, after_cell_id, source, cell_type?)` | Insert a new cell with a fresh nbformat 4.5 uuid. |
 | `notebook_delete_cell(path, cell_id)` | Remove a cell. |
-| `list_runs(log_dir or origin_path, cell_id?, session_id?, ok?, since?, limit?)` | Search the on-disk run-bundle index — "show me my last failed run on this file". |
+| `list_runs(log_dir or origin_path, cell_id?, session_id?, ok?, since?, limit?, offset?)` | Search the on-disk run-bundle index — "show me my last failed run on this file". Use `offset` to page through long histories. |
 
 There are also MCP resources (`stata://schema/run-result`, `log://...`, `graph://...`, `matrix://...`) and prompts (`run_do_file_and_report`, `debug_stata_error`, `fix_and_rerun_until_passes`, `replication_audit`, `summarize_estimation_results`).
 
@@ -165,8 +165,8 @@ For notebook repair, use `notebook_edit_cell(path, cell_id, source, expected_sou
 
 ## 7. Multi-session etiquette
 
-- Default session is `"main"`. Long analyses with conflicting state belong in named sessions (`session_id="model_a"`).
-- The VS Code extension calls sessions "tabs". A new session lazily spawns a Stata frame; data does not cross.
+- Default session is `"main"`. Long analyses with conflicting state belong in named sessions (`session_id="model_a"` or `"model-a"`). Valid ids match `[A-Za-z0-9_-]+`; the backend maps ids that are not legal Stata frame names to private frames and still echoes the public id.
+- The VS Code extension calls sessions "tabs". A new session lazily spawns or maps to a Stata frame; data does not cross.
 - After heavy state changes, prefer `reset_session(session_id)` over rerunning the file with `clear all` — it is cheaper and clears refs.
 
 ## 8. Origin metadata (helpful for run-bundle audit)

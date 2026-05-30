@@ -606,7 +606,7 @@
         "stataCode.sessionId": {
           "type": "string",
           "default": "main",
-          "description": "Session id passed to stata_run. 'main' is the default Stata frame; other values create/route to same-named frames."
+          "description": "Session id passed to stata_run. Must match [A-Za-z0-9_-]+. 'main' is the default Stata session; other values create or route to persistent sessions."
         },
         "stataCode.includeFullLog": {
           "type": "boolean",

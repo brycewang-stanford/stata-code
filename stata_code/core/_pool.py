@@ -235,11 +235,19 @@ def _worker_main() -> int:
                 }
             else:
                 response = {"id": req_id, "ok": False, "error": f"unknown op: {op}"}
+        except (ValueError, NotImplementedError) as exc:
+            response = {
+                "id": req_id,
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "error_kind": "invalid_request",
+            }
         except Exception as exc:  # noqa: BLE001
             response = {
                 "id": req_id,
                 "ok": False,
                 "error": f"{type(exc).__name__}: {exc}",
+                "error_kind": "worker_error",
             }
         proto_out.write(json.dumps(response) + "\n")
         proto_out.flush()
@@ -354,6 +362,8 @@ class WorkerProcess:
                     f"worker response id mismatch: expected {req_id}, got {response.get('id')}"
                 )
             if not response.get("ok"):
+                if response.get("error_kind") == "invalid_request":
+                    raise ValueError(response.get("error", "<no error>"))
                 raise _WorkerError(
                     f"worker reported failure: {response.get('error', '<no error>')}"
                 )
@@ -478,6 +488,8 @@ class WorkerProcess:
                     f"worker response id mismatch: expected {req_id}, got {response.get('id')}"
                 )
             if not response.get("ok"):
+                if response.get("error_kind") == "invalid_request":
+                    raise ValueError(response.get("error", "<no error>"))
                 raise _WorkerError(
                     f"worker reported failure: {response.get('error', '<no error>')}"
                 )
