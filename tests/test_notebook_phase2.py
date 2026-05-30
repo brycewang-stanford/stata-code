@@ -221,6 +221,57 @@ def test_edit_cell_replaces_source_and_clears_outputs(tmp_path: Path) -> None:
     assert cell["id"] == "x"  # preserved
 
 
+def test_edit_cell_returns_cleared_outputs_summary_with_error(tmp_path: Path) -> None:
+    """A repair loop must not lose the failed cell's error context when it
+    rewrites the source — edit_cell surfaces it under cleared_outputs_summary."""
+    path = _write_nb(
+        tmp_path,
+        [
+            {
+                "cell_type": "code",
+                "id": "x",
+                "execution_count": 3,
+                "source": "regress y x",
+                "metadata": {},
+                "outputs": [
+                    {
+                        "output_type": "error",
+                        "ename": "StataError(varname_not_found)",
+                        "evalue": "variable y not found",
+                        "traceback": ["r(111);", "variable y not found"],
+                    }
+                ],
+            }
+        ],
+    )
+    result = edit_cell(path, cell_id="x", new_source="regress mpg weight")
+    summary = result["cleared_outputs_summary"]
+    assert summary is not None
+    assert summary["has_error"] is True
+    assert summary["error"]["evalue"] == "variable y not found"
+    # And the on-disk cell really was cleared.
+    assert _read(path)["cells"][0]["outputs"] == []
+
+
+def test_edit_cell_cleared_summary_none_when_no_outputs(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "x", "source": "di 1",
+          "metadata": {}, "outputs": []}],
+    )
+    result = edit_cell(path, cell_id="x", new_source="di 2")
+    assert result["cleared_outputs_summary"] is None
+
+
+def test_edit_cell_cleared_summary_none_for_markdown(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "markdown", "id": "m", "source": "# Old", "metadata": {}}],
+    )
+    result = edit_cell(path, cell_id="m", new_source="# New")
+    assert result["cleared_outputs_summary"] is None
+
+
 def test_edit_cell_preserves_markdown_metadata(tmp_path: Path) -> None:
     path = _write_nb(
         tmp_path,

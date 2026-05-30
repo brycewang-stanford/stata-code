@@ -841,7 +841,7 @@ def _atomic_write_notebook(
             os.fsync(f.fileno())
         if prev_signature is not None:
             current = _path_signature(path)
-            if current is not None and current != prev_signature:
+            if current != prev_signature:
                 raise NotebookError(
                     "notebook_changed_on_disk: the notebook was modified since "
                     "it was read; re-read the cell and retry the edit"
@@ -1006,11 +1006,10 @@ def edit_cell(
     # the caller is holding.
     cell_lacked_id = not (isinstance(cell.get("id"), str) and cell.get("id"))
     actual_id = _ensure_native_id(cell)
-    if cell_lacked_id and _all_cells_have_native_ids(cells):
-        # We just completed the notebook's id coverage; only now is it a valid
-        # 4.5 notebook, so it's safe to bump nbformat_minor. (Other cells may
-        # still be id-less in a multi-cell pre-4.5 file — edit_cell upgrades
-        # only its target — in which case we leave the minor version alone.)
+    if _all_cells_have_native_ids(cells):
+        # The notebook is fully id'd, so it is valid to declare nbformat 4.5.
+        # This also repairs files that already had ids while still claiming a
+        # pre-4.5 minor version.
         _ensure_nbformat_minor_5(nb)
     ctype = _cell_type(cell)
     cell["source"] = new_source
@@ -1159,7 +1158,8 @@ def delete_cell(
     # The pop shifts every later cell's array index, invalidating any synth
     # ids the caller might still be holding for those cells. Upgrade them
     # all to fresh UUIDs in one shot.
-    if _upgrade_all_pre_45_ids(cells):
+    _upgrade_all_pre_45_ids(cells)
+    if _all_cells_have_native_ids(cells):
         _ensure_nbformat_minor_5(nb)
     _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
