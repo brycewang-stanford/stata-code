@@ -904,6 +904,36 @@ def _upgrade_all_pre_45_ids(cells: list[Any]) -> int:
     return upgraded
 
 
+def _ensure_nbformat_minor_5(nb: dict[str, Any]) -> None:
+    """Raise ``nbformat_minor`` to at least 5 once a notebook carries cell ids.
+
+    The ``id`` field is an nbformat 4.5 feature. Assigning UUID ids to a
+    pre-4.5 notebook (which ``_ensure_native_id`` / ``_upgrade_all_pre_45_ids``
+    do on first mutation) would otherwise leave the file internally
+    inconsistent — declaring ``nbformat_minor < 5`` yet carrying 4.5-style
+    ids — which some stricter nbformat validators reject. ``nbformat`` (major)
+    is left untouched."""
+    minor = nb.get("nbformat_minor")
+    if not isinstance(minor, int) or minor < 5:
+        nb["nbformat_minor"] = 5
+
+
+def _all_cells_have_native_ids(cells: list[Any]) -> bool:
+    """True iff every dict cell carries a non-empty native ``id``.
+
+    nbformat 4.5 *requires* an id on every cell, so we only declare a notebook
+    to be 4.5 (via :func:`_ensure_nbformat_minor_5`) once that holds — bumping
+    the minor version while some cells are still id-less would produce a file
+    that is invalid at 4.5 but was valid at 4.4."""
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        raw = cell.get("id")
+        if not (isinstance(raw, str) and raw):
+            return False
+    return True
+
+
 def edit_cell(
     path: str | Path,
     *,
@@ -948,7 +978,14 @@ def edit_cell(
     # indices; ``edit_cell`` does not change cell positions, so leaving
     # the other pre-4.5 synthetic ids stable preserves any other handles
     # the caller is holding.
+    cell_lacked_id = not (isinstance(cell.get("id"), str) and cell.get("id"))
     actual_id = _ensure_native_id(cell)
+    if cell_lacked_id and _all_cells_have_native_ids(cells):
+        # We just completed the notebook's id coverage; only now is it a valid
+        # 4.5 notebook, so it's safe to bump nbformat_minor. (Other cells may
+        # still be id-less in a multi-cell pre-4.5 file — edit_cell upgrades
+        # only its target — in which case we leave the minor version alone.)
+        _ensure_nbformat_minor_5(nb)
     ctype = _cell_type(cell)
     cell["source"] = new_source
     if ctype == "code":
@@ -1045,6 +1082,10 @@ def insert_cell(
     new_id = _new_cell_id()
     new_cell = _build_cell(cell_type=cell_type, source=source, cell_id=new_id)
     cells.insert(target_index, new_cell)
+    # _upgrade_all_pre_45_ids gave every prior cell an id and the inserted cell
+    # carries one too, so the notebook is now fully id'd — i.e. a valid 4.5+
+    # file. Keep nbformat_minor consistent (no-op if it was already >= 5).
+    _ensure_nbformat_minor_5(nb)
     _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
     return {
@@ -1090,7 +1131,8 @@ def delete_cell(
     # The pop shifts every later cell's array index, invalidating any synth
     # ids the caller might still be holding for those cells. Upgrade them
     # all to fresh UUIDs in one shot.
-    _upgrade_all_pre_45_ids(cells)
+    if _upgrade_all_pre_45_ids(cells):
+        _ensure_nbformat_minor_5(nb)
     _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
     return {

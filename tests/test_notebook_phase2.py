@@ -822,3 +822,74 @@ def test_sequential_edits_do_not_trip_lost_update_guard(tmp_path: Path) -> None:
     edit_cell(path, cell_id="a", new_source="v1")
     edit_cell(path, cell_id="a", new_source="v2")
     assert _read(path)["cells"][0]["source"] == "v2"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# nbformat_minor consistency when upgrading pre-4.5 notebooks
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _write_pre45_nb(tmp_path: Path, cells: list[dict[str, Any]]) -> Path:
+    """A pre-4.5 notebook: nbformat_minor=4 and cells without native ``id``."""
+    nb = {"nbformat": 4, "nbformat_minor": 4, "metadata": {}, "cells": cells}
+    path = tmp_path / "old.ipynb"
+    path.write_text(json.dumps(nb), encoding="utf-8")
+    return path
+
+
+def test_edit_completing_id_coverage_bumps_minor(tmp_path: Path) -> None:
+    """Editing the only cell of a pre-4.5 notebook gives it an id, completing
+    id coverage — so nbformat_minor is bumped to 5."""
+    path = _write_pre45_nb(
+        tmp_path, [{"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []}]
+    )
+    synth = outline_notebook(path)["cells"][0]["cell_id"]
+    edit_cell(path, cell_id=synth, new_source="x=2")
+    nb = _read(path)
+    assert nb["nbformat_minor"] == 5
+    assert not nb["cells"][0]["id"].startswith("synth-")
+
+
+def test_edit_one_of_many_pre45_cells_keeps_minor_4(tmp_path: Path) -> None:
+    """edit_cell upgrades only its target. Bumping nbformat_minor to 5 while
+    sibling cells are still id-less would make the file *invalid* at 4.5, so
+    the minor version must stay at 4 until coverage is complete."""
+    path = _write_pre45_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "x=2", "metadata": {}, "outputs": []},
+        ],
+    )
+    target = outline_notebook(path)["cells"][0]["cell_id"]
+    edit_cell(path, cell_id=target, new_source="x=99")
+    nb = _read(path)
+    assert nb["nbformat_minor"] == 4  # not yet fully id'd → stays 4
+    assert not nb["cells"][0]["id"].startswith("synth-")
+    assert "id" not in nb["cells"][1]
+
+
+def test_insert_into_pre45_bumps_minor(tmp_path: Path) -> None:
+    path = _write_pre45_nb(
+        tmp_path, [{"cell_type": "code", "source": "x=1", "metadata": {}, "outputs": []}]
+    )
+    insert_cell(path, source="x=2", at_end=True)
+    nb = _read(path)
+    assert nb["nbformat_minor"] == 5
+    assert all(c.get("id") for c in nb["cells"])  # fully id'd → valid 4.5
+
+
+def test_delete_in_pre45_bumps_minor(tmp_path: Path) -> None:
+    path = _write_pre45_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "source": "drop", "metadata": {}, "outputs": []},
+            {"cell_type": "code", "source": "keep", "metadata": {}, "outputs": []},
+        ],
+    )
+    target = outline_notebook(path)["cells"][0]["cell_id"]
+    delete_cell(path, cell_id=target)
+    nb = _read(path)
+    assert nb["nbformat_minor"] == 5
+    assert nb["cells"][0]["source"] == "keep"
+    assert all(c.get("id") for c in nb["cells"])
