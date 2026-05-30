@@ -611,3 +611,44 @@ def test_edit_cell_keeps_other_synth_ids_usable_for_same_outline(
     assert [c["source"] for c in cells] == ["x=10", "x=20"]
     assert not cells[0]["id"].startswith("synth-")
     assert not cells[1]["id"].startswith("synth-")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Encoding robustness (UTF-8 BOM)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_load_notebook_tolerates_utf8_bom(tmp_path: Path) -> None:
+    """A leading UTF-8 BOM (some Windows editors / Git configs add one) is
+    valid content, not corruption — ``load_notebook`` must read through it
+    instead of failing with ``notebook_invalid_json``."""
+    nb = {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {},
+        "cells": [
+            {"cell_type": "code", "id": "a", "source": "sysuse auto",
+             "metadata": {}, "outputs": []}
+        ],
+    }
+    path = tmp_path / "bom.ipynb"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(nb).encode("utf-8"))
+    out = outline_notebook(path)
+    assert out["cell_count"] == 1
+    assert out["cells"][0]["cell_id"] == "a"
+
+
+def test_edit_cell_on_bom_notebook_roundtrips_without_bom(tmp_path: Path) -> None:
+    """Editing a BOM'd notebook succeeds and rewrites it BOM-less, matching
+    Jupyter's own saver (so the round-trip doesn't oscillate the BOM)."""
+    nb = {
+        "nbformat": 4, "nbformat_minor": 5, "metadata": {},
+        "cells": [{"cell_type": "code", "id": "a", "source": "old",
+                   "metadata": {}, "outputs": []}],
+    }
+    path = tmp_path / "bom.ipynb"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(nb).encode("utf-8"))
+    edit_cell(path, cell_id="a", new_source="new")
+    raw = path.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    assert json.loads(raw.decode("utf-8"))["cells"][0]["source"] == "new"

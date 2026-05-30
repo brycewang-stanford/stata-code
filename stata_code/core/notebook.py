@@ -92,7 +92,14 @@ def load_notebook(path: str | Path) -> dict[str, Any]:
     if not p.is_file():
         raise NotebookError(f"notebook_not_file: {p}")
     try:
-        text = p.read_text(encoding="utf-8")
+        # ``utf-8-sig`` strips an optional leading BOM (some Windows editors and
+        # Git configurations write one) while leaving BOM-less files untouched.
+        # Plain ``utf-8`` would surface a valid-but-BOM'd notebook as
+        # ``notebook_invalid_json`` — a false "your notebook is corrupt" that
+        # would derail an agent mid repair loop. Note the round-trip is
+        # intentionally BOM-less: ``_atomic_write_notebook`` writes plain UTF-8,
+        # matching Jupyter's own saver.
+        text = p.read_text(encoding="utf-8-sig")
     except OSError as exc:
         raise NotebookError(f"notebook_io_error: {exc}") from exc
     try:
@@ -715,12 +722,65 @@ def _resolve_path(path: str | Path) -> Path:
     return p
 
 
-def _atomic_write_notebook(path: Path, nb: dict[str, Any]) -> None:
+def _path_signature(path: Path) -> tuple[int, int] | None:
+    """Return ``(mtime_ns, size)`` for ``path``, or ``None`` if it can't be
+    stat'd. Used as a cheap change-detection token for the lost-update guard in
+    :func:`_atomic_write_notebook`."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _fsync_dir(dir_path: Path) -> None:
+    """Best-effort fsync of a directory so a rename is durable across a crash.
+
+    No-op on Windows (directory handles cannot be fsynced there) and on any
+    platform where opening the directory fd fails — durability is a hardening
+    bonus, never a hard requirement for the write to succeed.
+    """
+    if os.name == "nt":
+        return
+    try:
+        dir_fd = os.open(str(dir_path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
+
+
+def _atomic_write_notebook(
+    path: Path,
+    nb: dict[str, Any],
+    *,
+    prev_signature: tuple[int, int] | None = None,
+) -> None:
     """Write the notebook JSON atomically (temp file + rename in same dir).
 
     Uses ``json.dumps`` with ``indent=1`` to match the convention Jupyter
     uses on save (small diffs, line-stable). Trailing newline matches the
     nbformat saver behaviour.
+
+    Durability: the temp file's bytes are flushed and ``fsync``'d before the
+    rename, and the parent directory is ``fsync``'d after, so a crash between
+    write and rename cannot leave a truncated ``.ipynb`` in place of the
+    original. ``os.replace`` only guarantees the rename is atomic, not that
+    the new bytes reached disk first.
+
+    Lost-update guard: when ``prev_signature`` (the ``(mtime_ns, size)`` the
+    caller captured right after it read the notebook) is supplied, the file is
+    re-stat'd immediately before the rename. If it changed in between — e.g. a
+    concurrent ``edit_cell`` from another session committed first — the write
+    is aborted with ``notebook_changed_on_disk`` rather than silently
+    clobbering that other write. This narrows, but does not fully close, the
+    read-modify-write race (a sub-millisecond window remains between the
+    re-stat and the rename); it converts the common concurrent-edit case from
+    silent data loss into a typed, retryable error.
     """
     # Match Jupyter / nbformat.writes: indent=1 with no trailing space after
     # commas, so saved-by-stata-code notebooks diff cleanly against
@@ -736,9 +796,21 @@ def _atomic_write_notebook(path: Path, nb: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(serialised)
+            f.flush()
+            os.fsync(f.fileno())
+        if prev_signature is not None:
+            current = _path_signature(path)
+            if current is not None and current != prev_signature:
+                raise NotebookError(
+                    "notebook_changed_on_disk: the notebook was modified since "
+                    "it was read; re-read the cell and retry the edit"
+                )
         os.replace(tmp_name, path)
+        _fsync_dir(path.parent)
     except Exception:
-        # Best-effort cleanup of the temp file on any write/rename failure.
+        # Best-effort cleanup of the temp file on any write/rename failure
+        # (including the lost-update abort above), so we never leave a stray
+        # ``.nb.ipynb.*.tmp`` next to the notebook.
         try:
             os.unlink(tmp_name)
         except OSError:
