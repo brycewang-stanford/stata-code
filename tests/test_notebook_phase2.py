@@ -652,3 +652,156 @@ def test_edit_cell_on_bom_notebook_roundtrips_without_bom(tmp_path: Path) -> Non
     raw = path.read_bytes()
     assert not raw.startswith(b"\xef\xbb\xbf")
     assert json.loads(raw.decode("utf-8"))["cells"][0]["source"] == "new"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Duplicate cell-id ambiguity (nbformat violation, but it happens)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_edit_cell_duplicate_id_is_ambiguous(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "dup", "source": "a",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "dup", "source": "b",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    with pytest.raises(NotebookError, match="cell_id_ambiguous"):
+        edit_cell(path, cell_id="dup", new_source="x")
+    # Neither cell was touched — better than silently editing the first.
+    cells = _read(path)["cells"]
+    assert [c["source"] for c in cells] == ["a", "b"]
+
+
+def test_delete_cell_duplicate_id_is_ambiguous(tmp_path: Path) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "dup", "source": "a",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "dup", "source": "b",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    with pytest.raises(NotebookError, match="cell_id_ambiguous"):
+        delete_cell(path, cell_id="dup")
+    assert len(_read(path)["cells"]) == 2
+
+
+def test_get_cell_duplicate_id_disambiguated_by_index(tmp_path: Path) -> None:
+    """``get_cell`` accepts ``cell_index`` to resolve a duplicate-id notebook."""
+    from stata_code.core.notebook import get_cell
+
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "dup", "source": "first",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "dup", "source": "second",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    with pytest.raises(NotebookError, match="cell_id_ambiguous"):
+        get_cell(path, cell_id="dup")
+    out = get_cell(path, cell_index=1)
+    assert out["source"] == "second"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Lost-update guard (concurrent external write between read and rename)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+_CONCURRENT_NB = {
+    "nbformat": 4,
+    "nbformat_minor": 5,
+    "metadata": {"kernelspec": {"name": "python3"}},
+    "cells": [
+        {
+            "cell_type": "code",
+            "id": "a",
+            "source": "a much longer source written by a concurrent session",
+            "metadata": {},
+            "outputs": [],
+        }
+    ],
+}
+
+
+def _install_racing_load(monkeypatch: Any, path: Path) -> None:
+    """Patch ``load_notebook`` so a concurrent writer commits a different
+    (and differently-sized) version of the file right after we read it."""
+    import stata_code.core.notebook as nbmod
+
+    real_load = nbmod.load_notebook
+
+    def racing_load(p: Any) -> Any:
+        nb = real_load(p)
+        path.write_text(json.dumps(_CONCURRENT_NB), encoding="utf-8")
+        return nb
+
+    monkeypatch.setattr(nbmod, "load_notebook", racing_load)
+
+
+def test_edit_cell_aborts_on_concurrent_external_write(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "orig",
+          "metadata": {}, "outputs": []}],
+    )
+    _install_racing_load(monkeypatch, path)
+    with pytest.raises(NotebookError, match="notebook_changed_on_disk"):
+        edit_cell(path, cell_id="a", new_source="mine")
+    # The concurrent write survived; our stale edit was rejected, no temp left.
+    assert "concurrent session" in path.read_text(encoding="utf-8")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["nb.ipynb"]
+
+
+def test_insert_cell_aborts_on_concurrent_external_write(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "orig",
+          "metadata": {}, "outputs": []}],
+    )
+    _install_racing_load(monkeypatch, path)
+    with pytest.raises(NotebookError, match="notebook_changed_on_disk"):
+        insert_cell(path, source="new", at_end=True)
+    assert "concurrent session" in path.read_text(encoding="utf-8")
+
+
+def test_delete_cell_aborts_on_concurrent_external_write(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "a", "source": "orig",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "b", "source": "keep",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    _install_racing_load(monkeypatch, path)
+    with pytest.raises(NotebookError, match="notebook_changed_on_disk"):
+        delete_cell(path, cell_id="a")
+    assert "concurrent session" in path.read_text(encoding="utf-8")
+
+
+def test_sequential_edits_do_not_trip_lost_update_guard(tmp_path: Path) -> None:
+    """The guard must only fire on a genuine concurrent change; ordinary
+    back-to-back edits (each re-reads after the prior write) must succeed."""
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "v0",
+          "metadata": {}, "outputs": []}],
+    )
+    edit_cell(path, cell_id="a", new_source="v1")
+    edit_cell(path, cell_id="a", new_source="v2")
+    assert _read(path)["cells"][0]["source"] == "v2"

@@ -400,14 +400,28 @@ def _resolve_cell(
                 )
         return cell_index, cell
 
-    # cell_id only: scan, supporting both real and synth ids.
+    # cell_id only: scan, supporting both real and synth ids. nbformat 4.5+
+    # requires ids to be unique, but hand-merged or tool-generated notebooks do
+    # produce duplicates. Returning the *first* match would silently edit or
+    # delete the wrong cell — exactly the messy-notebook repair scenario these
+    # tools exist for — so surface the ambiguity as a typed error instead.
+    found: tuple[int, dict[str, Any]] | None = None
     for index, cell in enumerate(cells):
         if not isinstance(cell, dict):
             continue
         source = _source_to_str(cell.get("source"))
         actual_id, _ = _cell_id(cell, index, source)
         if actual_id == cell_id:
-            return index, cell
+            if found is not None:
+                raise NotebookError(
+                    f"cell_id_ambiguous: cell_id={cell_id!r} matches cells at "
+                    f"indices {found[0]} and {index}; the notebook has duplicate "
+                    "cell ids. Pass cell_index to target one (get_cell), or "
+                    "resolve the duplication before editing."
+                )
+            found = (index, cell)
+    if found is not None:
+        return found
     raise NotebookError(f"cell_not_found: cell_id={cell_id!r}")
 
 
@@ -910,6 +924,9 @@ def edit_cell(
         raise NotebookError("edit_source_invalid: new_source must be a string")
 
     p = _resolve_path(path)
+    # Capture the on-disk signature BEFORE reading so the lost-update guard can
+    # detect a concurrent write that lands between our read and our rename.
+    prev_signature = _path_signature(p)
     nb = load_notebook(p)
     cells = nb["cells"]
     index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
@@ -933,7 +950,7 @@ def edit_cell(
         cell["outputs"] = []
         cell["execution_count"] = None
 
-    _atomic_write_notebook(p, nb)
+    _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
     return {
         "path": str(p),
@@ -993,6 +1010,7 @@ def insert_cell(
         )
 
     p = _resolve_path(path)
+    prev_signature = _path_signature(p)
     nb = load_notebook(p)
     cells = nb["cells"]
 
@@ -1022,7 +1040,7 @@ def insert_cell(
     new_id = _new_cell_id()
     new_cell = _build_cell(cell_type=cell_type, source=source, cell_id=new_id)
     cells.insert(target_index, new_cell)
-    _atomic_write_notebook(p, nb)
+    _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
     return {
         "path": str(p),
@@ -1052,6 +1070,7 @@ def delete_cell(
     :func:`edit_cell`.
     """
     p = _resolve_path(path)
+    prev_signature = _path_signature(p)
     nb = load_notebook(p)
     cells = nb["cells"]
     index, cell = _resolve_cell(cells, cell_id=cell_id, cell_index=None)
@@ -1067,7 +1086,7 @@ def delete_cell(
     # ids the caller might still be holding for those cells. Upgrade them
     # all to fresh UUIDs in one shot.
     _upgrade_all_pre_45_ids(cells)
-    _atomic_write_notebook(p, nb)
+    _atomic_write_notebook(p, nb, prev_signature=prev_signature)
 
     return {
         "path": str(p),
