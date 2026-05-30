@@ -198,7 +198,9 @@ def outline_notebook(
             "path": <absolute path>,
             "nbformat": <int|None>,
             "kernelspec": {"name", "display_name", "language"} | None,
-            "cell_count": int,
+            "cell_count": int,            # number of well-formed (dict) cells
+            "array_length": int,          # raw len(cells), incl. malformed
+            "malformed_cell_indices": [int, ...],  # raw indices skipped
             "cells": [
                 {
                     "cell_id": str,
@@ -222,8 +224,10 @@ def outline_notebook(
         p = p.resolve()
 
     cells_out: list[dict[str, Any]] = []
+    malformed_cell_indices: list[int] = []
     for index, cell in enumerate(nb["cells"]):
         if not isinstance(cell, dict):
+            malformed_cell_indices.append(index)
             continue
         source = _source_to_str(cell.get("source"))
         cell_id, synthesized = _cell_id(cell, index, source)
@@ -263,11 +267,19 @@ def outline_notebook(
     else:
         ks = None
 
+    # `cell_count` counts only well-formed cells (back-compat), but each entry's
+    # `index` is the RAW array index. When a notebook has malformed (non-dict)
+    # entries the two diverge, so an agent that loops `range(cell_count)` by
+    # index would skip the tail. Expose the raw `array_length` and the skipped
+    # `malformed_cell_indices` so callers iterate the true range and know what
+    # was dropped.
     return {
         "path": str(p),
         "nbformat": nb.get("nbformat") if isinstance(nb.get("nbformat"), int) else None,
         "kernelspec": ks,
         "cell_count": len(cells_out),
+        "array_length": len(nb["cells"]),
+        "malformed_cell_indices": malformed_cell_indices,
         "cells": cells_out,
     }
 
@@ -977,7 +989,8 @@ def edit_cell(
     Windows line-ending mismatch doesn't read as content drift.
 
     Returns the updated cell summary (same shape as :func:`get_cell`'s
-    return, minus ``outputs_summary`` since outputs were cleared).
+    return, with ``cleared_outputs_summary`` carrying a compact summary of
+    any code-cell outputs that were removed).
     """
     if not isinstance(new_source, str):
         raise NotebookError("edit_source_invalid: new_source must be a string")
@@ -1012,6 +1025,11 @@ def edit_cell(
         # pre-4.5 minor version.
         _ensure_nbformat_minor_5(nb)
     ctype = _cell_type(cell)
+    outputs = cell.get("outputs") if ctype == "code" else None
+    outputs_list = outputs if isinstance(outputs, list) else []
+    cleared_outputs_summary = (
+        _summarise_outputs(outputs_list) if outputs_list else None
+    )
     cell["source"] = new_source
     if ctype == "code":
         cell["outputs"] = []
@@ -1032,6 +1050,7 @@ def edit_cell(
         "execution_count": None,
         "metadata": cell.get("metadata") or {},
         "previous_source": current_source,
+        "cleared_outputs_summary": cleared_outputs_summary,
     }
 
 

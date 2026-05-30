@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from stata_code.core.log_artifacts import (
     changed_output_files,
@@ -215,3 +216,19 @@ def test_manifest_writes_are_atomic_and_leave_no_temp(tmp_path: Path) -> None:
     # Manifest is complete, valid JSON after both writes.
     manifest = json.loads(Path(info.manifest_path).read_text(encoding="utf-8"))
     assert manifest["request_id"] == "0123456789abcdef"
+
+
+def test_manifest_directory_fsync_is_best_effort(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Directory fsync can be unsupported on some filesystems; the manifest
+    bytes are already safely renamed, so that durability bonus must not turn a
+    successful artifact write into a failure."""
+    import stata_code.core.log_artifacts as log_artifacts
+
+    def fail_fsync(_fd: int) -> None:
+        raise OSError("directory fsync unsupported")
+
+    monkeypatch.setattr(log_artifacts.os, "fsync", fail_fsync)
+
+    log_artifacts._fsync_directory(tmp_path)

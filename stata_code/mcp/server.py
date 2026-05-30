@@ -257,6 +257,8 @@ _NOTEBOOK_OUTLINE_OUTPUT_SCHEMA = _object_schema(
         "nbformat": {"type": ["integer", "null"]},
         "kernelspec": {"type": ["object", "null"]},
         "cell_count": {"type": "integer"},
+        "array_length": {"type": "integer"},
+        "malformed_cell_indices": {"type": "array", "items": {"type": "integer"}},
         "cells": {
             "type": "array",
             "items": _NOTEBOOK_CELL_OUTLINE_ITEM_SCHEMA,
@@ -337,6 +339,7 @@ _NOTEBOOK_EDIT_OUTPUT_SCHEMA = _object_schema(
         "execution_count": {"type": ["integer", "null"]},
         "metadata": {"type": "object"},
         "previous_source": {"type": "string"},
+        "cleared_outputs_summary": {"type": ["object", "null"]},
     },
     [
         "path",

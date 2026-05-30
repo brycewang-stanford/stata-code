@@ -53,6 +53,8 @@ def _fsync_directory(directory: Path) -> None:
         return
     try:
         os.fsync(fd)
+    except OSError:
+        pass
     finally:
         os.close(fd)
 

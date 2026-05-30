@@ -871,6 +871,32 @@ def test_edit_cell_aborts_on_concurrent_external_write(
     assert sorted(p.name for p in tmp_path.iterdir()) == ["nb.ipynb"]
 
 
+def test_edit_cell_aborts_on_concurrent_external_delete(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "orig",
+          "metadata": {}, "outputs": []}],
+    )
+
+    import stata_code.core.notebook as nbmod
+
+    real_load = nbmod.load_notebook
+
+    def deleting_load(p: Any) -> Any:
+        nb = real_load(p)
+        path.unlink()
+        return nb
+
+    monkeypatch.setattr(nbmod, "load_notebook", deleting_load)
+
+    with pytest.raises(NotebookError, match="notebook_changed_on_disk"):
+        edit_cell(path, cell_id="a", new_source="mine")
+    assert not path.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+
 def test_insert_cell_aborts_on_concurrent_external_write(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -942,6 +968,18 @@ def test_edit_completing_id_coverage_bumps_minor(tmp_path: Path) -> None:
     assert not nb["cells"][0]["id"].startswith("synth-")
 
 
+def test_edit_existing_id_coverage_repairs_minor(tmp_path: Path) -> None:
+    """A file may already contain ids while still claiming pre-4.5. Any
+    mutation should repair that metadata inconsistency."""
+    path = _write_pre45_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": "x=1",
+          "metadata": {}, "outputs": []}],
+    )
+    edit_cell(path, cell_id="a", new_source="x=2")
+    assert _read(path)["nbformat_minor"] == 5
+
+
 def test_edit_one_of_many_pre45_cells_keeps_minor_4(tmp_path: Path) -> None:
     """edit_cell upgrades only its target. Bumping nbformat_minor to 5 while
     sibling cells are still id-less would make the file *invalid* at 4.5, so
@@ -985,3 +1023,19 @@ def test_delete_in_pre45_bumps_minor(tmp_path: Path) -> None:
     assert nb["nbformat_minor"] == 5
     assert nb["cells"][0]["source"] == "keep"
     assert all(c.get("id") for c in nb["cells"])
+
+
+def test_delete_existing_id_coverage_repairs_minor(tmp_path: Path) -> None:
+    path = _write_pre45_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "a", "source": "drop",
+             "metadata": {}, "outputs": []},
+            {"cell_type": "code", "id": "b", "source": "keep",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    delete_cell(path, cell_id="a")
+    nb = _read(path)
+    assert nb["nbformat_minor"] == 5
+    assert [c["id"] for c in nb["cells"]] == ["b"]

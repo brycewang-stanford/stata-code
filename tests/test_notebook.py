@@ -71,6 +71,26 @@ def test_outline_lists_cells_and_kernelspec(tmp_path: Path) -> None:
     assert "summarize" in code["source_preview"] or "sysuse" in code["source_preview"]
 
 
+def test_outline_reports_raw_array_length_and_malformed_indices(
+    tmp_path: Path,
+) -> None:
+    path = _write_nb(
+        tmp_path,
+        [
+            {"cell_type": "code", "id": "a", "source": "di 1",
+             "metadata": {}, "outputs": []},
+            "not-a-cell",  # type: ignore[list-item]
+            {"cell_type": "code", "id": "b", "source": "di 2",
+             "metadata": {}, "outputs": []},
+        ],
+    )
+    out = outline_notebook(path)
+    assert out["cell_count"] == 2
+    assert out["array_length"] == 3
+    assert out["malformed_cell_indices"] == [1]
+    assert [c["index"] for c in out["cells"]] == [0, 2]
+
+
 def test_outline_synthesizes_id_when_missing(tmp_path: Path) -> None:
     path = _write_nb(
         tmp_path,

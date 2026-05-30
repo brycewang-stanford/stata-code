@@ -39,6 +39,10 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 - **Run-bundle manifest writes.** Manifest creation and post-run artifact
   rewrites now use temp-file-and-rename writes with fsync so concurrent
   `list_runs` readers do not observe torn JSON.
+- **Notebook repair hardening.** Cell edits now retain a compact summary of
+  outputs they clear, abort if the notebook is deleted between read and write,
+  repair fully-id'd pre-4.5 metadata, and expose malformed raw cell indices in
+  `notebook_outline`.
 
 ## 0.6.5 — 2026-05-22
 
