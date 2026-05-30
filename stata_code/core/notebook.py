@@ -489,6 +489,9 @@ _LOCATE_LIMIT_DEFAULT = 10
 _LOCATE_LIMIT_MAX = 100
 _LOCATE_PREVIEW_LINES = 3
 _ERROR_TEXT_LINE_MIN_LEN = 8
+# Upper bound on how many characters of one cell's source the regex engine
+# scans. See :func:`_score_regex` for the rationale.
+_REGEX_MAX_SCAN_CHARS = 1_000_000
 
 
 def _line_with_match(source: str, idx: int) -> tuple[int, str]:
@@ -546,7 +549,13 @@ def _score_snippet(source: str, snippet: str) -> tuple[float, int | None]:
 
 
 def _score_regex(source: str, pattern: re.Pattern[str]) -> tuple[float, int | None]:
-    m = pattern.search(source)
+    # Bound the haystack the backtracking `re` engine sees. The pattern is
+    # supplied by a trusted agent, not untrusted external input, so this is
+    # defense-in-depth: it keeps an accidentally-huge cell (e.g. a multi-MB
+    # pasted data dump) from feeding an unbounded string to `re`. It does NOT
+    # make matching safe against a deliberately catastrophic pattern — stdlib
+    # `re` offers no match timeout — which is acceptable for a trusted caller.
+    m = pattern.search(source[:_REGEX_MAX_SCAN_CHARS])
     if m is None:
         return 0.0, None
     line_no, _ = _line_with_match(source, m.start())
@@ -611,6 +620,8 @@ def locate_cells(
     - ``snippet`` — literal substring match (preferred for quoting code lines).
       Whitespace-normalised line-by-line fallback if the exact match fails.
     - ``regex`` — Python regex applied to the cell source (multiline mode).
+      The pattern is trusted (agent-supplied); only the first ~1,000,000
+      characters of each cell are scanned as a defensive bound.
     - ``error_text`` — pasted Stata/traceback text; the longest code-like line
       is treated as a fingerprint and located in the notebook.
 

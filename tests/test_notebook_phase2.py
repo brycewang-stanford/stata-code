@@ -111,6 +111,20 @@ def test_locate_error_text_uses_longest_codey_line(tmp_path: Path) -> None:
     assert out["matches"][0]["cell_id"] == "a"
 
 
+def test_locate_regex_bounds_haystack_but_finds_early_match(tmp_path: Path) -> None:
+    """A cell larger than the regex scan bound still matches near its start,
+    and the reported line number is correct (the bound is a prefix slice)."""
+    big = "needle_here\n" + ("x" * 1_100_000)
+    path = _write_nb(
+        tmp_path,
+        [{"cell_type": "code", "id": "a", "source": big,
+          "metadata": {}, "outputs": []}],
+    )
+    out = locate_cells(path, regex=r"needle_here")
+    assert out["match_count"] == 1
+    assert out["matches"][0]["line_in_cell"] == 1
+
+
 def test_locate_error_text_score_capped_below_exact_match(tmp_path: Path) -> None:
     """An error-text fingerprint is a fuzzy match and must score < 1.0, so an
     agent never confuses it with an exact snippet/regex hit (which score 1.0)."""
