@@ -30,6 +30,7 @@ Design notes:
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +182,46 @@ def _normalise_path(p: str | Path) -> str:
     return str(pp)
 
 
+# Accepted ``since`` spellings, most specific first. Each is normalised back to
+# the canonical millisecond-UTC form so the lexicographic comparison against
+# ``started_at`` (also canonical) is sound.
+_SINCE_FORMATS: tuple[str, ...] = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",  # canonical, e.g. 2026-05-08T01:00:00.000Z
+    "%Y-%m-%dT%H:%M:%SZ",     # no milliseconds
+    "%Y-%m-%dT%H:%M:%S.%f",   # canonical without trailing Z
+    "%Y-%m-%dT%H:%M:%S",      # no milliseconds, no Z
+    "%Y-%m-%dT%H:%MZ",        # no seconds
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%d",               # date only → start of that UTC day
+)
+
+
+def _normalize_since(since: str) -> str:
+    """Normalise a caller-supplied ``since`` to canonical millisecond-UTC.
+
+    ``started_at`` is always emitted as ``YYYY-MM-DDTHH:MM:SS.mmmZ`` and the
+    ``since`` filter compares byte-wise against it. That comparison is only
+    correct when ``since`` is in the *same* format: a date-only ``"2026-05-08"``
+    or a seconds-only ``"2026-05-08T01:00:00Z"`` would silently sort wrong
+    (e.g. date-only excludes every run that day because ``.`` > end-of-string).
+    Accept the common shorthands, re-emit the canonical form, and reject
+    anything unparseable with a typed ``since_invalid`` rather than comparing
+    garbage.
+    """
+    raw = since.strip()
+    for fmt in _SINCE_FORMATS:
+        try:
+            dt = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+    raise RunIndexError(
+        "since_invalid: expected an ISO 8601 UTC timestamp such as "
+        "'2026-05-08T01:00:00.000Z' (date-only and seconds-only forms are "
+        f"also accepted); got {since!r}"
+    )
+
+
 def _matches_filters(
     summary: dict[str, Any],
     *,
@@ -229,6 +270,7 @@ def list_runs(
     ok: bool | None = None,
     since: str | None = None,
     limit: int = _LIMIT_DEFAULT,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Return compact summaries of run-bundle manifests under ``log_dir``.
 
@@ -237,10 +279,17 @@ def list_runs(
     ``<origin_path parent>/log-files``.
 
     All filters are AND-ed together; all are optional. ``since`` is an ISO
-    8601 UTC string and is compared lexicographically (**inclusive**) against
-    ``started_at`` — runs at the exact ``since`` timestamp are returned.
-    Lexicographic compare is sound because both timestamps are emitted in a
-    fixed millisecond-precision UTC format.
+    8601 UTC timestamp compared lexicographically (**inclusive**) against
+    ``started_at`` — runs at the exact ``since`` timestamp are returned. It is
+    normalised to canonical millisecond-UTC first (date-only and seconds-only
+    forms are accepted); an unparseable value raises ``since_invalid`` rather
+    than comparing wrongly.
+
+    ``offset`` skips the first N matches (after newest-first sorting) so a
+    caller can page through a long history with repeated ``limit``/``offset``
+    calls. The scan itself is O(number of run directories); for very large
+    histories, narrow it with the ``origin_path`` / ``cell_id`` / ``session_id``
+    / ``since`` filters.
 
     Result shape::
 
@@ -250,8 +299,9 @@ def list_runs(
             "match_count": int,      # passed filters (may exceed limit)
             "skipped_count": int,    # malformed/missing manifests
             "limit": int,
-            "truncated": bool,       # True iff match_count > limit
-            "runs": [<summary>, ...] # ≤ limit, newest first
+            "truncated": bool,       # True iff more matches remain past
+                                     #   offset+limit
+            "runs": [<summary>, ...] # ≤ limit, newest first, starting at offset
         }
 
     Each ``runs`` entry has: request_id, session_id, started_at, elapsed_ms,
@@ -266,8 +316,14 @@ def list_runs(
     if limit > _LIMIT_MAX:
         limit = _LIMIT_MAX
 
+    # `bool` is an `int` subclass; reject it explicitly so ``offset=True`` does
+    # not silently page by one.
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise RunIndexError("offset_invalid: offset must be a non-negative integer")
+
     if since is not None and not isinstance(since, str):
         raise RunIndexError("since_invalid: since must be an ISO 8601 string")
+    since_norm = _normalize_since(since) if since is not None else None
 
     target = _resolve_log_dir(log_dir=log_dir, origin_path=origin_path)
     origin_path_norm: str | None = None
@@ -286,6 +342,7 @@ def list_runs(
             "match_count": 0,
             "skipped_count": 0,
             "limit": limit,
+            "offset": offset,
             "truncated": False,
             "runs": [],
         }
@@ -313,7 +370,7 @@ def list_runs(
             cell_id=cell_id,
             session_id=session_id,
             ok=ok,
-            since=since,
+            since=since_norm,
         ):
             continue
         matched.append(summary)
@@ -324,14 +381,16 @@ def list_runs(
 
     matched.sort(key=_sort_key, reverse=True)
 
+    page_end = offset + limit
     payload: dict[str, Any] = {
         "log_dir": str(target),
         "scanned_count": scanned,
         "match_count": len(matched),
         "skipped_count": skipped,
         "limit": limit,
-        "truncated": len(matched) > limit,
-        "runs": matched[:limit],
+        "offset": offset,
+        "truncated": len(matched) > page_end,
+        "runs": matched[offset:page_end],
     }
     if requested_limit != limit:
         # Caller asked for more than ``_LIMIT_MAX``. Echo the original so a

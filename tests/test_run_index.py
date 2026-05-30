@@ -235,6 +235,29 @@ def test_filter_by_since(tmp_path: Path) -> None:
     assert sorted(r["request_id"] for r in out["runs"]) == ["kept", "newer"]
 
 
+def test_filter_by_since_accepts_common_shorthands(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log-files"
+    _write_bundle(log_dir, name="a", request_id="old",
+                  started_at="2026-05-07T23:59:59.999Z")
+    _write_bundle(log_dir, name="b", request_id="kept",
+                  started_at="2026-05-08T00:00:00.000Z")
+    _write_bundle(log_dir, name="c", request_id="newer",
+                  started_at="2026-05-08T01:00:00.000Z")
+
+    date_only = list_runs(log_dir=log_dir, since="2026-05-08")
+    seconds_only = list_runs(log_dir=log_dir, since="2026-05-08T00:00:00Z")
+
+    assert sorted(r["request_id"] for r in date_only["runs"]) == ["kept", "newer"]
+    assert sorted(r["request_id"] for r in seconds_only["runs"]) == ["kept", "newer"]
+
+
+def test_invalid_since_raises(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log-files"
+    log_dir.mkdir()
+    with pytest.raises(RunIndexError, match="since_invalid"):
+        list_runs(log_dir=log_dir, since="not-a-date")
+
+
 def test_filters_compose_AND(tmp_path: Path) -> None:
     log_dir = tmp_path / "log-files"
     _write_bundle(log_dir, name="a", request_id="a",
@@ -320,6 +343,23 @@ def test_limit_caps_returned_runs_and_flags_truncated(tmp_path: Path) -> None:
     assert [r["request_id"] for r in out["runs"]] == ["r4", "r3"]
 
 
+def test_offset_pages_after_newest_first_sort(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log-files"
+    for i in range(5):
+        ts = f"2026-05-08T0{i}:00:00.000Z"
+        _write_bundle(log_dir, name=f"b{i}", request_id=f"r{i}", started_at=ts)
+    out = list_runs(log_dir=log_dir, limit=2, offset=2)
+    assert out["match_count"] == 5
+    assert out["limit"] == 2
+    assert out["offset"] == 2
+    assert out["truncated"] is True
+    assert [r["request_id"] for r in out["runs"]] == ["r2", "r1"]
+
+    last_page = list_runs(log_dir=log_dir, limit=2, offset=4)
+    assert last_page["truncated"] is False
+    assert [r["request_id"] for r in last_page["runs"]] == ["r0"]
+
+
 def test_invalid_limit_raises(tmp_path: Path) -> None:
     log_dir = tmp_path / "log-files"
     log_dir.mkdir()
@@ -340,6 +380,15 @@ def test_bool_limit_rejected(tmp_path: Path) -> None:
         list_runs(log_dir=log_dir, limit=True)  # type: ignore[arg-type]
     with pytest.raises(RunIndexError, match="limit_invalid"):
         list_runs(log_dir=log_dir, limit=False)  # type: ignore[arg-type]
+
+
+def test_invalid_offset_raises(tmp_path: Path) -> None:
+    log_dir = tmp_path / "log-files"
+    log_dir.mkdir()
+    with pytest.raises(RunIndexError, match="offset_invalid"):
+        list_runs(log_dir=log_dir, offset=-1)
+    with pytest.raises(RunIndexError, match="offset_invalid"):
+        list_runs(log_dir=log_dir, offset=True)  # type: ignore[arg-type]
 
 
 def test_huge_limit_clamped(tmp_path: Path) -> None:
