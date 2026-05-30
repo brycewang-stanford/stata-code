@@ -6,12 +6,55 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from stata_code.core.schema import LogFileInfo, StataInfo
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically (temp file + rename in same dir).
+
+    The bytes are flushed and ``fsync``'d before the rename so a reader — the
+    run index scans ``manifest.json`` concurrently with new runs — never
+    observes a torn or half-written file. ``update_run_artifact_manifest`` also
+    rewrites the manifest in place after graphs/outputs are copied; doing that
+    non-atomically risked a partial JSON that ``list_runs`` would skip.
+    """
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+        _fsync_directory(path.parent)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Best-effort durability for the rename entry itself."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    try:
+        fd = os.open(directory, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 _SAFE_PART_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _MAX_OUTPUT_ARTIFACT_BYTES = 50 * 1024 * 1024
@@ -128,7 +171,8 @@ def persist_run_log_files(
         policy="per_run_directory",
         append=False,
     )
-    manifest_path.write_text(
+    _atomic_write_text(
+        manifest_path,
         json.dumps(
             _manifest(
                 info=info,
@@ -151,7 +195,6 @@ def persist_run_log_files(
             sort_keys=True,
         )
         + "\n",
-        encoding="utf-8",
     )
     return info
 
@@ -280,9 +323,9 @@ def update_run_artifact_manifest(info: LogFileInfo) -> None:
         }
     )
     manifest["working_dir"] = info.working_dir
-    manifest_path.write_text(
+    _atomic_write_text(
+        manifest_path,
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
 
 
@@ -453,4 +496,3 @@ def _unique_file(path: Path) -> Path:
     raise FileExistsError(
         f"could not allocate unique artifact path under {path.parent}"
     )
-

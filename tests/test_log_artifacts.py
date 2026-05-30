@@ -182,3 +182,36 @@ def test_generated_outputs_are_copied_into_run_bundle(tmp_path: Path) -> None:
     manifest = json.loads(Path(info.manifest_path).read_text(encoding="utf-8"))
     assert manifest["files"]["outputs_dir"] == info.outputs_dir
     assert manifest["files"]["output_paths"] == info.output_paths
+
+
+def test_manifest_writes_are_atomic_and_leave_no_temp(tmp_path: Path) -> None:
+    """Both the initial manifest write and the post-copy rewrite go through the
+    atomic temp+rename helper, so a concurrent run-index reader never sees a
+    torn file and no `.tmp` scratch files are left behind."""
+    do_file = tmp_path / "t.do"
+    do_file.write_text("di 1\n", encoding="utf-8")
+    info = persist_run_log_files(
+        log_text="ok\n",
+        code="di 1\n",
+        origin_path=str(do_file),
+        origin_kind="file",
+        origin_label="t.do:1",
+        request_id="0123456789abcdef",
+        session_id="main",
+        started_at="2026-05-08T01:22:33.456Z",
+        elapsed_ms=7,
+        rc=0,
+        ok=True,
+        stata=_stata(),
+        working_dir=str(tmp_path),
+    )
+    # Force the in-place rewrite path too.
+    update_run_artifact_manifest(info)
+
+    run_dir = Path(info.directory)
+    names = [p.name for p in run_dir.iterdir()]
+    assert not any(n.endswith(".tmp") for n in names)
+    assert "manifest.json" in names
+    # Manifest is complete, valid JSON after both writes.
+    manifest = json.loads(Path(info.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["request_id"] == "0123456789abcdef"
