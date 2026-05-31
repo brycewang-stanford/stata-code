@@ -45,9 +45,9 @@
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.6 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. The test suite covers schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
+**Status: v0.7 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. The test suite covers schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
-Two workflows v0.6 explicitly supports for end users:
+Two workflows the current release explicitly supports for end users:
 
 - **Run Stata code from a Jupyter notebook.** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` registers a **Stata** kernel that the Jupyter Notebook UI, JupyterLab, and the VS Code Jupyter extension all pick up by name. Cells render Stata logs, graphs, and warnings inline (the kernel logo bundled since v0.5 makes it appear in VS Code's kernel picker too). See [As a Jupyter Kernel](#as-a-jupyter-kernel).
 - **Optional agent "fix and rerun" loop.** `stata_run` returns typed `error.kind/line/context` plus `suggestions` on every failure. By default Claude Code only reports diagnostics — but if you explicitly say "fix this and rerun until it passes", the agent uses the same fields to edit your `.do` file and re-call `stata_run` until the run is green. The repair loop is **opt-in**: failed runs are diagnostics first, not automatic rewrite permission. See [Error Recovery in Agent Workflows](#error-recovery-in-agent-workflows).
@@ -405,7 +405,7 @@ stata_code/
 
 ## Roadmap
 
-### Done (through v0.6 — May 2026)
+### Done (through v0.7 — May 2026)
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - `pystata`-based runner with native-typed `r()`, `e()`, and matrices
