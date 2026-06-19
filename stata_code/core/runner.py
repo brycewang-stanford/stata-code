@@ -1195,11 +1195,20 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
 
 
 _GRAPH_NAME_RE = re.compile(r"\bname\(\s*([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+# Stata's default in-memory graph name, (re)used by any graph command that
+# omits an explicit `name(...)` option. Capture/redraw detection keys off this.
+_DEFAULT_GRAPH_NAME = "Graph"
+# Commands that actually *draw* a graph (and thus create/overwrite an
+# in-memory graph). Deliberately excludes the `graph` utility subcommands
+# (export, display, dir, drop, describe, save, use, rename, set, copy, query,
+# replay) — those operate on existing graphs and must not be mistaken for a
+# redraw, or a bare `graph export` cell would spuriously re-surface a stale
+# graph.
 _GRAPH_COMMAND_RE = re.compile(
     r"^\s*(?:"
-    r"graph\s+\w+|"
-    r"twoway|scatter|line|connected|histogram|kdensity|lowess|lfit|qfit|"
-    r"coefplot|binscatter"
+    r"graph\s+(?:bar|hbar|box|hbox|dot|pie|twoway|matrix|combine)\b|"
+    r"twoway|scatter|line|connected|histogram|hist|kdensity|lpoly|lowess|"
+    r"lfit|qfit|coefplot|binscatter|marginsplot"
     r")\b",
     re.IGNORECASE,
 )
@@ -1262,19 +1271,40 @@ def _collect_graphs(
     source_hints: dict[str, tuple[str, int]] | None = None,
     unnamed_source_hints: list[tuple[str, int]] | None = None,
 ) -> list[GraphInfo]:
-    """Capture graphs that user code newly created.
+    """Capture graphs that user code newly created or redrew.
 
     Strategy: snapshot graph names before user code (`pre_existing`), call
-    after to find the post-existing list, take the set difference. For each
-    new graph: `graph display <name>` (makes it active), `graph export` to a
-    tmpfile, read bytes, store under a ref. Tmpfile is deleted after.
+    after to find the post-existing list. Capture a graph when its name is
+    genuinely new *or* when this cell's source shows it (re)drew that name.
+
+    The redraw case matters because Stata keeps only one in-memory graph per
+    name, so a command that overwrites an existing name (most commonly the
+    default ``Graph``, produced by any unnamed graph command) leaves the
+    ``graph dir`` name set unchanged. A pure set-difference against
+    `pre_existing` therefore misses it — which is why, in a persistent session
+    (Jupyter cell 2+, repeated MCP runs), only the first graph ever surfaced.
+
+    For each captured graph: `graph display <name>` (makes it active),
+    `graph export` to a tmpfile, read bytes, store under a ref. Tmpfile is
+    deleted after.
     """
     after_names = _list_graph_names(rt)
-    new_names = [n for n in after_names if n not in pre_existing]
-    if not new_names:
-        return []
     source_hints = source_hints or {}
     unnamed_source_hints = unnamed_source_hints or []
+
+    # Names this cell explicitly drew, inferred from its source: every
+    # `name(...)` option, plus the default graph when any unnamed graph
+    # command ran. These are re-captured even if they already existed, so an
+    # in-place redraw is not dropped.
+    redrawn = set(source_hints)
+    if unnamed_source_hints:
+        redrawn.add(_DEFAULT_GRAPH_NAME)
+
+    new_names = [
+        n for n in after_names if n not in pre_existing or n in redrawn
+    ]
+    if not new_names:
+        return []
     unattributed_names = [n for n in new_names if n not in source_hints]
     unnamed_by_graph: dict[str, tuple[str, int]] = {}
     if len(unattributed_names) == len(unnamed_source_hints):

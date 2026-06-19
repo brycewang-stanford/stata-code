@@ -265,6 +265,67 @@ class TestGraphCapture:
         # refs are unique per index
         assert len({g.ref for g in r.graphs}) == 2
 
+    def test_redrawn_default_graph_recaptured_each_cell(self, loaded_auto):
+        """Regression: in a persistent session every unnamed graph command
+        overwrites the default "Graph" in place, so a pure name set-diff sees
+        no new name on the 2nd+ run and captured nothing — only the first
+        Jupyter cell's graph displayed. Each redraw must now surface its own
+        graph. NOTE: deliberately no _clean_graphs between runs."""
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        r1 = execute("scatter price mpg")
+        assert len(r1.graphs) == 1
+        r2 = execute("scatter weight mpg")
+        assert len(r2.graphs) == 1  # was 0 before the fix
+        r3 = execute("histogram price")
+        assert len(r3.graphs) == 1
+
+    def test_redrawn_named_graph_recaptured(self, loaded_auto):
+        """A named graph redrawn under the same name across runs is captured
+        every time, not just the first."""
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        r1 = execute("scatter price mpg, name(g_redraw, replace)")
+        assert len(r1.graphs) == 1
+        r2 = execute("scatter weight mpg, name(g_redraw, replace)")
+        assert len(r2.graphs) == 1  # was 0 before the fix
+        assert r2.graphs[0].name == "g_redraw"
+
+    def test_no_graph_cell_after_graph_no_recapture(self, loaded_auto):
+        """A cell that draws nothing must not re-surface an existing graph
+        left over from an earlier cell."""
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        first = execute("scatter price mpg")
+        assert len(first.graphs) == 1
+        r = execute('display "just text, no graph"')
+        assert r.graphs == []
+
+    def test_graph_export_cell_does_not_recapture(self, loaded_auto, tmp_path):
+        """A utility-only cell (graph export of a prior graph) must not be
+        treated as a redraw — `graph export` is not a drawing command."""
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        execute("scatter price mpg")  # default Graph now exists
+        out = (tmp_path / "export.png").as_posix()
+        r = execute(f'graph export "{out}", replace')
+        assert r.graphs == []
+
+    def test_new_graph_with_untouched_graph_persisting(self, loaded_auto):
+        """When a cell draws one new named graph while an older, untouched
+        named graph still lives in memory, only the new one is captured."""
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        execute("scatter price mpg, name(g_keep)")
+        r = execute("histogram weight, name(g_fresh)")
+        assert len(r.graphs) == 1
+        assert r.graphs[0].name == "g_fresh"
+
     def test_get_graph_returns_bytes(self, loaded_auto):
         from stata_code.core.runner import execute, get_graph
 

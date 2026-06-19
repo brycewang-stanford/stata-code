@@ -223,6 +223,8 @@ log-files/
 *.smcl
 *.dta
 !tests/fixtures/*.dta
+# Graph-export artifact written by the runner graph-capture tests
+stata_code_test_export.png
 
 # macOS
 .DS_Store
