@@ -102,6 +102,35 @@ def _word_at_cursor(code: str, cursor_pos: int) -> tuple[str, int, int]:
     return code[start:end], start, end
 
 
+def _strip_command_echo(log_text: str) -> str:
+    """Drop Stata's do-file command echo from a captured cell log.
+
+    pystata runs a multi-line cell as a temporary do-file, and Stata echoes
+    every submitted command — ``. cmd`` for the first line of each command and
+    ``> ...`` for wrapped/continued lines — regardless of the ``echo=False``
+    flag (which only suppresses echo for a single inline command). In a
+    notebook the input cell already shows the source, so the echo is pure
+    duplication; for a cell with no textual output (e.g. a graph) the echo is
+    the *only* thing shown, which reads as a useless repeat of the code.
+
+    Strip the echoed command/continuation lines, keep genuine command output,
+    and collapse the blank-line runs the removal leaves behind. Echoed lines
+    always start at column 0 with ``. `` (dot-space) or ``> `` (continuation);
+    real Stata output never begins that way, so this is safe.
+    """
+    kept: list[str] = []
+    for line in log_text.split("\n"):
+        if line.startswith(". ") or line.startswith("> "):
+            continue
+        # Collapse leading and consecutive blank lines left by removed echoes.
+        if not line.strip() and (not kept or not kept[-1].strip()):
+            continue
+        kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return "\n".join(kept)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Kernel
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,8 +184,9 @@ class StataKernel(_KernelBase):
         self._last_result = result
 
         if not silent:
-            if result.log.head:
-                self._stream("stdout", result.log.head + "\n")
+            log_text = _strip_command_echo(result.log.head) if result.log.head else ""
+            if log_text:
+                self._stream("stdout", log_text + "\n")
             if result.warnings:
                 for w in result.warnings:
                     self._stream("stderr", f"[{w.kind}] {w.message}\n")

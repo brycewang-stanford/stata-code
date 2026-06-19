@@ -130,6 +130,73 @@ class TestStataKernelClass:
         finally:
             kernel_module._HAS_IPYKERNEL = original
 
+    def test_do_execute_suppresses_pure_command_echo(self):
+        """A cell with no textual output (e.g. a graph) must not stream the
+        echoed source back — that read as a useless repeat of the code."""
+        from stata_code.kernel import kernel as kernel_module
+
+        original = kernel_module._HAS_IPYKERNEL
+        kernel_module._HAS_IPYKERNEL = True
+        echo_only = LogInfo(
+            head='\n. * 3) fit\n. twoway (scatter price mpg) (lfit price mpg)\n\n. \n',
+            tail="",
+            lines_total=5,
+            bytes_total=60,
+        )
+        mock_result = _make_run_result(ok=True, log=echo_only)
+        try:
+            from stata_code.kernel import StataKernel
+
+            kb = StataKernel()
+            streamed: list[tuple[str, str]] = []
+            with patch.object(
+                kb, "_stream", side_effect=lambda n, t: streamed.append((n, t))
+            ):
+                with patch(
+                    "stata_code.kernel.kernel.execute", return_value=mock_result
+                ):
+                    reply = kb.do_execute(
+                        "* 3) fit\ntwoway (scatter price mpg) (lfit price mpg)",
+                        silent=False,
+                    )
+            assert reply["status"] == "ok"
+            assert not any(name == "stdout" for name, _ in streamed)
+        finally:
+            kernel_module._HAS_IPYKERNEL = original
+
+    def test_do_execute_streams_output_without_echo(self):
+        """Genuine command output is streamed, but the leading `. cmd` echo is
+        stripped from it."""
+        from stata_code.kernel import kernel as kernel_module
+
+        original = kernel_module._HAS_IPYKERNEL
+        kernel_module._HAS_IPYKERNEL = True
+        mixed = LogInfo(
+            head="\n. summarize price\n\n    price |   74\n\n. \n",
+            tail="",
+            lines_total=6,
+            bytes_total=40,
+        )
+        mock_result = _make_run_result(ok=True, log=mixed)
+        try:
+            from stata_code.kernel import StataKernel
+
+            kb = StataKernel()
+            streamed: list[tuple[str, str]] = []
+            with patch.object(
+                kb, "_stream", side_effect=lambda n, t: streamed.append((n, t))
+            ):
+                with patch(
+                    "stata_code.kernel.kernel.execute", return_value=mock_result
+                ):
+                    kb.do_execute("summarize price", silent=False)
+            stdout = [t for n, t in streamed if n == "stdout"]
+            assert len(stdout) == 1
+            assert ". summarize price" not in stdout[0]
+            assert "price |   74" in stdout[0]
+        finally:
+            kernel_module._HAS_IPYKERNEL = original
+
     def test_do_complete_returns_stata_keywords(self):
         """do_complete should return Stata keyword matches."""
         from stata_code.kernel import StataKernel
@@ -330,6 +397,52 @@ class TestInstallKernel:
             install_kernel(system=True)
 
         assert flags == [False]
+
+
+class TestCommandEchoStripping:
+    """Unit tests for `_strip_command_echo` (pure, no Stata required)."""
+
+    def test_pure_echo_graph_cell_becomes_empty(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        log = "\n. * 3) fit\n. twoway (scatter price mpg) (lfit price mpg)\n\n. \n"
+        assert _strip_command_echo(log) == ""
+
+    def test_wrapped_continuation_lines_stripped(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        # Stata wraps a long command onto a `> ` continuation line.
+        log = (
+            '\n. twoway scatter price mpg, title("A long title that wraps\n'
+            '> onto another line")\n\n. \n'
+        )
+        assert _strip_command_echo(log) == ""
+
+    def test_real_output_preserved_echo_removed(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        log = "\n. summarize price\n\n    price |   74\n\n. \n"
+        out = _strip_command_echo(log)
+        assert ". summarize" not in out
+        assert out == "    price |   74"
+
+    def test_consecutive_blank_lines_collapsed(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        assert _strip_command_echo("line1\n\n\n\nline2") == "line1\n\nline2"
+
+    def test_log_without_echo_unchanged(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        log = "    Variable |  Obs\n       price |   74"
+        assert _strip_command_echo(log) == log
+
+    def test_missing_value_dot_output_not_stripped(self):
+        from stata_code.kernel.kernel import _strip_command_echo
+
+        # A bare "." (e.g. `display .`) is real output, not an echoed prompt
+        # (which is always ". " — dot-space). It must survive.
+        assert _strip_command_echo(".") == "."
 
 
 # NOTE: TestStataGraphDataUri was removed in v0.2. The legacy `StataGraph`
