@@ -1203,6 +1203,22 @@ _GRAPH_COMMAND_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+# Commands that *create or redraw* a graph (as opposed to graph-management
+# subcommands like `graph dir`, `graph export`, `graph drop`). Used to decide
+# whether a cell touched the default-named "Graph", which Stata reuses for every
+# unnamed plot — so the delta-by-name snapshot alone cannot tell that a later
+# cell redrew it. See `_collect_graphs`.
+_GRAPH_CREATING_RE = re.compile(
+    r"^\s*(?:"
+    r"graph\s+(?:bar|hbar|box|hbox|pie|dot|matrix|twoway|combine)\b|"
+    r"twoway|scatter|line|connected|histogram|hist|kdensity|lowess|lfit|qfit|"
+    r"coefplot|binscatter"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Stata's default name for any graph drawn without an explicit `name(...)`.
+_DEFAULT_GRAPH_NAME = "Graph"
 
 
 def _graph_source_hints(code: str) -> tuple[dict[str, tuple[str, int]], list[tuple[str, int]]]:
@@ -1262,19 +1278,36 @@ def _collect_graphs(
     source_hints: dict[str, tuple[str, int]] | None = None,
     unnamed_source_hints: list[tuple[str, int]] | None = None,
 ) -> list[GraphInfo]:
-    """Capture graphs that user code newly created.
+    """Capture graphs that user code newly created or redrew.
 
     Strategy: snapshot graph names before user code (`pre_existing`), call
     after to find the post-existing list, take the set difference. For each
     new graph: `graph display <name>` (makes it active), `graph export` to a
     tmpfile, read bytes, store under a ref. Tmpfile is deleted after.
+
+    The set difference alone misses graphs the cell *redrew* under a name that
+    already existed — most importantly Stata's default ``Graph``, which every
+    unnamed plot command reuses. Without this, a notebook only ever shows the
+    first cell's plot: the second cell redraws ``Graph`` in place, the name is
+    unchanged, and the delta is empty. So we also capture any graph this cell's
+    code explicitly targeted (a ``name(...)`` it drew, or ``Graph`` when the
+    cell ran an unnamed plotting command).
     """
-    after_names = _list_graph_names(rt)
-    new_names = [n for n in after_names if n not in pre_existing]
-    if not new_names:
-        return []
     source_hints = source_hints or {}
     unnamed_source_hints = unnamed_source_hints or []
+
+    after_names = _list_graph_names(rt)
+    # Names this cell's code explicitly (re)drew, regardless of whether they
+    # pre-existed in memory.
+    targeted: set[str] = set(source_hints)
+    if any(_GRAPH_CREATING_RE.search(src) for src, _line in unnamed_source_hints):
+        targeted.add(_DEFAULT_GRAPH_NAME)
+    capture_names = [
+        n for n in after_names if n not in pre_existing or n in targeted
+    ]
+    if not capture_names:
+        return []
+    new_names = capture_names
     unattributed_names = [n for n in new_names if n not in source_hints]
     unnamed_by_graph: dict[str, tuple[str, int]] = {}
     if len(unattributed_names) == len(unnamed_source_hints):

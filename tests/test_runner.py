@@ -265,6 +265,48 @@ class TestGraphCapture:
         # refs are unique per index
         assert len({g.ref for g in r.graphs}) == 2
 
+    def test_unnamed_redraw_in_later_cell_captured(self, loaded_auto):
+        # Regression: in a notebook the default-named "Graph" is reused by every
+        # unnamed plot. A pure delta-by-name snapshot only ever sees the first
+        # cell's plot — later cells redraw "Graph" in place, so the name set is
+        # unchanged and nothing is captured. Each call must yield its own graph.
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        r1 = execute("scatter price mpg")
+        assert r1.ok is True
+        assert len(r1.graphs) == 1
+        assert r1.graphs[0].name == "Graph"
+
+        # Second cell redraws the same default-named graph — must still show.
+        r2 = execute("scatter weight mpg")
+        assert r2.ok is True
+        assert len(r2.graphs) == 1
+        assert r2.graphs[0].name == "Graph"
+
+    def test_named_redraw_in_later_cell_captured(self, loaded_auto):
+        # A graph redrawn under an existing explicit name must also re-capture.
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        r1 = execute("scatter price mpg, name(g_redraw)")
+        assert len(r1.graphs) == 1
+        r2 = execute("scatter weight mpg, name(g_redraw, replace)")
+        assert r2.ok is True
+        assert len(r2.graphs) == 1
+        assert r2.graphs[0].name == "g_redraw"
+
+    def test_non_drawing_cell_does_not_recapture(self, loaded_auto):
+        # A cell that only manages an existing graph (no plotting command) must
+        # NOT re-display the stale default "Graph".
+        from stata_code.core.runner import execute
+
+        self._clean_graphs(execute)
+        execute("scatter price mpg")  # leaves "Graph" in memory
+        r = execute('display "no new plot"')
+        assert r.ok is True
+        assert r.graphs == []
+
     def test_get_graph_returns_bytes(self, loaded_auto):
         from stata_code.core.runner import execute, get_graph
 
