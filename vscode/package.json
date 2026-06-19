@@ -2,9 +2,10 @@
   "name": "stata-code-vscode",
   "displayName": "stata-code",
   "description": "Run Stata code from VSCode through the agent-native stata-code MCP server.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "brycewang-stanford",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/brycewang-stanford/stata-code.git",

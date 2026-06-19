@@ -6,6 +6,39 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.7.1 — 2026-06-19
+
+### Fixed
+
+- **Jupyter kernel: graphs after the first cell now display.** Graph capture
+  detected new graphs by diffing in-memory graph names before/after a run.
+  Because Stata keeps only one graph per name and every unnamed graph command
+  overwrites the default `Graph` in place, the second and later cells of a
+  persistent session produced no name delta and their graphs were silently
+  dropped — only the first cell's graph ever rendered. Capture now also
+  re-exports any graph the cell's own source shows it (re)drew (every
+  `name(...)` target, plus the default `Graph` for any unnamed graph command),
+  so in-place redraws surface every time. The same fix covers repeated MCP
+  `stata_run` calls in one session. The graph-command detector was tightened
+  to distinguish drawing commands from `graph` utility subcommands (`export`,
+  `display`, `dir`, `drop`, …) so a utility-only cell no longer re-surfaces a
+  stale graph.
+- **Jupyter kernel: no more duplicated code echo in cell output.** pystata
+  runs a multi-line cell as a temporary do-file, and Stata echoes every
+  submitted command (`. cmd` / `> continuation`) regardless of `echo=False`
+  (which only suppresses echo for a single inline command). For a cell with no
+  textual output (e.g. a graph) that echo was the *only* thing shown — a
+  useless repeat of the source already visible in the input cell. The kernel
+  now strips command-echo lines before streaming, keeping genuine command
+  output. The full log (with echo) is unchanged in `RunResult.log` for MCP /
+  agent consumers.
+
+### Changed
+
+- **VS Code extension now ships a Marketplace icon** (coef-plot mark, Anthropic
+  palette on white) so the listing and Extensions sidebar render branded
+  artwork instead of the default placeholder.
+
 ## 0.7.0 — 2026-05-30
 
 ### Added
