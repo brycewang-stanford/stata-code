@@ -17,7 +17,7 @@ cleanly::
 
 Run::
 
-    python scripts/build_skill_zip.py                 # -> dist/stata-code-skill.zip
+    python scripts/build_skill_zip.py                 # -> build/stata-code-skill.zip
     python scripts/build_skill_zip.py -o /tmp/out.zip  # custom destination
 
 The build is deterministic (sorted entries, fixed timestamps) so re-running it
@@ -33,7 +33,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_DIR = REPO_ROOT / "skills" / "stata-code"
-DEFAULT_OUTPUT = REPO_ROOT / "dist" / "stata-code-skill.zip"
+DEFAULT_OUTPUT = REPO_ROOT / "build" / "stata-code-skill.zip"
 ARCHIVE_PREFIX = "stata-code"
 
 # Fixed timestamp for reproducible archives (zip epoch starts at 1980).

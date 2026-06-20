@@ -35,6 +35,11 @@ def test_skill_source_tree_present():
     assert any(p.parts[-2:] == ("packages", "reghdfe.md") for p in files)
 
 
+def test_default_output_does_not_pollute_python_dist():
+    mod = _load_module()
+    assert mod.DEFAULT_OUTPUT.parent != REPO_ROOT / "dist"
+
+
 def test_build_zip_contains_prefixed_entries(tmp_path):
     mod = _load_module()
     dest = tmp_path / "skill.zip"
