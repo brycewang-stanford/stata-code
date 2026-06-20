@@ -200,7 +200,7 @@ loop (cap ~5 iterations):
   if the same kind+line repeats unchanged twice → STOP with a summary
 ```
 
-For notebook repair, use `notebook_edit_cell(path, cell_id, source, expected_source=<old>)` with optimistic concurrency so a user-side edit aborts your write rather than silently overwriting it.
+For notebook repair, use `notebook_edit_cell(path, cell_id, new_source, expected_source=<old>)` with optimistic concurrency so a user-side edit aborts your write rather than silently overwriting it.
 
 ## 9. Multi-session etiquette
 
