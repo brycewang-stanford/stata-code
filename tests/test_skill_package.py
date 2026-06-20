@@ -31,8 +31,14 @@ def test_skill_source_tree_present():
     assert "SKILL.md" in names
     assert "error-codes.md" in names
     assert "defensive-coding.md" in names
+    assert "parity-audit.md" in names
+    assert "data-mcp-handoff.md" in names
+    assert "data-sources.md" in names
     # The packages subdir is included with its nested path.
     assert any(p.parts[-2:] == ("packages", "reghdfe.md") for p in files)
+    assert any(p.parts[-2:] == ("packages", "csdid.md") for p in files)
+    assert any(p.parts[-2:] == ("recipes", "did-event-study.md") for p in files)
+    assert any(p.parts[-2:] == ("recipes", "cross-validation.md") for p in files)
 
 
 def test_default_output_does_not_pollute_python_dist():
@@ -54,6 +60,10 @@ def test_build_zip_contains_prefixed_entries(tmp_path):
         assert zf.testzip() is None  # archive integrity
         body = zf.read("stata-code/SKILL.md").decode("utf-8")
         assert "# stata-code Skill" in body
+        assert "stata-code/references/parity-audit.md" in arcnames
+        assert "stata-code/references/data-sources.md" in arcnames
+        assert "stata-code/references/packages/csdid.md" in arcnames
+        assert "stata-code/references/recipes/did-event-study.md" in arcnames
 
 
 def test_build_is_deterministic(tmp_path):

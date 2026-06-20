@@ -159,7 +159,8 @@ estat overid          // overid (GMM/2SLS, requires overidentification)
 
 `estat firststage` returns the first-stage F in `r()`; rule of thumb F>10, but prefer the effective-F / weak-IV stats from community tools.
 
-Community `ivreg2` / `ivreghdfe` (richer weak-IV and overid diagnostics, HDFE support):
+Community [`ivreg2`](packages/ivreg2.md) / [`ivreghdfe`](packages/ivreghdfe.md)
+(richer weak-IV and overid diagnostics, HDFE support):
 
 ```stata
 ssc install ivreg2          // also: ranktest
@@ -170,7 +171,7 @@ ssc install ivreghdfe       // ivreg2 + reghdfe absorb()
 ivreghdfe y x1 (x2 = z1 z2), absorb(firm year) cluster(firm)
 ```
 
-For design framing (relevance, exclusion, LATE interpretation, just-identified vs overidentified strategy) see **causal-inference.md**.
+For design framing (relevance, exclusion, LATE interpretation, just-identified vs overidentified strategy) see **causal-inference.md**. With few clusters, consider wild-cluster bootstrap inference via [`boottest`](packages/boottest.md).
 
 ## 8. Storing & comparing models
 

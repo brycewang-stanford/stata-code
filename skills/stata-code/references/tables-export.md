@@ -51,7 +51,7 @@ dtable mpg weight price, by(foreign) ///
 
 Export targets for `collect export`: `.docx`, `.tex` (LaTeX), `.html`, `.md` (Markdown), `.xlsx`, `.pdf`, `.txt`. Always add `replace`.
 
-## 2. `estout` / `esttab` — the workhorse (community)
+## 2. [`estout` / `esttab`](packages/estout.md) — the workhorse (community)
 
 ```stata
 ssc install estout, replace
@@ -123,7 +123,7 @@ esttab using fe.tex, replace label scalars("hasFE Rep78 FE") booktabs
 
 `estout` is the lower-level engine if you need full layout control; `esttab` is the friendly wrapper — prefer `esttab`.
 
-## 3. `outreg2` — quick alternative (community)
+## 3. [`outreg2`](packages/outreg2.md) — quick alternative (community)
 
 ```stata
 ssc install outreg2, replace

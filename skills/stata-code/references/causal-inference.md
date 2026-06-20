@@ -30,11 +30,11 @@ If staggered, do **not** trust the single TWFE coefficient — use a modern esti
 
 | Estimator | Command | Package | Install |
 | --- | --- | --- | --- |
-| Callaway & Sant'Anna (2021) | `csdid` | `csdid` | `ssc install csdid`; also `drdid` |
-| Borusyak, Jaravel & Spiess imputation | `did_imputation` | `did_imputation` | `ssc install did_imputation` |
-| de Chaisemartin & D'Haultfœuille | `did_multiplegt` / `did_multiplegt_dyn` | same | `ssc install did_multiplegt_dyn` |
-| Sun & Abraham (2021) | `eventstudyinteract` | `eventstudyinteract` | `ssc install eventstudyinteract` (needs `avar`) |
-| Doubly-robust 2×2 ATT | `drdid` | `drdid` | `ssc install drdid` |
+| Callaway & Sant'Anna (2021) | `csdid` | [`csdid`](packages/csdid.md) | `ssc install csdid`; also `drdid` |
+| Borusyak, Jaravel & Spiess imputation | `did_imputation` | [`did_imputation`](packages/did_imputation.md) | `ssc install did_imputation` |
+| de Chaisemartin & D'Haultfœuille | `did_multiplegt` / `did_multiplegt_dyn` | [`did_multiplegt_dyn`](packages/did_multiplegt_dyn.md) | `ssc install did_multiplegt_dyn` |
+| Sun & Abraham (2021) | `eventstudyinteract` | [`eventstudyinteract`](packages/eventstudyinteract.md) | `ssc install eventstudyinteract` (needs `avar`) |
+| Doubly-robust 2×2 ATT | `drdid` | [`drdid`](packages/drdid.md) | `ssc install drdid` |
 
 ### Callaway & Sant'Anna — `csdid`
 
@@ -129,11 +129,11 @@ ivreghdfe y x (d = z), absorb(unit time) cluster(unit)
 * report e(widstat) = Kleibergen-Paap F under non-iid errors
 ```
 
-Weak instruments → biased toward OLS and badly-sized t-tests; report Anderson-Rubin weak-IV-robust CIs (`weakiv`, community) when F is marginal.
+Weak instruments → biased toward OLS and badly-sized t-tests; report Anderson-Rubin weak-IV-robust CIs (`weakiv`, community) when F is marginal. For package-level syntax notes, see [`ivreg2`](packages/ivreg2.md), [`ivreghdfe`](packages/ivreghdfe.md), and [`boottest`](packages/boottest.md).
 
 ## 5. Regression discontinuity
 
-All from the `rdrobust` suite (community: `ssc install rdrobust`, `ssc install rddensity`; `lpdensity` may be pulled in). Local-polynomial estimation with bias-corrected robust CIs and data-driven bandwidth.
+All from the [`rdrobust`](packages/rdrobust.md) suite (community: `ssc install rdrobust`, `ssc install rddensity`; `lpdensity` may be pulled in). Local-polynomial estimation with bias-corrected robust CIs and data-driven bandwidth.
 
 ```stata
 ssc install rdrobust

@@ -45,11 +45,15 @@ The skill ships a `references/` library of dense Stata domain knowledge. **Progr
 | Panel data / time series — `xtset`, `tsset`, `xtreg`, dynamic panels, `arima` | `references/panel-timeseries.md` |
 | Plots and visualization | `references/graphics.md` |
 | Regression/summary tables, LaTeX/Word/Excel/Markdown export | `references/tables-export.md` |
+| Choosing public data sources or documenting source provenance | `references/data-sources.md` |
+| Data fetched by external MCPs should become Stata inputs | `references/data-mcp-handoff.md` |
+| Cross-package or cross-language robustness / parity checks | `references/parity-audit.md` |
+| Turnkey empirical recipes — DiD/event study, IV/2SLS, RDD, publication tables, cross-validation | `references/recipes/<recipe>.md` |
 | Diagnosing a failed run, Stata `rc` codes, the self-repair loop | `references/error-codes.md` |
 | Writing correct, reproducible Stata that fails loudly (not silently) | `references/defensive-coding.md` |
-| A specific community package | `references/packages/<pkg>.md` — `reghdfe`, `coefplot`, `estout`, `gtools` |
+| A specific community package | `references/packages/<pkg>.md` — `reghdfe`, `csdid`, `drdid`, `did_imputation`, `eventstudyinteract`, `did_multiplegt_dyn`, `rdrobust`, `ivreg2`, `ivreghdfe`, `boottest`, `estout`, `outreg2`, `coefplot`, `gtools` |
 
-Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+ `panel-timeseries.md`); "my merge gives wrong N" → `defensive-coding.md`; "command not found: reghdfe" → `error-codes.md` + `packages/reghdfe.md`; "make a publication table" → `tables-export.md`.
+Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+ `panel-timeseries.md`); "my merge gives wrong N" → `defensive-coding.md`; "command not found: reghdfe" → `error-codes.md` + `packages/reghdfe.md`; "make a publication table" → `tables-export.md` + `recipes/publication-tables.md`; "compare Stata csdid against R did" → `parity-audit.md` + `packages/csdid.md`; "OECD MCP pulled a CSV; now analyze it in Stata" → `data-mcp-handoff.md`; "run the full DiD/event-study workflow" → `recipes/did-event-study.md`.
 
 ## 4. The 18 MCP tools (cheat sheet)
 
@@ -74,7 +78,7 @@ Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+
 | `notebook_delete_cell(path, cell_id, expected_source?)` | Remove a cell. Pass `expected_source` when guarding against drift. |
 | `list_runs(log_dir or origin_path, …)` | Search the on-disk run-bundle index — "show me my last failed run on this file". |
 
-There are also MCP resources (`stata://schema/run-result`, `log://...`, `graph://...`, `matrix://...`) and prompts (`run_do_file_and_report`, `debug_stata_error`, `fix_and_rerun_until_passes`, `replication_audit`, `summarize_estimation_results`).
+There are also MCP resources (`stata://schema/run-result`, `log://...`, `graph://...`, `matrix://...`) and prompts (`run_do_file_and_report`, `debug_stata_error`, `fix_and_rerun_until_passes`, `replication_audit`, `summarize_estimation_results`, `run_notebook_cell_and_report`, `fix_and_rerun_notebook_cell`, `plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`, `did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`).
 
 ## 5. The v1.0 RunResult schema (read this once)
 
@@ -235,5 +239,5 @@ The runner echoes these into `result.origin` and writes them to the run-bundle m
 - Domain knowledge: the `references/` library (routing table in §3).
 - Full schema: `SCHEMA.md` in the repo or the MCP resource `stata://schema/run-result`.
 - Server capabilities + tool list: MCP resource `stata://server/capabilities`.
-- Examples (DiD, IV, graphs, multi-session, large matrices): `examples/` in the repo.
+- Examples (DiD, IV, graphs, multi-session, large matrices, parity audits, data-MCP handoff): `examples/` in the repo.
 - License: MIT (`stata-code` itself); Stata is a registered trademark of StataCorp LLC.

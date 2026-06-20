@@ -11,5 +11,7 @@ The recurring theme is **token economy**: by default the server returns a 20-lin
 | 03 | [Graphs](./03-graphs.md) | `graph://` refs vs. inline base64; `include_graphs="inline"` opt-in |
 | 04 | [Multi-session](./04-multi-session.md) | Two parallel analyses via `session_id` (Stata frames under the hood) |
 | 05 | [Large matrices](./05-large-matrix.md) | `matrix://` refs when a result exceeds the 10,000-cell inline cap |
+| 06 | [Cross-stack parity audit](./06-cross-stack-parity-audit.md) | Freeze one sample, run the Stata leg, and compare against external R/Python legs without hiding package disagreement |
+| 07 | [Data-MCP handoff](./07-data-mcp-handoff.md) | Persist external data-MCP pulls, import/validate them in Stata, and keep provenance in run bundles |
 
 Every Stata command shown is real syntax. Tool names, argument names, and response field names match `stata_code/mcp/server.py` and `SCHEMA.md` v1.0. Where a JSON response is abbreviated for readability, an inline comment marks what was cut.
