@@ -6,6 +6,33 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+## 0.7.2 — 2026-06-20
+
+### Added
+
+- **Three convenience MCP tools** raise the tool surface from 15 to 18:
+  - `install_package(name, source?, url?, replace?, session_id?)` — installs a
+    community package via `ssc install` / `net install` without the agent
+    having to remember the syntax, then verifies it resolves with `which`.
+    Package names and URLs are validated to keep them out of the generated
+    command line; failures surface the typed `error` block (e.g. `network`).
+  - `search_log(ref, pattern, is_regex?, ignore_case?, context?, max_matches?)`
+    — greps within a truncated `log://` payload and returns only the matching
+    lines (with optional context), so a long log can be inspected without
+    pulling the whole transcript back through `get_log`.
+  - `inspect_data(varlist?, detail?, session_id?)` — runs `describe` +
+    `codebook` and returns the structured `dataset` block plus the codebook
+    log: a one-call "what's in this dataset" the agent doesn't have to spell out.
+- **On-demand Stata reference library** under `skills/stata-code/references/`
+  (~4,200 lines): topic files for core syntax, data management, econometrics,
+  causal inference, panel/time series, graphics, and table export; load-bearing
+  `error-codes.md` (the full `rc → kind → fix` table + self-repair loop, aligned
+  with the typed-error taxonomy) and `defensive-coding.md`; and per-package notes
+  for `reghdfe`, `coefplot`, `estout`, and `gtools`. `SKILL.md` gained a routing
+  table (read 1–3 files on demand) and a live-vs-offline execution-mode section.
+- **`scripts/build_skill_zip.py`** packages the skill into a deterministic
+  `build/stata-code-skill.zip` for upload as Claude.ai project knowledge.
+
 ## 0.7.1 — 2026-06-19
 
 ### Fixed
