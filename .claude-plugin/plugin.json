@@ -1,6 +1,6 @@
 {
   "name": "stata-code",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "Agent-native Stata bridge for Claude Code. Bundles an MCP server (18 tools, token-economy result schema, typed errors, multi-session) and an agent skill with an on-demand Stata reference library that teaches Claude how to call it idiomatically.",
   "author": {
     "name": "Bryce Wang",

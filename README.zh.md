@@ -61,7 +61,7 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.7（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
+**当前状态：v0.8（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
 
 当前代码树明确支持的三类用户 / agent 工作流：
 

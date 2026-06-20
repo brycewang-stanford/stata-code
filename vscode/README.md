@@ -2,7 +2,7 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.7 (May 2026).** Full UI surface — orange Stata title-bar
+> **Status: v0.8 (June 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / data (variables) / run history / logs / graphs / outputs panels,
 > syntax highlighting, outline/section navigation, code-lens cells and sections,
