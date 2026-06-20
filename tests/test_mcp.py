@@ -134,8 +134,47 @@ class TestToolRegistry:
         assert "debug_stata_error" in prompts
         assert "fix_and_rerun_until_passes" in prompts
         assert "replication_audit" in prompts
+        assert "plan_cross_stack_parity_audit" in prompts
+        assert "data_mcp_to_stata_handoff" in prompts
         assert "summarize_estimation_results" in prompts
+        assert "did_event_study" in prompts
+        assert "iv_2sls" in prompts
+        assert "rdd" in prompts
+        assert "publication_table" in prompts
+        assert "cross_validate_did" in prompts
         assert prompts["run_do_file_and_report"].arguments[0].name == "path"
+
+        parity_args = {
+            arg.name: arg for arg in prompts["plan_cross_stack_parity_audit"].arguments
+        }
+        assert parity_args["stata_entrypoint"].required is True
+        assert "target" in parity_args
+
+        handoff_args = {
+            arg.name: arg for arg in prompts["data_mcp_to_stata_handoff"].arguments
+        }
+        assert handoff_args["raw_path"].required is True
+        assert "metadata_path" in handoff_args
+
+        did_args = {arg.name: arg for arg in prompts["did_event_study"].arguments}
+        assert did_args["data_path"].required is True
+        assert did_args["outcome"].required is True
+        assert did_args["cohort"].required is True
+
+        iv_args = {arg.name: arg for arg in prompts["iv_2sls"].arguments}
+        assert iv_args["endogenous"].required is True
+        assert iv_args["instruments"].required is True
+
+        rdd_args = {arg.name: arg for arg in prompts["rdd"].arguments}
+        assert rdd_args["running_var"].required is True
+        assert "cutoff" in rdd_args
+
+        table_args = {arg.name: arg for arg in prompts["publication_table"].arguments}
+        assert table_args["models"].required is True
+
+        cross_args = {arg.name: arg for arg in prompts["cross_validate_did"].arguments}
+        assert cross_args["data_path"].required is True
+        assert cross_args["cohort"].required is True
 
     def test_prompts_include_notebook_cell_workflows(self):
         from stata_code.mcp.server import _get_mcp_prompt, _prompt_definitions
@@ -304,6 +343,100 @@ class TestDispatch:
 
         with pytest.raises(ValueError, match="Unknown prompt"):
             _get_mcp_prompt("nope", {})
+
+    def test_get_prompt_renders_parity_and_data_handoff_workflows(self):
+        from stata_code.mcp.server import _get_mcp_prompt
+
+        parity = _get_mcp_prompt(
+            "plan_cross_stack_parity_audit",
+            {
+                "stata_entrypoint": "analysis/csdid.do",
+                "target": "overall ATT",
+                "external_stacks": "R did, Python",
+            },
+        )
+        parity_text = parity.messages[0].content.text
+        assert "analysis/csdid.do" in parity_text
+        assert "Freeze one common analysis sample" in parity_text
+        assert "Do not claim stata-code ran R or Python" in parity_text
+
+        handoff = _get_mcp_prompt(
+            "data_mcp_to_stata_handoff",
+            {
+                "raw_path": "data/raw/oecd.csv",
+                "metadata_path": "data/raw/oecd.source.json",
+                "analysis_goal": "scatter plot",
+            },
+        )
+        handoff_text = handoff.messages[0].content.text
+        assert "data/raw/oecd.csv" in handoff_text
+        assert "persist_log_files=true" in handoff_text
+        assert "Do not cite an LLM memory value" in handoff_text
+
+    def test_get_prompt_renders_turnkey_recipe_workflows(self):
+        from stata_code.mcp.server import _get_mcp_prompt
+
+        did = _get_mcp_prompt(
+            "did_event_study",
+            {
+                "data_path": "data/cfps_panel.dta",
+                "outcome": "wage",
+                "cohort": "first_treat",
+                "controls": "age age2 edu",
+            },
+        )
+        did_text = did.messages[0].content.text
+        assert "recipes/did-event-study.md" in did_text
+        assert "Callaway-Sant'Anna" in did_text
+        assert "install_package" in did_text
+
+        iv = _get_mcp_prompt(
+            "iv_2sls",
+            {
+                "data_path": "data/wage.dta",
+                "outcome": "earnings",
+                "endogenous": "schooling",
+                "instruments": "quarter_birth",
+            },
+        )
+        iv_text = iv.messages[0].content.text
+        assert "recipes/iv-2sls.md" in iv_text
+        assert "first-stage F" in iv_text
+        assert "LATE" in iv_text
+
+        rdd = _get_mcp_prompt(
+            "rdd",
+            {
+                "data_path": "data/rd.dta",
+                "outcome": "score",
+                "running_var": "margin",
+            },
+        )
+        rdd_text = rdd.messages[0].content.text
+        assert "recipes/rdd.md" in rdd_text
+        assert "rddensity" in rdd_text
+        assert "local" in rdd_text
+
+        table = _get_mcp_prompt(
+            "publication_table",
+            {"models": "m1 m2", "output_path": "tables/main.tex"},
+        )
+        table_text = table.messages[0].content.text
+        assert "recipes/publication-tables.md" in table_text
+        assert "Do not re-estimate models" in table_text
+
+        cross = _get_mcp_prompt(
+            "cross_validate_did",
+            {
+                "data_path": "data/cfps_panel.dta",
+                "outcome": "wage",
+                "cohort": "first_treat",
+            },
+        )
+        cross_text = cross.messages[0].content.text
+        assert "recipes/cross-validation.md" in cross_text
+        assert "Callaway-Sant'Anna ATT" in cross_text
+        assert "reconcile the spec" in cross_text
 
     def test_stata_run_missing_code_returns_error_json(self):
         from stata_code.mcp.server import _dispatch

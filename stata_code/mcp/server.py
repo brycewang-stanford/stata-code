@@ -1537,6 +1537,71 @@ def _prompt_definitions() -> list[Prompt]:
             ],
         ),
         Prompt(
+            name="plan_cross_stack_parity_audit",
+            title="Plan Cross-stack Parity Audit",
+            description=(
+                "Plan a disciplined Stata/R/Python or cross-package parity "
+                "audit: freeze a common sample, run the Stata leg through "
+                "stata_run, and compare external legs without hiding package "
+                "warnings or refusals."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="stata_entrypoint",
+                    description=(
+                        "Path to the Stata do-file or dataset that defines "
+                        "the Stata leg or common sample."
+                    ),
+                    required=True,
+                ),
+                PromptArgument(
+                    name="target",
+                    description=(
+                        "Estimator or estimand to compare, e.g. csdid overall "
+                        "ATT, event-study ATT, IV LATE, or RDD estimate."
+                    ),
+                    required=False,
+                ),
+                PromptArgument(
+                    name="external_stacks",
+                    description=(
+                        "Optional comma-separated external stacks/packages to "
+                        "compare, e.g. R did, Python DoubleML."
+                    ),
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="data_mcp_to_stata_handoff",
+            title="Data MCP to Stata Handoff",
+            description=(
+                "Turn a dataset fetched by an external data MCP into a "
+                "reproducible Stata import, validation, analysis, and "
+                "run-bundle workflow."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="raw_path",
+                    description="Path to the raw CSV/TSV/XLSX/DTA produced by the data MCP.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="metadata_path",
+                    description=(
+                        "Optional path to source metadata with provider, "
+                        "indicator ids, endpoint, units, and fetch time."
+                    ),
+                    required=False,
+                ),
+                PromptArgument(
+                    name="analysis_goal",
+                    description="Optional analysis goal, e.g. scatter plot and correlation.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
             name="summarize_estimation_results",
             title="Summarize Estimation Results",
             description=(
@@ -1611,6 +1676,207 @@ def _prompt_definitions() -> list[Prompt]:
                 ),
             ],
         ),
+        Prompt(
+            name="did_event_study",
+            title="DiD / Event-Study Workflow",
+            description=(
+                "Turnkey difference-in-differences / event study: TWFE baseline, "
+                "Goodman-Bacon staggered-bias diagnostic, a modern staggered "
+                "estimator (Callaway-Sant'Anna), an event-study plot, and an "
+                "esttab table. Follows skills/stata-code/references/recipes/"
+                "did-event-study.md."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="data_path",
+                    description="Path to the panel dataset (.dta/.csv).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="outcome",
+                    description="Outcome variable name.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="cohort",
+                    description=(
+                        "First-treatment-period (cohort) variable; . or 0 for "
+                        "never-treated. Not a 0/1 post dummy."
+                    ),
+                    required=True,
+                ),
+                PromptArgument(
+                    name="controls",
+                    description="Optional space-separated control variables.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to did.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="iv_2sls",
+            title="IV / 2SLS Workflow",
+            description=(
+                "Turnkey instrumental-variables estimation: first-stage "
+                "relevance, 2SLS/LIML, weak-instrument and overid diagnostics, "
+                "and an esttab table reporting the first-stage F. Follows "
+                "skills/stata-code/references/recipes/iv-2sls.md. Reports a LATE."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="data_path",
+                    description="Path to the dataset (.dta/.csv).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="outcome",
+                    description="Outcome variable name.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="endogenous",
+                    description="Endogenous regressor(s), space-separated.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="instruments",
+                    description="Excluded instrument(s), space-separated.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="controls",
+                    description="Optional exogenous controls (both stages).",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to iv.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="rdd",
+            title="Regression Discontinuity Workflow",
+            description=(
+                "Turnkey RDD: rdplot visualization, rdrobust local-polynomial "
+                "estimate with bias-corrected robust CIs, the three mandatory "
+                "placebos (rddensity manipulation, covariate balance, bandwidth "
+                "sensitivity), and an esttab table. Follows "
+                "skills/stata-code/references/recipes/rdd.md."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="data_path",
+                    description="Path to the dataset (.dta/.csv).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="outcome",
+                    description="Outcome variable name.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="running_var",
+                    description="Running (forcing) variable name.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="cutoff",
+                    description="Cutoff value; defaults to 0.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="fuzzy",
+                    description="Optional treatment take-up var for a fuzzy RD.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to rd.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="publication_table",
+            title="Publication Table (esttab)",
+            description=(
+                "Export one or more stored estimates (eststo/estimates store) to "
+                "a LaTeX/Word/Excel/Markdown table with stars, fit stats, and "
+                "labels via esttab. Follows skills/stata-code/references/recipes/"
+                "publication-tables.md."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="models",
+                    description=(
+                        "Space-separated names of stored estimates to place as "
+                        "columns (in order)."
+                    ),
+                    required=True,
+                ),
+                PromptArgument(
+                    name="output_path",
+                    description=(
+                        "Optional output file; the extension picks the format "
+                        "(.tex/.rtf/.csv/.md). Omit to preview in the log."
+                    ),
+                    required=False,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to main.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
+            name="cross_validate_did",
+            title="Cross-Validate DiD (Stata × StatsPAI)",
+            description=(
+                "Run the same Callaway-Sant'Anna DiD through Stata (csdid) and, "
+                "when available, StatsPAI (callaway_santanna), then compare point "
+                "estimates and only trust an agreeing result — the Cunningham "
+                "robustness check. Falls back to two independent Stata estimators "
+                "when StatsPAI is not wired up. Follows "
+                "skills/stata-code/references/recipes/cross-validation.md."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="data_path",
+                    description="Path to the panel dataset (.dta/.csv).",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="outcome",
+                    description="Outcome variable name.",
+                    required=True,
+                ),
+                PromptArgument(
+                    name="cohort",
+                    description=(
+                        "First-treatment-period (cohort) variable; . or 0 for "
+                        "never-treated."
+                    ),
+                    required=True,
+                ),
+                PromptArgument(
+                    name="controls",
+                    description="Optional space-separated control variables.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="session_id",
+                    description="Optional Stata session id; defaults to did.",
+                    required=False,
+                ),
+            ],
+        ),
     ]
 
 
@@ -1670,6 +1936,50 @@ def _prompt_text(name: str, arguments: dict[str, str] | None) -> tuple[str, str]
                 "failed commands. Do not rewrite source unless separately asked."
             ),
         )
+    if name == "plan_cross_stack_parity_audit":
+        stata_entrypoint = args.get("stata_entrypoint", "<stata-entrypoint>")
+        target = args.get("target", "<target-estimand>")
+        external_stacks = args.get("external_stacks", "<external-stacks>")
+        return (
+            "Plan a cross-stack parity audit",
+            (
+                f"Plan a parity audit for `{stata_entrypoint}` targeting "
+                f"`{target}` and comparing against `{external_stacks}`. "
+                "Freeze one common analysis sample before comparing packages: "
+                "define the missing-value rule, compact IDs if needed, assert "
+                "keys, save a Stata `.dta`, and export a CSV handoff for "
+                "external R/Python tools. Run the Stata leg through "
+                "`stata_run` with `persist_log_files=true`; read estimates "
+                "from structured `results.e` / `results.r` fields where "
+                "available. Do not claim stata-code ran R or Python unless "
+                "separate tools actually did. Build a comparison table with "
+                "package versions, sample N, target parameter, options, "
+                "estimate, SE, warnings/refusals, and a predeclared numeric "
+                "tolerance. Treat package disagreement as a robustness finding, "
+                "not as a menu for choosing the most convenient result."
+            ),
+        )
+    if name == "data_mcp_to_stata_handoff":
+        raw_path = args.get("raw_path", "<raw-path>")
+        metadata_path = args.get("metadata_path", "<metadata-path>")
+        analysis_goal = args.get("analysis_goal", "<analysis-goal>")
+        return (
+            "Create a data-MCP to Stata handoff",
+            (
+                f"Use `{raw_path}` as the raw data file from an external data "
+                f"MCP. Source metadata is `{metadata_path}` and the analysis "
+                f"goal is `{analysis_goal}`. Do not re-query live data unless "
+                "asked. Write or run a Stata import step that confirms the raw "
+                "file exists, imports it, compresses it, asserts keys/ranges, "
+                "records source metadata in notes where useful, sets a data "
+                "signature, and saves a derived `.dta`. Then run the analysis "
+                "from the derived `.dta` with `stata_run`, "
+                "`origin_path`, and `persist_log_files=true`. Report raw and "
+                "derived paths, validation checks, source metadata, Stata "
+                "results, graph/table/log refs, and any missingness or unit "
+                "warnings. Do not cite an LLM memory value as the data source."
+            ),
+        )
     if name == "summarize_estimation_results":
         run_result_json = args.get("run_result_json", "<run-result-json-or-ref>")
         return (
@@ -1726,6 +2036,153 @@ def _prompt_text(name: str, arguments: dict[str, str] | None) -> tuple[str, str]
                 "bug.\n"
                 "Report changed cell, attempts made, final status, and any "
                 "residual risk."
+            ),
+        )
+    if name == "did_event_study":
+        data_path = args.get("data_path", "<data-path>")
+        outcome = args.get("outcome", "<outcome>")
+        cohort = args.get("cohort", "<cohort>")
+        controls = args.get("controls", "")
+        session_id = args.get("session_id", "did")
+        ctrl = f" controlling for `{controls}`" if controls else ""
+        return (
+            "Run a DiD / event-study workflow",
+            (
+                f"Run a difference-in-differences / event-study analysis of "
+                f"`{outcome}` on the treatment in `{data_path}`{ctrl}, using Stata "
+                f"session `{session_id}`. Follow the turnkey recipe in "
+                "`skills/stata-code/references/recipes/did-event-study.md`:\n"
+                f"1. `use` the data, then `inspect_data` to confirm the unit id, "
+                f"time, and the cohort variable `{cohort}` (first-treatment "
+                "period, not a 0/1 dummy).\n"
+                "2. Fit a `reghdfe` TWFE baseline and run `bacondecomp` to check "
+                "for staggered-adoption bias.\n"
+                "3. Estimate Callaway-Sant'Anna with `csdid` "
+                f"(`gvar({cohort})`, `method(dripw)`); read the overall ATT from "
+                "`results.e.scalars` and fetch the `csdid_plot` event-study figure "
+                "via `get_graph`.\n"
+                "4. Export a stacked esttab table (TWFE + CS-DID columns).\n"
+                "5. Report the ATT, CI, N, and pre-trend evidence from structured "
+                "fields. `install_package` any community command that throws rc "
+                "199. Offer the StatsPAI cross-check (cross_validate_did) if "
+                "robustness matters."
+            ),
+        )
+    if name == "iv_2sls":
+        data_path = args.get("data_path", "<data-path>")
+        outcome = args.get("outcome", "<outcome>")
+        endogenous = args.get("endogenous", "<endogenous>")
+        instruments = args.get("instruments", "<instruments>")
+        controls = args.get("controls", "")
+        session_id = args.get("session_id", "iv")
+        ctrl = f" with exogenous controls `{controls}`" if controls else ""
+        return (
+            "Run an IV / 2SLS workflow",
+            (
+                f"Estimate the effect of `{endogenous}` on `{outcome}` in "
+                f"`{data_path}` by 2SLS, instrumenting with `{instruments}`{ctrl}, "
+                f"in Stata session `{session_id}`. Follow "
+                "`skills/stata-code/references/recipes/iv-2sls.md`:\n"
+                "1. `use` + `inspect_data`; confirm the variable roles.\n"
+                "2. Run the first stage and report relevance (do not skip).\n"
+                "3. `ivregress 2sls` (or `ivreghdfe` for high-dim FE / "
+                "clustering); then `estat firststage`, `estat endogenous`, and "
+                "`estat overid` when over-identified.\n"
+                "4. Apply the weak-instrument decision rule: compare the "
+                "effective F to critical values; report Anderson-Rubin CIs if F is "
+                "marginal.\n"
+                "5. Export an esttab table that includes the first-stage F.\n"
+                "6. Report the estimate as a LATE for compliers, with the "
+                "first-stage F and endogeneity test, all from `results.e`. "
+                "`install_package` any missing community command (rc 199)."
+            ),
+        )
+    if name == "rdd":
+        data_path = args.get("data_path", "<data-path>")
+        outcome = args.get("outcome", "<outcome>")
+        running_var = args.get("running_var", "<running-var>")
+        cutoff = args.get("cutoff", "0")
+        fuzzy = args.get("fuzzy", "")
+        session_id = args.get("session_id", "rd")
+        fuzzy_txt = (
+            f" This is a fuzzy RD; treatment take-up is `{fuzzy}` "
+            f"(use `fuzzy({fuzzy})`)."
+            if fuzzy
+            else " Treat as a sharp RD unless the data says otherwise."
+        )
+        return (
+            "Run a regression-discontinuity workflow",
+            (
+                f"Estimate the effect of crossing cutoff `{cutoff}` in running "
+                f"variable `{running_var}` on `{outcome}` in `{data_path}`, Stata "
+                f"session `{session_id}`.{fuzzy_txt} Follow "
+                "`skills/stata-code/references/recipes/rdd.md`:\n"
+                "1. `use` + `inspect_data`, then `rdplot` and fetch the figure "
+                "via `get_graph` — look before estimating.\n"
+                f"2. `rdrobust {outcome} {running_var}, c({cutoff})`; report the "
+                "robust bias-corrected estimate and CI from `results.e`.\n"
+                "3. Run the three mandatory placebos: `rddensity` (manipulation), "
+                "covariate-balance RD, and bandwidth sensitivity.\n"
+                "4. Export an esttab table reporting the bandwidth.\n"
+                "5. Report the local effect at the cutoff, the bandwidth, and the "
+                "manipulation-test p-value; state the estimand is local. "
+                "`install_package(name=\"rdrobust\")` / `rddensity` if rc 199."
+            ),
+        )
+    if name == "publication_table":
+        models = args.get("models", "<model-names>")
+        output_path = args.get("output_path", "")
+        session_id = args.get("session_id", "main")
+        dest = (
+            f"to `{output_path}` (the extension picks the format)"
+            if output_path
+            else "as an in-log preview (no `using`)"
+        )
+        return (
+            "Export a publication table with esttab",
+            (
+                f"Export the stored estimates `{models}` as columns of one "
+                f"publication table {dest}, from Stata session `{session_id}`. "
+                "Follow `skills/stata-code/references/recipes/publication-tables.md`:"
+                "\n"
+                "1. `install_package(name=\"estout\")` if `esttab` is missing.\n"
+                "2. Build the `esttab` call with `b()`/`se()`, `star(* 0.10 ** "
+                "0.05 *** 0.01)`, a `stats(...)` row (N and the fit stat that "
+                "exists in `e()` — `r2` vs `r2_within`), `mtitles(...)`, and "
+                "reader-facing `coeflabels`.\n"
+                "3. Run it and report the exact output path (esttab writes to "
+                "Stata's working directory) or the previewed table. Do not "
+                "re-estimate models — use the stored estimates as given."
+            ),
+        )
+    if name == "cross_validate_did":
+        data_path = args.get("data_path", "<data-path>")
+        outcome = args.get("outcome", "<outcome>")
+        cohort = args.get("cohort", "<cohort>")
+        controls = args.get("controls", "")
+        session_id = args.get("session_id", "did")
+        ctrl = f" controlling for `{controls}`" if controls else ""
+        return (
+            "Cross-validate a DiD across two stacks",
+            (
+                f"Cross-validate the Callaway-Sant'Anna ATT of `{outcome}` on the "
+                f"treatment in `{data_path}`{ctrl} (cohort `{cohort}`) across two "
+                "independent implementations — the Cunningham robustness check. "
+                "Follow `skills/stata-code/references/recipes/cross-validation.md`:"
+                "\n"
+                f"1. Stata side: run `csdid` in session `{session_id}` and read "
+                "the overall ATT + SE from `results.e.scalars`.\n"
+                "2. Independent side: if the StatsPAI MCP server is available, run "
+                "`mcp__statspai__callaway_santanna` on the same data and roles and "
+                "read its overall ATT. If StatsPAI is not wired up, fall back to a "
+                "second independent Stata estimator (`did_imputation` or "
+                "`did_multiplegt_dyn`).\n"
+                "3. Hold the specification identical across both (control group, "
+                "covariates, aggregation, clustering).\n"
+                "4. State a tolerance up front, then compare point estimates, "
+                "signs, and CIs. If they agree, report the number and cite both "
+                "implementations; if they disagree, reconcile the spec before "
+                "reporting and surface any residual gap as a real finding."
             ),
         )
     raise ValueError(f"Unknown prompt: {name}")
