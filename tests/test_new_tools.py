@@ -444,3 +444,5 @@ def test_skill_docs_match_current_mcp_argument_names():
     ) in skill
     assert "notebook_delete_cell(path, cell_id, expected_source?)" in skill
     assert "get_matrix(name=" not in docs
+    assert "notebook_edit_cell(path, cell_id, source" not in docs
+    assert "notebook_insert_cell(path, after_cell_id" not in docs
