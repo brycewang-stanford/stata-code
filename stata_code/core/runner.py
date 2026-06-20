@@ -218,6 +218,103 @@ def get_log(ref: str) -> dict[str, Any]:
     }
 
 
+def search_log(
+    ref: str,
+    pattern: str,
+    *,
+    is_regex: bool = False,
+    ignore_case: bool = True,
+    context: int = 0,
+    max_matches: int = 50,
+) -> dict[str, Any]:
+    """Auxiliary tool: grep within a stored ``log://`` payload.
+
+    Pairs with the token-economy default of returning long logs by
+    reference: instead of pulling the whole log back with
+    :func:`get_log`, the agent can find just the lines it cares about.
+
+    Parameters
+    ----------
+    ref : str
+        A ``log://<request_id>`` ref produced by a truncated ``stata_run``.
+    pattern : str
+        Substring (default) or regular expression (``is_regex=True``) to
+        match against each line.
+    is_regex : bool
+        Treat ``pattern`` as a Python regular expression. A malformed
+        regex raises :class:`ValueError` (surfaced as ``invalid_request``).
+    ignore_case : bool
+        Case-insensitive matching (default ``True``).
+    context : int
+        Lines of surrounding context to include on each side of a match
+        (capped at 10). ``before`` / ``after`` are omitted when 0.
+    max_matches : int
+        Stop after this many matches; ``truncated`` reports whether more
+        existed (capped at 1000).
+
+    Returns
+    -------
+    dict
+        ``{ref, pattern, is_regex, lines_total, match_count, truncated,
+        matches: [{line_no, text, before?, after?}]}``. ``line_no`` is
+        1-based. Raises :class:`RefNotFound` for an unknown ref.
+    """
+    payload = _refs.get(ref)
+    if payload is None:
+        raise RefNotFound(ref, kind="unknown_log_ref")
+    if not pattern:
+        raise ValueError("pattern must be a non-empty string")
+
+    context = max(0, min(int(context), 10))
+    max_matches = max(1, min(int(max_matches), 1000))
+
+    flags = re.IGNORECASE if ignore_case else 0
+    if is_regex:
+        try:
+            matcher = re.compile(pattern, flags)
+        except re.error as exc:
+            raise ValueError(f"invalid regex: {exc}") from exc
+
+        def _hit(line: str) -> bool:
+            return matcher.search(line) is not None
+    else:
+        needle = pattern.lower() if ignore_case else pattern
+
+        def _hit(line: str) -> bool:
+            hay = line.lower() if ignore_case else line
+            return needle in hay
+
+    text: str = payload["text"]
+    lines = text.split("\n")
+    matches: list[dict[str, Any]] = []
+    truncated = False
+    for idx, line in enumerate(lines):
+        if not _hit(line):
+            continue
+        if len(matches) >= max_matches:
+            truncated = True
+            break
+        entry: dict[str, Any] = {"line_no": idx + 1, "text": line}
+        if context:
+            before = lines[max(0, idx - context):idx]
+            after = lines[idx + 1:idx + 1 + context]
+            if before:
+                entry["before"] = before
+            if after:
+                entry["after"] = after
+        matches.append(entry)
+
+    return {
+        "ref": ref,
+        "pattern": pattern,
+        "is_regex": is_regex,
+        "lines_total": payload["lines_total"],
+        "match_count": len(matches),
+        "truncated": truncated,
+        "matches": matches,
+    }
+
+
 def cancel(session_id: str = "main") -> bool:
     """Request cancellation of the next ``execute()`` call for ``session_id``.
 

@@ -149,7 +149,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 15 tools (`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 18 tools (`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
 
 #### Error Recovery in Agent Workflows
 
@@ -237,15 +237,18 @@ If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
 upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
 processes keep advertising the stale schema until they are restarted.
 
-The MCP server registers 15 tools:
+The MCP server registers 18 tools:
 
 | Tool | Purpose |
 | --- | --- |
 | `stata_run` | Execute Stata code and return a v1.0 RunResult JSON |
 | `stata_info` | Report Stata edition, version, and capabilities |
 | `get_log` | Fetch the full log behind a `log://` ref |
+| `search_log` | Search matching lines inside a stored `log://` payload |
 | `get_graph` | Fetch graph bytes behind a `graph://` ref (`ImageContent`) |
 | `get_matrix` | Fetch matrix payloads behind a `matrix://` ref |
+| `inspect_data` | Run `describe` + `codebook` and return compact dataset metadata |
+| `install_package` | Install an SSC or explicit `net install` package and verify it resolves |
 | `list_sessions` | Enumerate live sessions |
 | `cancel_session` | Cancel a session; the subprocess-backed path terminates in-flight runs and short-circuits pending ones |
 | `reset_session` | Drop a session's data |
@@ -377,7 +380,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (15 tools)
+│   └── server.py      # MCP server (18 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -415,7 +418,7 @@ stata_code/
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 32-kind error taxonomy with canonical suggestions
-- MCP server: 15 tools, including notebook navigation / search / atomic edits and the run-bundle index (`list_runs`)
+- MCP server: 18 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), and package installation (`install_package`)
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`

@@ -147,7 +147,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 15 个工具（`stata_run`, `stata_info`, `get_log`, `get_graph`, `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 18 个工具（`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
 
 #### Agent 工作流里的报错恢复
 
@@ -203,15 +203,18 @@ client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`
 `stata-code>=0.6.5`，然后重启 MCP client。旧 server 进程在重启前仍会继续
 暴露旧 schema。
 
-MCP server 注册了 15 个工具：
+MCP server 注册了 18 个工具：
 
 | 工具 | 用途 |
 | --- | --- |
 | `stata_run` | 执行 Stata code，返回 v1.0 RunResult JSON |
 | `stata_info` | 返回 Stata edition、version 和 capabilities |
 | `get_log` | 通过 `log://` ref 获取完整日志 |
+| `search_log` | 在已存储的 `log://` payload 内搜索匹配行 |
 | `get_graph` | 通过 `graph://` ref 获取图形 bytes（`ImageContent`） |
 | `get_matrix` | 通过 `matrix://` ref 获取矩阵 `{rows, cols, values}` |
+| `inspect_data` | 运行 `describe` + `codebook`，返回紧凑的数据集元数据 |
+| `install_package` | 安装 SSC 或显式 `net install` 包，并验证命令可解析 |
 | `list_sessions` | 列出 live sessions |
 | `cancel_session` | 取消某个 session；subprocess-backed 路径会终止运行中的 worker，也会短路尚未开始的运行 |
 | `reset_session` | 清空某个 session 的数据 |
@@ -328,7 +331,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (15 tools)
+│   └── server.py      # MCP server (18 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -366,7 +369,7 @@ stata_code/
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 32 类错误分类法 + 标准化建议
-- MCP server：15 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）
+- MCP server：18 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）和包安装（`install_package`）
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`

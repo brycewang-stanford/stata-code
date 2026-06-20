@@ -18,8 +18,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import sys
 from typing import Any, cast
+from urllib.parse import urlparse
 
 try:
     from mcp.server import Server
@@ -92,6 +94,7 @@ from stata_code.core.runner import (
     get_graph,
     get_log,
     get_matrix,
+    search_log,
 )
 from stata_code.core.schema import RunResult
 
@@ -1098,6 +1101,183 @@ def _tool_definitions() -> list[Tool]:
                 openWorldHint=True,
             ),
         ),
+        Tool(
+            name="install_package",
+            title="Install Stata Package",
+            description=(
+                "Install a community-contributed Stata package (e.g. "
+                "reghdfe, coefplot, estout, ftools) without the agent "
+                "having to remember `ssc install` / `net install` syntax. "
+                "Runs the install in the named session, then verifies the "
+                "package resolves with `which`. Returns a compact JSON "
+                "summary: {name, source, command, ok, verified, rc, stata, "
+                "log, error}. On failure the typed error block (kind: "
+                "network / permission / file_not_found / ...) is surfaced "
+                "so the agent can react. Idempotent by default (replace)."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": (
+                            "Package name, e.g. 'reghdfe'. For ssc this is "
+                            "the SSC package id; for net it is the package "
+                            "name within the `from()` repository."
+                        ),
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["ssc", "net"],
+                        "default": "ssc",
+                        "description": (
+                            "'ssc' installs from the Boston College SSC "
+                            "archive. 'net' installs from an explicit `url` "
+                            "(required for net)."
+                        ),
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": (
+                            "Repository URL for `net install <name>, "
+                            "from(<url>)`. Required when source='net', "
+                            "ignored for source='ssc'."
+                        ),
+                    },
+                    "replace": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Pass the `replace` option so an existing "
+                            "install is overwritten (keeps the call "
+                            "idempotent)."
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "default": "main",
+                        "description": "Session to install into. Defaults to 'main'.",
+                    },
+                },
+                "required": ["name"],
+            },
+            annotations=ToolAnnotations(
+                title="Install Stata Package",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
+        ),
+        Tool(
+            name="search_log",
+            title="Search a Stata Log",
+            description=(
+                "Grep within a `log://` payload returned by a truncated "
+                "stata_run (log.ref). Returns only the matching lines (with "
+                "optional surrounding context) instead of pulling the whole "
+                "log back via get_log — the token-economy way to inspect a "
+                "long log. Substring match by default; set is_regex=true for "
+                "a Python regular expression."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "A 'log://<request_id>' ref from log.ref.",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Substring or regex to search for.",
+                    },
+                    "is_regex": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Treat pattern as a Python regular expression.",
+                    },
+                    "ignore_case": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Case-insensitive match (default true).",
+                    },
+                    "context": {
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
+                        "maximum": 10,
+                        "description": (
+                            "Lines of context to include on each side of a "
+                            "match (capped at 10)."
+                        ),
+                    },
+                    "max_matches": {
+                        "type": "integer",
+                        "default": 50,
+                        "minimum": 1,
+                        "maximum": 1000,
+                        "description": "Stop after this many matches.",
+                    },
+                },
+                "required": ["ref", "pattern"],
+            },
+            annotations=ToolAnnotations(
+                title="Search a Stata Log",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="inspect_data",
+            title="Inspect Dataset",
+            description=(
+                "One-call 'what is in this dataset' for the in-memory data "
+                "of a session. Runs `describe` + `codebook` (compact unless "
+                "detail=true) and returns the structured dataset block "
+                "(frame, n_obs, n_vars, variables) plus the codebook log so "
+                "the agent does not have to remember the command. Branch on "
+                "the structured `dataset` field; the `log` is human-oriented "
+                "detail (head + ref). Read-only: it never modifies data."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "varlist": {
+                        "type": "string",
+                        "description": (
+                            "Optional space-separated variable list (or "
+                            "wildcard, e.g. 'pri*') to restrict the report. "
+                            "Omit to inspect all variables."
+                        ),
+                    },
+                    "detail": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "False (default) runs `codebook, compact` (one "
+                            "row per variable). True runs the full `codebook`."
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "default": "main",
+                        "description": "Session to inspect. Defaults to 'main'.",
+                    },
+                },
+            },
+            annotations=ToolAnnotations(
+                title="Inspect Dataset",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
+        ),
     ]
 
 
@@ -1785,6 +1965,12 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _notebook_delete_cell_tool(arguments)
         if name == "list_runs":
             return _list_runs_tool(arguments)
+        if name == "install_package":
+            return await asyncio.to_thread(_install_package_tool, arguments)
+        if name == "search_log":
+            return _search_log_tool(arguments)
+        if name == "inspect_data":
+            return await asyncio.to_thread(_inspect_data_tool, arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
         return _error_result(str(exc), kind=exc.kind)
@@ -1833,6 +2019,195 @@ def _run_tool(arguments: dict[str, Any]) -> Any:
     except (ValueError, NotImplementedError) as exc:
         return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
     payload = json.loads(result.model_dump_json())
+    return _json_result(payload)
+
+
+def _compact_log(log: Any) -> dict[str, Any]:
+    """Project a LogInfo down to the fields a convenience tool needs.
+
+    Keeps responses small: head + the ``log://`` ref (for a follow-up
+    ``get_log`` / ``search_log``) rather than the full transcript.
+    """
+    return {
+        "head": getattr(log, "head", ""),
+        "truncated": getattr(log, "truncated", False),
+        "lines_total": getattr(log, "lines_total", 0),
+        "ref": getattr(log, "ref", None),
+    }
+
+
+# Stata package ids are plain names; reject anything that could smuggle
+# additional commands into the generated `ssc install` / `net install` line.
+_PACKAGE_NAME_RE = re.compile(r"[A-Za-z0-9_]+")
+# Varlists are names, wildcards (* ?), ranges (a-b), and horizontal
+# whitespace only. `\s` is deliberately NOT used: it matches newlines,
+# which would let a varlist smuggle extra commands into the generated code.
+_VARLIST_RE = re.compile(r"[A-Za-z0-9_*?~ \t\-]+")
+_URL_STATA_DELIMITERS = set("(),;`'\"")
+
+
+def _is_safe_net_install_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and not any(ch.isspace() for ch in url)
+        and not any(ch in _URL_STATA_DELIMITERS for ch in url)
+    )
+
+
+def _install_package_tool(arguments: dict[str, Any]) -> Any:
+    name, err = _require_str(arguments, "name")
+    if err is not None:
+        return err
+    if not _PACKAGE_NAME_RE.fullmatch(name):
+        return _error_result(
+            "name must be a Stata package name ([A-Za-z0-9_]+)",
+            kind="invalid_request",
+        )
+    source = arguments.get("source", "ssc")
+    if source not in ("ssc", "net"):
+        return _error_result("source must be 'ssc' or 'net'", kind="invalid_request")
+    replace, err = _bool_arg(arguments, "replace", default=True)
+    if err is not None:
+        return err
+    session_id = arguments.get("session_id", "main")
+    if not isinstance(session_id, str) or not session_id:
+        return _error_result(
+            "session_id must be a non-empty string", kind="invalid_request"
+        )
+    url = arguments.get("url")
+    if url is not None and not isinstance(url, str):
+        return _error_result("url must be a string", kind="invalid_request")
+
+    if source == "ssc":
+        cmd = f"ssc install {name}"
+        if replace:
+            cmd += ", replace"
+    else:  # net
+        if not url:
+            return _error_result(
+                "url is required when source='net'", kind="invalid_request"
+            )
+        if not _is_safe_net_install_url(url):
+            return _error_result(
+                "url must be a plain http(s) URL with no whitespace or Stata option delimiters",
+                kind="invalid_request",
+            )
+        opts = [f"from({url})"]
+        if replace:
+            opts.append("replace")
+        cmd = f"net install {name}, " + " ".join(opts)
+
+    try:
+        result = pool_execute(cmd, session_id=session_id)
+    except (ValueError, NotImplementedError) as exc:
+        return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
+
+    # Best-effort verification that the package now resolves. `which` returns
+    # rc 111 when the command is still unknown, so `ok` is a clean signal.
+    verified = False
+    if result.ok:
+        try:
+            check = pool_execute(f"which {name}", session_id=session_id)
+            verified = bool(check.ok)
+        except Exception:  # noqa: BLE001 - verification is best-effort
+            verified = False
+
+    payload = {
+        "name": name,
+        "source": source,
+        "command": cmd,
+        "session_id": session_id,
+        "ok": bool(result.ok),
+        "verified": verified,
+        "rc": result.rc,
+        "stata": result.stata.model_dump() if result.stata else None,
+        "log": _compact_log(result.log),
+        "error": result.error.model_dump() if result.error else None,
+    }
+    return _json_result(payload)
+
+
+def _search_log_tool(arguments: dict[str, Any]) -> Any:
+    ref, err = _require_str(arguments, "ref")
+    if err is not None:
+        return err
+    pattern, err = _require_str(arguments, "pattern")
+    if err is not None:
+        return err
+    is_regex, err = _bool_arg(arguments, "is_regex", default=False)
+    if err is not None:
+        return err
+    ignore_case, err = _bool_arg(arguments, "ignore_case", default=True)
+    if err is not None:
+        return err
+    context = arguments.get("context", 0)
+    if not isinstance(context, int) or isinstance(context, bool) or context < 0:
+        return _error_result(
+            "context must be a non-negative integer", kind="invalid_request"
+        )
+    max_matches = arguments.get("max_matches", 50)
+    if (
+        not isinstance(max_matches, int)
+        or isinstance(max_matches, bool)
+        or max_matches < 1
+    ):
+        return _error_result(
+            "max_matches must be a positive integer", kind="invalid_request"
+        )
+    # search_log raises RefNotFound (→ unknown_log_ref) and ValueError (bad
+    # regex → invalid_request); both are mapped by the _dispatch handlers.
+    payload = search_log(
+        ref,
+        pattern,
+        is_regex=is_regex,
+        ignore_case=ignore_case,
+        context=context,
+        max_matches=max_matches,
+    )
+    return _json_result(payload)
+
+
+def _inspect_data_tool(arguments: dict[str, Any]) -> Any:
+    varlist = arguments.get("varlist")
+    if varlist is not None and not isinstance(varlist, str):
+        return _error_result("varlist must be a string", kind="invalid_request")
+    detail, err = _bool_arg(arguments, "detail", default=False)
+    if err is not None:
+        return err
+    session_id = arguments.get("session_id", "main")
+    if not isinstance(session_id, str) or not session_id:
+        return _error_result(
+            "session_id must be a non-empty string", kind="invalid_request"
+        )
+    vl = (varlist or "").strip()
+    if vl and not _VARLIST_RE.fullmatch(vl):
+        return _error_result(
+            "varlist may only contain variable names, wildcards, and ranges",
+            kind="invalid_request",
+        )
+
+    describe_cmd = f"describe {vl}" if vl else "describe"
+    if detail:
+        codebook_cmd = f"codebook {vl}" if vl else "codebook"
+    else:
+        codebook_cmd = f"codebook {vl}, compact" if vl else "codebook, compact"
+    code = f"{describe_cmd}\n{codebook_cmd}"
+
+    try:
+        result = pool_execute(code, session_id=session_id)
+    except (ValueError, NotImplementedError) as exc:
+        return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
+
+    payload = {
+        "session_id": session_id,
+        "ok": bool(result.ok),
+        "rc": result.rc,
+        "dataset": result.dataset.model_dump() if result.dataset else None,
+        "log": _compact_log(result.log),
+        "error": result.error.model_dump() if result.error else None,
+    }
     return _json_result(payload)
 
 
