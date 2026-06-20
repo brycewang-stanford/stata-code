@@ -12,6 +12,8 @@
 
 import * as vscode from "vscode";
 
+import { buildDataNodes, type DataNode } from "./dataBrowser";
+import { buildOutputNodes, type OutputNode } from "./outputs";
 import type { StataMcpClient } from "./mcpClient";
 import type { GraphInfo, Matrix, RunResult } from "./types/runResult";
 
@@ -370,6 +372,42 @@ function formatScalar(v: unknown): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Data browser (current dataset / variables)
+// ─────────────────────────────────────────────────────────────────────────
+
+export class DataProvider implements vscode.TreeDataProvider<DataNode> {
+  private readonly _changed = new vscode.EventEmitter<DataNode | undefined>();
+  readonly onDidChangeTreeData = this._changed.event;
+
+  constructor(private readonly store: ResultStore) {}
+
+  refresh(): void {
+    this._changed.fire(undefined);
+  }
+
+  getTreeItem(node: DataNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
+    item.description = node.description;
+    item.tooltip = node.tooltip;
+    if (node.icon) item.iconPath = new vscode.ThemeIcon(node.icon);
+    if (node.kind === "variable") {
+      item.contextValue = "stataCode.variable";
+      item.command = {
+        command: "stataCode.copyVariableName",
+        title: "Copy Variable Name",
+        arguments: [node.varName],
+      };
+    }
+    return item;
+  }
+
+  getChildren(parent?: DataNode): DataNode[] {
+    if (parent) return [];
+    return buildDataNodes(this.store.getLastResult());
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Run history
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -520,4 +558,46 @@ class LogHistoryItem extends vscode.TreeItem {
 
 function formatClock(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Outputs (table / export artifacts written during runs)
+// ─────────────────────────────────────────────────────────────────────────
+
+export class OutputsHistoryProvider implements vscode.TreeDataProvider<OutputItem> {
+  private readonly _changed = new vscode.EventEmitter<OutputItem | undefined>();
+  readonly onDidChangeTreeData = this._changed.event;
+
+  constructor(private readonly store: ResultStore) {}
+
+  refresh(): void {
+    this._changed.fire(undefined);
+  }
+
+  getTreeItem(item: OutputItem): vscode.TreeItem {
+    return item;
+  }
+
+  getChildren(): OutputItem[] {
+    const runs = this.store
+      .getRunHistory()
+      .map((e) => ({ runId: e.runId, ts: e.ts, result: e.result }));
+    return buildOutputNodes(runs).map((node) => new OutputItem(node));
+  }
+}
+
+class OutputItem extends vscode.TreeItem {
+  constructor(public readonly node: OutputNode) {
+    super(node.label, vscode.TreeItemCollapsibleState.None);
+    this.description = node.description;
+    this.tooltip = node.tooltip;
+    this.resourceUri = vscode.Uri.file(node.path);
+    this.iconPath = new vscode.ThemeIcon(node.icon);
+    this.contextValue = "stataCode.outputItem";
+    this.command = {
+      command: "stataCode.openOutputFile",
+      title: "Open Output",
+      arguments: [node.path],
+    };
+  }
 }

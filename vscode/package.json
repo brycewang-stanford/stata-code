@@ -101,6 +101,34 @@
         }
       },
       {
+        "command": "stataCode.copyVariableName",
+        "title": "Stata: Copy Variable Name",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.refreshData",
+        "title": "Stata: Refresh Data View",
+        "category": "stata-code",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "stataCode.openOutputFile",
+        "title": "Stata: Open Output File",
+        "category": "stata-code"
+      },
+      {
+        "command": "stataCode.revealOutputFile",
+        "title": "Stata: Reveal Output File in OS",
+        "category": "stata-code",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "stataCode.refreshOutputs",
+        "title": "Stata: Refresh Outputs View",
+        "category": "stata-code",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "stataCode.rerunHistory",
         "title": "Stata: Rerun",
         "category": "stata-code",
@@ -298,6 +326,12 @@
           "contextualTitle": "stata-code"
         },
         {
+          "id": "stataCode.dataBrowser",
+          "name": "Data",
+          "icon": "$(table)",
+          "contextualTitle": "stata-code"
+        },
+        {
           "id": "stataCode.runHistory",
           "name": "Run History",
           "icon": "$(history)",
@@ -314,6 +348,12 @@
           "name": "Graphs",
           "icon": "$(graph)",
           "contextualTitle": "stata-code"
+        },
+        {
+          "id": "stataCode.outputs",
+          "name": "Outputs",
+          "icon": "$(files)",
+          "contextualTitle": "stata-code"
         }
       ]
     },
@@ -321,6 +361,10 @@
       {
         "view": "stataCode.lastResult",
         "contents": "No run yet. Open a Stata file and press Cmd/Ctrl+Enter to run a selection."
+      },
+      {
+        "view": "stataCode.dataBrowser",
+        "contents": "No dataset in memory yet. Run a Stata command (for example: sysuse auto, clear) to browse its variables here."
       },
       {
         "view": "stataCode.runHistory",
@@ -333,6 +377,10 @@
       {
         "view": "stataCode.graphsHistory",
         "contents": "No graphs captured yet."
+      },
+      {
+        "view": "stataCode.outputs",
+        "contents": "No exported files yet. Tables and exports written during a run (esttab, outreg2, export delimited, save) are surfaced here — run with run-bundle logging enabled to collect them."
       }
     ],
     "menus": {
@@ -437,6 +485,16 @@
           "group": "navigation@1"
         },
         {
+          "command": "stataCode.viewDataPreview",
+          "when": "view == stataCode.dataBrowser",
+          "group": "navigation@1"
+        },
+        {
+          "command": "stataCode.refreshData",
+          "when": "view == stataCode.dataBrowser",
+          "group": "navigation@2"
+        },
+        {
           "command": "stataCode.refreshSessions",
           "when": "view == stataCode.sessions",
           "group": "navigation@2"
@@ -470,9 +528,29 @@
           "command": "stataCode.clearGraphs",
           "when": "view == stataCode.graphsHistory",
           "group": "navigation@2"
+        },
+        {
+          "command": "stataCode.refreshOutputs",
+          "when": "view == stataCode.outputs",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
+        {
+          "command": "stataCode.copyVariableName",
+          "when": "view == stataCode.dataBrowser && viewItem == stataCode.variable",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.openOutputFile",
+          "when": "view == stataCode.outputs && viewItem == stataCode.outputItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "stataCode.revealOutputFile",
+          "when": "view == stataCode.outputs && viewItem == stataCode.outputItem",
+          "group": "inline@2"
+        },
         {
           "command": "stataCode.switchSession",
           "when": "view == stataCode.sessions && viewItem =~ /stataCode.session/",
@@ -565,6 +643,18 @@
         },
         {
           "command": "stataCode.openMatrix",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.copyVariableName",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.openOutputFile",
+          "when": "false"
+        },
+        {
+          "command": "stataCode.revealOutputFile",
           "when": "false"
         },
         {

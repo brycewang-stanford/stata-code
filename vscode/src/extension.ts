@@ -36,9 +36,11 @@ import {
 } from "./stataLanguage";
 import { StataStatusBar, currentSessionId } from "./statusBar";
 import {
+  DataProvider,
   GraphsHistoryProvider,
   LastResultProvider,
   LogsHistoryProvider,
+  OutputsHistoryProvider,
   RunHistoryProvider,
   type GraphHistoryEntry,
   type LogHistoryEntry,
@@ -75,9 +77,11 @@ const runHistory: RunHistoryEntry[] = [];
 
 let sessionsProvider: SessionsProvider | undefined;
 let lastResultProvider: LastResultProvider | undefined;
+let dataProvider: DataProvider | undefined;
 let graphsHistoryProvider: GraphsHistoryProvider | undefined;
 let logsHistoryProvider: LogsHistoryProvider | undefined;
 let runHistoryProvider: RunHistoryProvider | undefined;
+let outputsProvider: OutputsHistoryProvider | undefined;
 let diagnostics: StataDiagnostics | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -146,15 +150,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   sessionsProvider = new SessionsProvider(getClient, sessionStore);
   lastResultProvider = new LastResultProvider(resultStore);
+  dataProvider = new DataProvider(resultStore);
   runHistoryProvider = new RunHistoryProvider(resultStore);
+  outputsProvider = new OutputsHistoryProvider(resultStore);
   graphsHistoryProvider = new GraphsHistoryProvider(resultStore);
   logsHistoryProvider = new LogsHistoryProvider(resultStore);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider("stataCode.sessions", sessionsProvider),
     vscode.window.registerTreeDataProvider("stataCode.lastResult", lastResultProvider),
+    vscode.window.registerTreeDataProvider("stataCode.dataBrowser", dataProvider),
     vscode.window.registerTreeDataProvider("stataCode.runHistory", runHistoryProvider),
     vscode.window.registerTreeDataProvider("stataCode.logsHistory", logsHistoryProvider),
     vscode.window.registerTreeDataProvider("stataCode.graphsHistory", graphsHistoryProvider),
+    vscode.window.registerTreeDataProvider("stataCode.outputs", outputsProvider),
   );
 
   void maybePromptForServerInstall(context);
@@ -172,6 +180,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
     vscode.commands.registerCommand("stataCode.openMatrix", openMatrix),
     vscode.commands.registerCommand("stataCode.viewDataPreview", viewDataPreview),
+    vscode.commands.registerCommand("stataCode.copyVariableName", copyVariableName),
+    vscode.commands.registerCommand("stataCode.refreshData", () => dataProvider?.refresh()),
+    vscode.commands.registerCommand("stataCode.openOutputFile", openOutputFile),
+    vscode.commands.registerCommand("stataCode.revealOutputFile", revealOutputFile),
+    vscode.commands.registerCommand("stataCode.refreshOutputs", () => outputsProvider?.refresh()),
     vscode.commands.registerCommand("stataCode.rerunHistory", rerunHistory),
     vscode.commands.registerCommand("stataCode.copyRunCode", copyRunCode),
     vscode.commands.registerCommand("stataCode.exportRunBundle", exportRunBundle),
@@ -419,7 +432,9 @@ async function submitCode(code: string, origin: SubmitOrigin): Promise<void> {
         recordGraphs(result);
         diagnostics?.publish(origin, result);
         lastResultProvider?.refresh();
+        dataProvider?.refresh();
         runHistoryProvider?.refresh();
+        outputsProvider?.refresh();
         logsHistoryProvider?.refresh();
         graphsHistoryProvider?.refresh();
         sessionsProvider?.refresh();
@@ -673,6 +688,27 @@ async function viewDataPreview(): Promise<void> {
   });
 }
 
+async function copyVariableName(varName?: unknown): Promise<void> {
+  if (typeof varName !== "string" || varName.length === 0) return;
+  await vscode.env.clipboard.writeText(varName);
+  vscode.window.showInformationMessage(`stata-code: copied variable "${varName}"`);
+}
+
+async function openOutputFile(path?: unknown): Promise<void> {
+  if (typeof path !== "string" || path.length === 0) return;
+  const uri = vscode.Uri.file(path);
+  try {
+    await vscode.commands.executeCommand("vscode.open", uri);
+  } catch {
+    await vscode.env.openExternal(uri);
+  }
+}
+
+async function revealOutputFile(path?: unknown): Promise<void> {
+  if (typeof path !== "string" || path.length === 0) return;
+  await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(path));
+}
+
 async function rerunHistory(target?: unknown): Promise<void> {
   const entry = resolveRunHistoryEntry(target);
   if (!entry) {
@@ -697,6 +733,7 @@ async function copyRunCode(target?: unknown): Promise<void> {
 function clearRunHistory(): void {
   runHistory.splice(0);
   runHistoryProvider?.refresh();
+  outputsProvider?.refresh();
 }
 
 async function exportRunBundle(target?: unknown): Promise<void> {
@@ -1122,7 +1159,9 @@ function removeMatching<T>(items: T[], predicate: (item: T) => boolean): void {
 
 function refreshResultViews(): void {
   lastResultProvider?.refresh();
+  dataProvider?.refresh();
   runHistoryProvider?.refresh();
+  outputsProvider?.refresh();
   logsHistoryProvider?.refresh();
   graphsHistoryProvider?.refresh();
   sessionsProvider?.refresh();

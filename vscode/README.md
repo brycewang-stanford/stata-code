@@ -4,7 +4,7 @@ Run Stata code from VSCode through the agent-native [stata-code](https://github.
 
 > **Status: v0.7 (May 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
-> sidebar with sessions / last result / run history / logs / graphs panels,
+> sidebar with sessions / last result / data (variables) / run history / logs / graphs / outputs panels,
 > syntax highlighting, outline/section navigation, code-lens cells and sections,
 > inline error squigglies, graph webview Save/Open actions, run-bundle export,
 > and Stata working-directory helpers. Source build with
@@ -68,7 +68,7 @@ the MCP `cancel_session` tool).
 
 ### Activity bar sidebar
 
-A new entry on the activity bar opens a sidebar with five sections:
+A new entry on the activity bar opens a sidebar with seven sections:
 
 - **Sessions** — live `list_sessions` view with the current session
   highlighted; header buttons for New / Refresh and per-item actions for
@@ -80,6 +80,14 @@ A new entry on the activity bar opens a sidebar with five sections:
   `graphs` leaf, and on failure a typed error block with the failing line
   and suggestions. Matrix entries open on demand via `get_matrix(ref)` as
   TSV text.
+- **Data** — a persistent variables browser for the dataset currently in
+  memory: a summary row (`N obs × K vars`, frame, and a "modified" flag)
+  followed by one row per variable, each with a type-aware icon
+  (numeric vs string), its variable label as the description, and a
+  tooltip with the full `name · type · label`. Click a variable to copy
+  its name; use the title-bar buttons to open the full data preview or
+  refresh. The view tracks the last run, so it updates as the data
+  changes — the agent-native equivalent of Stata's Variables window.
 - **Run History** — recent runs (capped at 64). Each item can rerun the
   exact submitted code, copy the code, open the JSON result, or export a
   reproducible run bundle.
@@ -89,6 +97,14 @@ A new entry on the activity bar opens a sidebar with five sections:
 - **Graphs** — every captured graph in reverse-chronological order
   (capped at 64); click any item to open it in the graph webview, or
   save it directly from the item context menu.
+- **Outputs** — table and export artifacts written during your runs
+  (`esttab`/`outreg2` tables, `export delimited`/`export excel` files,
+  saved `.dta`, figures exported to disk). The runner snapshots the
+  working directory around each run and copies new/changed files into the
+  run bundle; this view lists them newest-first with a format-aware icon.
+  Click to open the file, or reveal it in Finder/Explorer from the item
+  context menu. Populated when run-bundle logging is on
+  (`persist_log_files=true`, which the method-workflow MCP prompts set).
 
 ### Run bundles
 
