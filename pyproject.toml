@@ -47,6 +47,7 @@ kernel = ["ipykernel>=6.0"]
 all = ["stata-code[mcp,kernel]"]
 
 [project.scripts]
+stata-code = "stata_code.cli:run_main"
 stata-code-kernel = "stata_code.kernel.kernel:run_main"
 stata-code-mcp = "stata_code.mcp.server:run_main"
 
