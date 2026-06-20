@@ -157,6 +157,18 @@ class TestSearchLogFunction:
         with pytest.raises(RefNotFound):
             search_log("log://nope", "x")
 
+    def test_non_log_ref_raises_unknown_log_ref(self):
+        from stata_code.core.runner import RefNotFound
+
+        ref = "matrix://not-a-log/e/M"
+        _refs.put(ref, {"rows": ["r"], "cols": ["c"], "values": [[1.0]]})
+        try:
+            with pytest.raises(RefNotFound) as excinfo:
+                search_log(ref, "x")
+        finally:
+            _refs.discard(ref)
+        assert excinfo.value.kind == "unknown_log_ref"
+
     def test_bad_regex_raises_valueerror(self):
         _put_log("log://sl5", ["x"])
         with pytest.raises(ValueError):
@@ -184,6 +196,18 @@ class TestSearchLogDispatch:
                 "search_log", {"ref": "log://missing", "pattern": "x"}
             )
         )
+        assert out.isError is True
+        assert out.structuredContent["kind"] == "unknown_log_ref"
+
+    def test_dispatch_non_log_ref_is_error(self):
+        ref = "matrix://not-a-log-dispatch/e/M"
+        _refs.put(ref, {"rows": ["r"], "cols": ["c"], "values": [[1.0]]})
+        try:
+            out = asyncio.run(
+                server._dispatch("search_log", {"ref": ref, "pattern": "x"})
+            )
+        finally:
+            _refs.discard(ref)
         assert out.isError is True
         assert out.structuredContent["kind"] == "unknown_log_ref"
 

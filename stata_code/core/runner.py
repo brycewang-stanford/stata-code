@@ -260,7 +260,11 @@ def search_log(
         1-based. Raises :class:`RefNotFound` for an unknown ref.
     """
     payload = _refs.get(ref)
-    if payload is None:
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("text"), str)
+        or "lines_total" not in payload
+    ):
         raise RefNotFound(ref, kind="unknown_log_ref")
     if not pattern:
         raise ValueError("pattern must be a non-empty string")
