@@ -6,6 +6,32 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## Unreleased
 
+### Added
+
+- **Economist workflow coordination and roadmap.** Added
+  `AGENT_COORDINATION.md` for concurrent-agent lanes and
+  `docs/industry-leader-roadmap.md` for the one-month product plan: workflow
+  intelligence, parity audits, data-MCP handoff, editor/artifact polish, and
+  distribution diagnostics.
+- **Cross-stack and data-MCP workflow references.** The `stata-code` skill now
+  includes `references/parity-audit.md` and
+  `references/data-mcp-handoff.md`, plus cookbook examples for cross-stack
+  parity audits and external-data-MCP handoff into Stata.
+- **Modern empirical-economics package notes.** Added package references for
+  `csdid`, `drdid`, `did_imputation`, `eventstudyinteract`,
+  `did_multiplegt_dyn`, `rdrobust`, `ivreg2`, `ivreghdfe`, `boottest`, and
+  `outreg2`, and wired them into the skill routing table.
+- **MCP prompt discoverability for economist workflows.** Added
+  `plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`,
+  `did_event_study`, `iv_2sls`, `rdd`, `publication_table`, and
+  `cross_validate_did` prompts so clients can discover the new protocols and
+  turnkey empirical recipes directly through MCP.
+- **Read-only installation diagnostics.** Added the top-level `stata-code`
+  console script with `doctor` / `verify` commands. The diagnostic reports
+  package/Python version, MCP and kernel extras, `pystata` discovery, console
+  scripts on `PATH`, client/VS Code hints, and an optional live Stata
+  version/edition probe without mutating user configuration.
+
 ## 0.7.2 — 2026-06-20
 
 ### Added

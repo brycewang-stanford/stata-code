@@ -28,6 +28,22 @@
 
 `stata-code` 让你可以从现代开发环境中驱动 Stata：LLM 智能体（Claude Code、Cursor、Claude Desktop）、Jupyter notebook，或 VS Code 编辑器。它们共享同一个 Python 核心，并返回稳定、结构化、**适合智能体读取**的结果格式。
 
+**面向实证经济学家。** 用自然语言驱动 Stata：**一次对话里跑完 DiD、IV、RDD 和出版级 `esttab` 表**——再把每个估计在 Stata 与 Python 两套实现上交叉核对，只采信结果一致的那一个（Cunningham 跨包稳健性检验）。
+
+**60 秒上手**（配合 [Claude Code](https://github.com/anthropics/claude-code)，无需全局安装）：
+
+```bash
+claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
+```
+
+然后直接问：
+
+> *“用 `data/cfps_panel.dta` 跑一个工人月工资对处理变量的双向固定效应回归（控制变量 `age age2 edu industry`），再用 Callaway-Sant'Anna 检验异质处理效应，最后输出 `esttab` 表。”*
+
+`stata-code` 会自动写 do 文件、运行、把表格回传并解读结果——还能用 [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) 把同一个 ATT 再估一遍，确认两套结果一致。这些工作流以一键 MCP prompts（`did_event_study`、`iv_2sls`、`rdd`、`publication_table`、`cross_validate_did`）的形式提供，背后是一个按需调用的 [recipe 库](skills/stata-code/references/recipes/)。
+
+**为什么选 `stata-code`：** MIT 许可证 · 同时提供 MCP server、内置 agent skill、Jupyter kernel **和** VS Code 扩展 · 统一的结构化、省 token 的结果格式（typed errors、原生 `r()` / `e()`）· 配合 StatsPAI 做跨栈交叉验证（Cunningham 检验）。
+
 ```text
                     ┌────────────────────────────────────────┐
                     │     stata-code core (Python)           │
@@ -47,10 +63,11 @@
 
 **当前状态：v0.7（2026 年 5 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
 
-当前版本明确支持的两种用户工作流：
+当前代码树明确支持的三类用户 / agent 工作流：
 
 - **在 Jupyter notebook 里跑 Stata 代码。** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` 会注册一个名为 **Stata** 的 kernel，Jupyter Notebook、JupyterLab、以及 VS Code 的 Jupyter 扩展都能在 kernel 选择器里看到它。Cell 里直接写 Stata 命令，日志、图形和警告会内联渲染（自 v0.5 起 kernel logo 已一起打包进 PyPI wheel，VS Code 的 Jupyter kernel picker 也能正常显示）。详见下文 [作为 Jupyter kernel](#作为-jupyter-kernel)。
 - **可选的 agent「修复并重跑」循环。** `stata_run` 在每次失败时都会返回结构化的 `error.kind/line/context` 和 `suggestions`。默认情况下 Claude Code 只把它当作诊断信息上报；但如果你明确说「帮我修到跑通」「修复并反复运行直到成功」，agent 就会用同一组字段去改 `.do` 文件、再调 `stata_run`，直到代码通过。这个修复循环是 **opt-in** 的：默认失败 = 诊断，不是自动改写授权。详见下文 [Agent 工作流里的报错恢复](#agent-工作流里的报错恢复)。
+- **经济学实证工作流指南。** 随包 skill 和 cookbook 覆盖现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP 到 Stata 的交接、以及跨包/跨栈 parity audit。`stata-code` 负责运行和审计 Stata 这一侧；R、Python、官方数据 MCP 仍是独立工具，通过显式 handoff 文件和 source metadata 衔接。详见 [`skills/stata-code/references/`](skills/stata-code/references/) 和 [`examples/`](examples/)。
 
 ---
 
@@ -97,6 +114,18 @@ pip install -e ".[mcp,kernel]"
 > 所以：`pip install stata-code`，`from stata_code import run`。
 
 注意：`pystata` **不在 PyPI 上**，它随 Stata 一起安装。`stata-code` 会自动在 macOS 的 `/Applications/Stata/utilities/pystata` 以及 Linux / Windows 的对应位置寻找它。如果你的 Stata 安装在其他位置，请在导入前把 `pystata` 加到 `PYTHONPATH`。
+
+安装后可以用只读 doctor 检查本机环境：
+
+```bash
+stata-code doctor
+stata-code doctor --json          # 机器可读输出
+stata-code doctor --no-stata-probe # 跳过实时 Stata 初始化
+```
+
+doctor 会报告 package/Python 版本、MCP 和 Jupyter extras、`pystata` 发现结果、
+`PATH` 上的 console scripts、client/VS Code 配置提示，以及 best-effort 的
+Stata 版本/edition 探测。它不会改 shell、Stata、Claude 或 VS Code 配置。
 
 ---
 
@@ -240,8 +269,11 @@ server 还暴露 MCP resources：
 | `matrix://...` | 延迟获取的大矩阵 payload |
 
 同时提供 MCP prompts：`run_do_file_and_report`、`debug_stata_error`、
-`fix_and_rerun_until_passes`、`replication_audit` 和
-`summarize_estimation_results`，用于常见 agent 工作流。
+`fix_and_rerun_until_passes`、`replication_audit`、
+`plan_cross_stack_parity_audit`、`data_mcp_to_stata_handoff`、
+`summarize_estimation_results`、`run_notebook_cell_and_report`、
+`fix_and_rerun_notebook_cell`、`did_event_study`、`iv_2sls`、`rdd`、
+`publication_table` 和 `cross_validate_did`，用于常见 agent 工作流。
 
 ### 作为 Jupyter kernel
 
@@ -282,6 +314,11 @@ code --install-extension brycewang-stanford.stata-code-vscode
 或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。
 
 扩展仍然依赖系统 Python 上安装了 MCP extra（`pip install "stata-code[mcp]"`），从而保证 `stata-code-mcp` 在 `PATH` 上可用，并且能导入 MCP SDK。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
+
+如果扩展或 MCP client 找不到 server，请在同一个 Python 环境里运行
+`stata-code doctor --no-stata-probe`。它会报告 `stata-code-mcp` 是否在
+`PATH` 上，并提示 GUI client 常见的绝对路径或 `python -m stata_code.mcp`
+兜底配置。
 
 ---
 
@@ -359,7 +396,7 @@ stata_code/
 
 ## 路线图
 
-### 已完成（截至 v0.7 —— 2026 年 5 月）
+### 已完成（当前代码树）
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - 基于 `pystata` 的 runner，原生类型化的 `r()`、`e()` 和矩阵
@@ -375,6 +412,10 @@ stata_code/
 - 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`
 - `.ipynb` 单 cell 修复闭环：`notebook_outline` / `notebook_get_cell` / `notebook_edit_cell`，并通过 `expected_source` 做乐观并发控制；`stata_run` 回显 `origin_cell_id`
 - 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`，并用 limit / offset 翻页
+- 只读 `stata-code doctor` / `verify` 诊断：检查 package 版本、extras、
+  `pystata` 发现、console scripts、client 配置提示，以及可选的实时 Stata
+  版本探测
+- 经济学实证工作流层：现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP handoff、跨包/跨栈 parity audit 的 skill references 和 cookbook examples
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、侧边栏（sessions / last result / run history / logs / graphs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))

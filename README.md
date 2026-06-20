@@ -28,6 +28,22 @@
 
 `stata-code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
 
+**For empirical economists.** Drive Stata in plain language: run **DiD, IV, RDD, and publication-ready `esttab` tables in one conversation** — then cross-check each estimate across Stata and Python so you only trust results that *agree* (the Cunningham cross-package robustness check).
+
+**Try it in 60 seconds** with [Claude Code](https://github.com/anthropics/claude-code) — no global install needed:
+
+```bash
+claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
+```
+
+Then just ask:
+
+> *"Using `data/cfps_panel.dta`, run a two-way fixed-effects regression of monthly wage on the treatment (controls: `age age2 edu industry`), then test heterogeneous effects with Callaway-Sant'Anna, and export an `esttab` table."*
+
+`stata-code` writes the do-file, runs it, returns the table, and interprets the result — and can re-estimate the same ATT with [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) to confirm the two stacks agree. These workflows ship as one-call MCP prompts (`did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`) backed by an on-demand [recipe library](skills/stata-code/references/recipes/).
+
+**Why `stata-code`:** MIT-licensed · ships as an MCP server, a bundled agent skill, a Jupyter kernel, **and** a VS Code extension · one structured, token-economy result schema (typed errors, native `r()` / `e()`) · cross-stack validation with StatsPAI for the Cunningham check.
+
 ```text
                     ┌────────────────────────────────────────┐
                     │     stata-code core (Python)           │
@@ -47,10 +63,16 @@
 
 **Status: v0.7 (May 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. The test suite covers schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
-Two workflows the current release explicitly supports for end users:
+Three workflows the current tree explicitly supports for end users and agents:
 
 - **Run Stata code from a Jupyter notebook.** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` registers a **Stata** kernel that the Jupyter Notebook UI, JupyterLab, and the VS Code Jupyter extension all pick up by name. Cells render Stata logs, graphs, and warnings inline (the kernel logo bundled since v0.5 makes it appear in VS Code's kernel picker too). See [As a Jupyter Kernel](#as-a-jupyter-kernel).
 - **Optional agent "fix and rerun" loop.** `stata_run` returns typed `error.kind/line/context` plus `suggestions` on every failure. By default Claude Code only reports diagnostics — but if you explicitly say "fix this and rerun until it passes", the agent uses the same fields to edit your `.do` file and re-call `stata_run` until the run is green. The repair loop is **opt-in**: failed runs are diagnostics first, not automatic rewrite permission. See [Error Recovery in Agent Workflows](#error-recovery-in-agent-workflows).
+- **Economist workflow guides.** The bundled skill and cookbook now cover
+  modern DiD, IV/weak-IV, RDD, table export, data-MCP handoff, and
+  cross-stack parity audits. `stata-code` runs and audits the Stata leg; R,
+  Python, and official data MCPs remain separate tools with explicit handoff
+  files and source metadata. See [`skills/stata-code/references/`](skills/stata-code/references/)
+  and [`examples/`](examples/).
 
 ---
 
@@ -98,6 +120,19 @@ pip install -e ".[mcp,kernel]"
 > `from stata_code import run`.
 
 Note: `pystata` is **not** on PyPI; it ships with Stata. `stata-code` auto-discovers it on macOS at `/Applications/Stata/utilities/pystata` and at equivalent Linux / Windows paths. If your install is elsewhere, add it to `PYTHONPATH` before importing.
+
+Verify the local setup with the read-only doctor:
+
+```bash
+stata-code doctor
+stata-code doctor --json          # machine-readable output
+stata-code doctor --no-stata-probe # skip live Stata initialization
+```
+
+The doctor reports the package/Python version, MCP and Jupyter extras, `pystata`
+discovery, console scripts on `PATH`, client/VS Code configuration hints, and a
+best-effort Stata version/edition probe. It never edits shell, Stata, Claude, or
+VS Code config.
 
 ---
 
@@ -276,8 +311,11 @@ resources:
 
 MCP prompts are available for common agent workflows:
 `run_do_file_and_report`, `debug_stata_error`,
-`fix_and_rerun_until_passes`, `replication_audit`, and
-`summarize_estimation_results`.
+`fix_and_rerun_until_passes`, `replication_audit`,
+`plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`,
+`summarize_estimation_results`, `run_notebook_cell_and_report`,
+`fix_and_rerun_notebook_cell`, `did_event_study`, `iv_2sls`, `rdd`,
+`publication_table`, and `cross_validate_did`.
 
 ### As a Jupyter Kernel
 
@@ -318,6 +356,12 @@ code --install-extension brycewang-stanford.stata-code-vscode
 Or open the **Extensions** sidebar in VS Code and search `stata-code`. The extension is also available from [Open VSX](https://open-vsx.org/) so Cursor, Windsurf, and other VS Code-compatible editors can install it without going through the Microsoft Marketplace.
 
 On first activation the extension probes for `stata-code-mcp` on `PATH` (and in any workspace `.venv` / `venv`). If nothing resolves, it shows a one-time install hint with the exact `pip install "stata-code[mcp]"` command — choose **Don't show again** to silence it for the installed extension version.
+
+If the extension or an MCP client cannot find the server, run
+`stata-code doctor --no-stata-probe` in the same Python environment. It reports
+whether `stata-code-mcp` is on `PATH` and suggests absolute-path or
+`python -m stata_code.mcp` fallbacks for GUI clients whose `PATH` differs from
+your shell.
 
 #### Cell and section conventions
 
@@ -408,7 +452,7 @@ stata_code/
 
 ## Roadmap
 
-### Done (through v0.7 — May 2026)
+### Done (current tree)
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - `pystata`-based runner with native-typed `r()`, `e()`, and matrices
@@ -424,6 +468,12 @@ stata_code/
 - Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
 - Per-cell repair loop on `.ipynb` via `notebook_outline` / `notebook_get_cell` / `notebook_edit_cell` with optimistic-concurrency `expected_source` guards and `origin_cell_id` echo on `RunResult`
 - Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok; page with limit / offset)
+- Read-only `stata-code doctor` / `verify` diagnostics for package version,
+  extras, `pystata` discovery, console scripts, client hints, and optional live
+  Stata version probing
+- Economist workflow layer: skill references and examples for modern DiD,
+  IV/weak-IV, RDD, table export, data-MCP handoff, and cross-stack parity
+  audits
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, sidebar (sessions / last result / run history / logs / graphs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))

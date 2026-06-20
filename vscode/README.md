@@ -159,6 +159,17 @@ when the default console script cannot be found.
 }
 ```
 
+To diagnose PATH or virtualenv mismatches without launching Stata, run the
+read-only package doctor in the Python environment the extension should use:
+
+```bash
+stata-code doctor --no-stata-probe
+```
+
+It reports whether `stata-code-mcp` is on `PATH`, whether the MCP extra is
+installed, where `pystata` would be discovered, and which absolute-path /
+`python -m stata_code.mcp` fallback is safest for GUI clients.
+
 ## Configuration
 
 | Key | Default | Purpose |
