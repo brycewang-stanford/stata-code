@@ -235,7 +235,9 @@ UI modules:
 | `src/extension.ts` | activation, command registration, run pipeline |
 | `src/mcpClient.ts` | MCP transport (stdio child process) |
 | `src/statusBar.ts` | status bar item + running-state spinner |
-| `src/treeProviders.ts` | sessions / last-result / run-history / logs / graphs sidebar trees |
+| `src/treeProviders.ts` | sessions / last-result / data / run-history / logs / graphs / outputs sidebar trees |
+| `src/dataBrowser.ts` | variables-window data nodes for the **Data** view |
+| `src/outputs.ts` | table/export artifact nodes for the **Outputs** view |
 | `src/cellLens.ts` | `* %%` code-lens provider |
 | `src/diagnostics.ts` | inline error squigglies |
 | `src/graphPanel.ts` | graph webview (Save / Open / Refresh) |

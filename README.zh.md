@@ -20,6 +20,24 @@
 [![GitHub release](https://img.shields.io/github/v/release/brycewang-stanford/stata-code)](https://github.com/brycewang-stanford/stata-code/releases)
 [![GitHub stars](https://img.shields.io/github/stars/brycewang-stanford/stata-code?style=social)](https://github.com/brycewang-stanford/stata-code)
 
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-logo.png" alt="CoPaper.AI" width="200" /></a>
+    </td>
+    <td width="48"></td>
+    <td align="center">
+      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP — 斯坦福中国经济与制度研究中心" width="280" /></a>
+    </td>
+  </tr>
+</table>
+
+<sub><strong>Stanford REAP × CoPaper.AI</strong> · 面向实证研究的产学研 AI 工具箱</sub>
+
+</div>
+
 <p align="center">
   <img src="branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
 </p>
@@ -304,7 +322,7 @@ jupyter kernelspec list
 
 ### 作为 VS Code 扩展
 
-配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、侧边栏（sessions / last result / run history / logs / graphs）、状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
 
 ```bash
 # 从 VS Code 命令行
@@ -386,7 +404,7 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | 统一结果格式 | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | 默认节省 token | ✓ (log refs, graph refs) | — | — | — |
-| 结构化错误和建议 | ✓ (32 kinds) | — | — | — |
+| 结构化错误和建议 | ✓ (31 kinds) | — | — | — |
 | 多 session | ✓ (Stata frames) | partial | — | — |
 | 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
@@ -405,7 +423,7 @@ stata_code/
 - 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
-- 32 类错误分类法 + 标准化建议
+- 31 类错误分类法 + 标准化建议
 - MCP server：18 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）和包安装（`install_package`）
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
@@ -417,7 +435,7 @@ stata_code/
   版本探测
 - 经济学实证工作流层：现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP handoff、跨包/跨栈 parity audit 的 skill references 和 cookbook examples
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、侧边栏（sessions / last result / run history / logs / graphs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
+- VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、七视图侧边栏（sessions / last result / data 变量浏览器 / run history / logs / graphs / outputs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### 下一步
@@ -463,3 +481,36 @@ Stata 是 StataCorp LLC 的注册商标。本项目是独立项目，不隶属�
 ## 致谢
 
 本项目参考和学习的 Stata 工具生态整理在 [References-tools.md](References-tools.md)。其中列出的项目保留各自的许可证和作者归属；复用前请查看对应仓库。
+
+---
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-logo.png" alt="CoPaper.AI" width="200" /></a>
+    </td>
+    <td width="40"></td>
+    <td align="center">
+      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP" width="280" /></a>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-qrcode.png" alt="访问 copaper.ai" width="160" /></a><br/>
+      <strong>访问 <a href="https://copaper.ai">copaper.ai</a></strong>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-wechat.jpg" alt="CoPaper.AI 微信" width="160" /><br/>
+      <strong>微信公众号：CoPaper.AI</strong>
+    </td>
+  </tr>
+</table>
+
+<sub>由 <a href="https://copaper.ai"><strong>CoPaper.AI</strong></a> 维护，孵化于 <a href="https://sccei.fsi.stanford.edu/reap"><strong>Stanford REAP / SCCEI</strong></a> · 实证研究 AI 助手</sub>
+
+</div>

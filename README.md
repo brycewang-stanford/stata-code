@@ -20,6 +20,24 @@
 [![GitHub release](https://img.shields.io/github/v/release/brycewang-stanford/stata-code)](https://github.com/brycewang-stanford/stata-code/releases)
 [![GitHub stars](https://img.shields.io/github/stars/brycewang-stanford/stata-code?style=social)](https://github.com/brycewang-stanford/stata-code)
 
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-logo.png" alt="CoPaper.AI" width="200" /></a>
+    </td>
+    <td width="48"></td>
+    <td align="center">
+      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP — Center on China's Economy & Institutions" width="280" /></a>
+    </td>
+  </tr>
+</table>
+
+<sub><strong>Stanford REAP × CoPaper.AI</strong> · an academic–industrial AI toolkit for empirical research</sub>
+
+</div>
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
 </p>
@@ -346,7 +364,7 @@ Then open Jupyter Notebook / JupyterLab (or a `.ipynb` in VS Code), pick **Stata
 
 ### As a VS Code Extension
 
-The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a sidebar (sessions / last result / run history / logs / graphs), status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors.
+The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a **seven-view sidebar** (sessions / last result / **data variables** / run history / logs / graphs / **outputs**) — including an agent-native equivalent of Stata's **Variables window** and an **Outputs** panel that surfaces the `esttab` tables and `export` files each run writes to disk — status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors.
 
 ```bash
 # from the VS Code CLI
@@ -442,7 +460,7 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | Token-economy defaults | ✓ (log refs, graph refs) | — | — | — |
-| Typed errors + suggestions | ✓ (32 kinds) | — | — | — |
+| Typed errors + suggestions | ✓ (31 kinds) | — | — | — |
 | Multi-session | ✓ (Stata frames) | partial | — | — |
 | Mature ecosystem | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
@@ -461,7 +479,7 @@ stata_code/
 - Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
-- 32-kind error taxonomy with canonical suggestions
+- 31-kind error taxonomy with canonical suggestions
 - MCP server: 18 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), and package installation (`install_package`)
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
@@ -475,7 +493,7 @@ stata_code/
   IV/weak-IV, RDD, table export, data-MCP handoff, and cross-stack parity
   audits
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, sidebar (sessions / last result / run history / logs / graphs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
+- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, seven-view sidebar (sessions / last result / data variables / run history / logs / graphs / outputs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next Up
@@ -521,3 +539,36 @@ Stata is a registered trademark of StataCorp LLC. This project is independent an
 ## Acknowledgements
 
 The Stata tooling landscape that this project builds on and learns from is surveyed in [References-tools.md](References-tools.md). All listed projects retain their own licenses and authorship; please consult each repository before reuse.
+
+---
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-logo.png" alt="CoPaper.AI" width="200" /></a>
+    </td>
+    <td width="40"></td>
+    <td align="center">
+      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP" width="280" /></a>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-qrcode.png" alt="Visit copaper.ai" width="160" /></a><br/>
+      <strong>Visit <a href="https://copaper.ai">copaper.ai</a></strong>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-wechat.jpg" alt="CoPaper.AI WeChat" width="160" /><br/>
+      <strong>WeChat: CoPaper.AI</strong>
+    </td>
+  </tr>
+</table>
+
+<sub>Maintained by <a href="https://copaper.ai"><strong>CoPaper.AI</strong></a>, incubated at <a href="https://sccei.fsi.stanford.edu/reap"><strong>Stanford REAP / SCCEI</strong></a> · AI Assistant for Empirical Research</sub>
+
+</div>
