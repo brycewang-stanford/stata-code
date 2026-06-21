@@ -4,6 +4,20 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
+## 0.8.1 — 2026-06-20
+
+### Changed
+
+- **README & metadata refresh.** Documented the VS Code extension's
+  seven-view sidebar (added the **Data** variables browser and the
+  **Outputs** table/export-artifact panel), corrected the error taxonomy
+  count to 31 kinds, and sharpened the Claude Code plugin / VS Code
+  Marketplace descriptions to lead with the empirical-economics workflow
+  (DiD/IV/RDD, publication tables, StatsPAI cross-validation).
+- **Partner module.** Added a Stanford REAP × CoPaper.AI partner block
+  (logos, QR, links) to both the English and Chinese README, with the logo
+  assets bundled under `branding/partners/`.
+
 ## 0.8.0 — 2026-06-20
 
 ### Added

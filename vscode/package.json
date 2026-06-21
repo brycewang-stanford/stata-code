@@ -1,8 +1,8 @@
 {
   "name": "stata-code-vscode",
   "displayName": "stata-code",
-  "description": "Run Stata code from VSCode through the agent-native stata-code MCP server.",
-  "version": "0.8.0",
+  "description": "Run Stata in VS Code via the agent-native stata-code MCP server: run cells & hierarchical sections, an agent-native Variables window, a sidebar for sessions/data/outputs/logs/graphs, typed-error diagnostics, and reproducible run-bundle export.",
+  "version": "0.8.1",
   "publisher": "brycewang-stanford",
   "license": "MIT",
   "icon": "icon.png",

@@ -5,15 +5,15 @@
     "url": "https://github.com/brycewang-stanford"
   },
   "metadata": {
-    "description": "Agent-native Stata bridge — MCP server, Jupyter kernel, and VS Code extension sharing one v1.0 result schema.",
-    "version": "0.8.0"
+    "description": "Agent-native Stata bridge for empirical research — MCP server, Jupyter kernel, and VS Code extension sharing one token-economy v1.0 result schema, with one-call DiD/IV/RDD/table workflows and StatsPAI cross-validation.",
+    "version": "0.8.1"
   },
   "plugins": [
     {
       "name": "stata-code",
       "source": ".",
-      "description": "Run Stata code from Claude Code through the stata-code MCP server (typed errors, token-economy logs/graphs, multi-session) and an agent skill that teaches Claude the result schema and Stata workflows.",
-      "version": "0.8.0",
+      "description": "Run Stata from Claude Code through the stata-code MCP server (18 tools, 14 workflow prompts, typed errors, token-economy logs/graphs, multi-session) and an agent skill that teaches Claude the result schema and modern DiD/IV/RDD/table workflows, including StatsPAI cross-validation.",
+      "version": "0.8.1",
       "author": {
         "name": "Bryce Wang",
         "email": "brycewang@stanford.edu",
