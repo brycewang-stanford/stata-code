@@ -32,7 +32,13 @@ from typing import Any, ParamSpec, TypeVar
 
 from stata_code.core import _refs
 from stata_code.core._runtime import PystataNotAvailable, get_runtime
-from stata_code.core.errors import classify_rc, label_for_rc, suggestions_for
+from stata_code.core.errors import (
+    classify_rc,
+    label_for_rc,
+    recovery_for,
+    suggestions_for,
+)
+from stata_code.core.estimation import build_estimation_result
 from stata_code.core.log_artifacts import (
     FileSnapshot,
     changed_output_files,
@@ -76,9 +82,7 @@ _EDITION_MAP: dict[str, StataEdition] = {
 
 _ERETURN_NAME_RE = re.compile(r"^\s*(?:e|r)\(([A-Za-z_][A-Za-z0-9_]*)\)\s*[=:]")
 _VARNAME_RE = re.compile(r"variable (\w+) (?:not found|already defined)")
-_FILE_PATH_RE = re.compile(
-    r"file\s+(\S+?)\s+(?:not\s+found|already\s+exists|could\s+not)"
-)
+_FILE_PATH_RE = re.compile(r"file\s+(\S+?)\s+(?:not\s+found|already\s+exists|could\s+not)")
 _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
 _UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
 
@@ -110,6 +114,7 @@ def _serialize_stata_state(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             return fn(*args, **kwargs)
 
     return wrapper
+
 
 # Cap on `dataset.variables` to avoid pathological return sizes (per SCHEMA §3.5).
 _DATASET_VAR_CAP = 200
@@ -300,8 +305,8 @@ def search_log(
             break
         entry: dict[str, Any] = {"line_no": idx + 1, "text": line}
         if context:
-            before = lines[max(0, idx - context):idx]
-            after = lines[idx + 1:idx + 1 + context]
+            before = lines[max(0, idx - context) : idx]
+            after = lines[idx + 1 : idx + 1 + context]
             if before:
                 entry["before"] = before
             if after:
@@ -392,8 +397,13 @@ def _build_cancelled_result(
         stata_elapsed_ms=0,
         stata=_stata_info(rt),
         log=LogInfo(
-            head="", tail="", lines_total=0, bytes_total=0,
-            truncated=False, complete=True, ref=None,
+            head="",
+            tail="",
+            lines_total=0,
+            bytes_total=0,
+            truncated=False,
+            complete=True,
+            ref=None,
         ),
         results=ResultsInfo(),
         dataset=_collect_dataset(rt, include_dataset_variables),
@@ -404,8 +414,7 @@ def _build_cancelled_result(
             rc=-3,
             rc_label="cancelled",
             message=(
-                "Execution cancelled before Stata received the code "
-                f"(session_id={session_id!r})."
+                f"Execution cancelled before Stata received the code (session_id={session_id!r})."
             ),
             command=None,
             line=None,
@@ -415,6 +424,7 @@ def _build_cancelled_result(
             varname=None,
             name=None,
             suggestions=[],
+            recovery=recovery_for(ErrorKind.CANCELLED),
         ),
         capabilities=["cancel", "multi_session"],
     )
@@ -504,8 +514,7 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
             rows = list(sfi.Matrix.getRowNames(key) or [])
             cols = list(sfi.Matrix.getColNames(key) or [])
             norm_values: list[list[float | None]] = [
-                [None if v is None else float(v) for v in row]
-                for row in values
+                [None if v is None else float(v) for v in row] for row in values
             ]
             n_rows = len(norm_values)
             n_cols = len(norm_values[0]) if n_rows else 0
@@ -515,13 +524,9 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
                     ref,
                     {"rows": rows, "cols": cols, "values": norm_values},
                 )
-                matrices[name] = Matrix(
-                    rows=rows, cols=cols, values=None, ref=ref
-                )
+                matrices[name] = Matrix(rows=rows, cols=cols, values=None, ref=ref)
             else:
-                matrices[name] = Matrix(
-                    rows=rows, cols=cols, values=norm_values, ref=None
-                )
+                matrices[name] = Matrix(rows=rows, cols=cols, values=norm_values, ref=None)
         except Exception:  # noqa: BLE001
             continue
 
@@ -626,9 +631,7 @@ def _extract_typed_fields(kind: ErrorKind, message: str) -> dict[str, str | None
     return fields
 
 
-def _parse_failure_transcript(
-    error_text: str, user_code: str
-) -> dict[str, Any]:
+def _parse_failure_transcript(error_text: str, user_code: str) -> dict[str, Any]:
     """Pinpoint the failing command in multi-line user code.
 
     pystata's SystemError for multi-line input contains the full Stata
@@ -695,7 +698,8 @@ def _parse_failure_transcript(
             ][-3:]
             if i < len(user_lines):
                 next_lines = [
-                    user_lines[j] for j in range(i, min(len(user_lines), i + 1))
+                    user_lines[j]
+                    for j in range(i, min(len(user_lines), i + 1))
                     if user_lines[j].strip()
                 ]
                 out["after"] = next_lines[:1]
@@ -711,9 +715,7 @@ def _build_error(
     available_varnames: list[str] | None,
 ) -> ErrorInfo:
     kind = classify_rc(rc)
-    short_msg = (
-        _last_error_line(error_message) if error_message else ""
-    )
+    short_msg = _last_error_line(error_message) if error_message else ""
     typed = _extract_typed_fields(kind, error_message)
     suggs = suggestions_for(
         kind,
@@ -741,6 +743,7 @@ def _build_error(
         varname=typed["varname"],
         name=typed["name"],
         suggestions=suggs,
+        recovery=recovery_for(kind),
     )
 
 
@@ -914,18 +917,14 @@ def execute(
     )
     output_snapshot: FileSnapshot | None = None
     if persist_log_files and persist_generated_files and run_working_dir:
-        output_snapshot = snapshot_working_dir_files(
-            run_working_dir, origin_path=origin_path
-        )
+        output_snapshot = snapshot_working_dir_files(run_working_dir, origin_path=origin_path)
     if run_working_dir:
         _change_stata_working_dir(rt, run_working_dir)
 
     # Snapshot existing graph names before user code so we can take a delta
     # afterward. This itself calls `graph dir`, which clobbers r(); user code
     # will overwrite r() if they care about return values.
-    pre_graphs = (
-        _list_graph_names(rt) if include_graphs != "none" else []
-    )
+    pre_graphs = _list_graph_names(rt) if include_graphs != "none" else []
     graph_source_hints, unnamed_graph_source_hints = (
         _graph_source_hints(code) if include_graphs != "none" else ({}, [])
     )
@@ -954,20 +953,17 @@ def execute(
         e=_collect_returns(rt, "e", request_id),
         last_estimation_cmd=_last_estimation_cmd(rt),
     )
+    results.estimation = build_estimation_result(results)
     dataset = _collect_dataset(rt, include_dataset_variables)
 
-    available_varnames = (
-        [v.name for v in dataset.variables] if dataset.variables else None
-    )
+    available_varnames = [v.name for v in dataset.variables] if dataset.variables else None
 
     if err_msg is not None:
         error = _build_error(rc, err_msg, code, available_varnames)
         # Build an error_window: prefer log tail; fall back to the error message
         # itself when the log is empty (pystata can raise before any stdout
         # gets flushed for short failures).
-        log_lines = [
-            ln for ln in stdout_text.replace("\r\n", "\n").split("\n") if ln
-        ]
+        log_lines = [ln for ln in stdout_text.replace("\r\n", "\n").split("\n") if ln]
         if log_lines:
             tail_n = min(len(log_lines), 10)
             error_window = "\n".join(log_lines[-tail_n:])
@@ -1131,9 +1127,7 @@ def _frame_for_session(session_id: str) -> str:
             f"session_id must match [A-Za-z0-9_-]+; got {session_id!r}. "
             "':' is reserved for future remote prefixing."
         )
-    if _STATA_NAME_RE.fullmatch(session_id) and not session_id.startswith(
-        _MAPPED_FRAME_PREFIX
-    ):
+    if _STATA_NAME_RE.fullmatch(session_id) and not session_id.startswith(_MAPPED_FRAME_PREFIX):
         return session_id
     mapped = _session_frame_map.get(session_id)
     if mapped is None:
@@ -1230,9 +1224,7 @@ _WARNING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Convergence not achieved (MLE-family commands)
     (
         "convergence",
-        re.compile(
-            r"convergence (?:not achieved|not reached|failed)", re.IGNORECASE
-        ),
+        re.compile(r"convergence (?:not achieved|not reached|failed)", re.IGNORECASE),
     ),
     # Matrix not pos. def. / singular — typically reported in MLE diagnostics
     (
@@ -1402,9 +1394,7 @@ def _collect_graphs(
     if unnamed_source_hints:
         redrawn.add(_DEFAULT_GRAPH_NAME)
 
-    new_names = [
-        n for n in after_names if n not in pre_existing or n in redrawn
-    ]
+    new_names = [n for n in after_names if n not in pre_existing or n in redrawn]
     if not new_names:
         return []
     unattributed_names = [n for n in new_names if n not in source_hints]
@@ -1420,9 +1410,7 @@ def _collect_graphs(
             target = tmpdir / f"{idx}.{fmt_str}"
             try:
                 rt.run_suppressed(f"graph display {gname}")
-                rt.run_suppressed(
-                    f'graph export "{target}", as({fmt_str}) replace'
-                )
+                rt.run_suppressed(f'graph export "{target}", as({fmt_str}) replace')
             except SystemError:
                 # Stata refused — skip this graph (e.g., window not found)
                 continue

@@ -13,9 +13,10 @@ from stata_code.core.errors import (
     RC_TO_KIND,
     classify_rc,
     label_for_rc,
+    recovery_for,
     suggestions_for,
 )
-from stata_code.core.schema import ErrorKind
+from stata_code.core.schema import ErrorKind, Recovery
 
 # ─────────────────────────────────────────────────────────────────────────────
 # varname_not_found — fuzzy match against the dataset's variable list
@@ -48,9 +49,7 @@ class TestVarnameFuzzyMatch:
     def test_varname_without_candidate_list(self):
         # When the runner can't supply variables (older Stata, dataset missing),
         # we still emit a describe hint instead of nothing.
-        suggs = suggestions_for(
-            ErrorKind.VARNAME_NOT_FOUND, varname="anything"
-        )
+        suggs = suggestions_for(ErrorKind.VARNAME_NOT_FOUND, varname="anything")
         assert len(suggs) == 1
         assert suggs[0].command == "describe"
 
@@ -80,22 +79,16 @@ class TestVarnameFuzzyMatch:
 
 class TestCommandFuzzyMatch:
     def test_command_fuzzy_match(self):
-        suggs = suggestions_for(
-            ErrorKind.COMMAND_NOT_FOUND, command="regres"
-        )
+        suggs = suggestions_for(ErrorKind.COMMAND_NOT_FOUND, command="regres")
         assert any("regress" in s.action for s in suggs)
 
     def test_command_fuzzy_match_summarize(self):
-        suggs = suggestions_for(
-            ErrorKind.COMMAND_NOT_FOUND, command="sumarize"
-        )
+        suggs = suggestions_for(ErrorKind.COMMAND_NOT_FOUND, command="sumarize")
         assert any("summarize" in s.action for s in suggs)
 
     def test_command_no_match_still_returns_ssc_hint(self):
         # Total garbage shouldn't fuzzy-match to anything; ssc hint persists.
-        suggs = suggestions_for(
-            ErrorKind.COMMAND_NOT_FOUND, command="zzzzzz"
-        )
+        suggs = suggestions_for(ErrorKind.COMMAND_NOT_FOUND, command="zzzzzz")
         assert all("Did you mean" not in s.action for s in suggs)
         assert any("ssc install" in s.action for s in suggs)
 
@@ -288,12 +281,12 @@ class TestClassifyRcAgainstManual:
     def test_corrupt_and_memory_additions(self):
         assert classify_rc(688) == ErrorKind.FILE_CORRUPT  # file is corrupt
         assert classify_rc(610) == ErrorKind.FILE_CORRUPT  # not Stata format
-        assert classify_rc(907) == ErrorKind.STATA_LIMIT   # maxvar too small
+        assert classify_rc(907) == ErrorKind.STATA_LIMIT  # maxvar too small
         assert classify_rc(950) == ErrorKind.OUT_OF_MEMORY  # insufficient memory
 
     def test_removed_mismappings_fall_through_to_unknown(self):
         # Previously these were (incorrectly) mapped; they have no good kind.
-        assert classify_rc(9) == ErrorKind.UNKNOWN    # assertion is false
+        assert classify_rc(9) == ErrorKind.UNKNOWN  # assertion is false
         assert classify_rc(604) == ErrorKind.UNKNOWN  # log file already open
         assert classify_rc(615) == ErrorKind.UNKNOWN  # (not in manual table)
         assert classify_rc(616) == ErrorKind.UNKNOWN  # checksum file error
@@ -344,6 +337,38 @@ class TestRcLabel:
             if rc in no_manual_label:
                 continue
             assert RC_LABEL.get(rc), f"rc {rc} classified but has no label"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent recovery contract (recovery_for)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRecoveryContract:
+    def test_user_code_error_requires_code_change(self):
+        recovery = recovery_for(ErrorKind.VARNAME_NOT_FOUND)
+        assert recovery.category == "user_code"
+        assert recovery.retriable is False
+        assert recovery.needs_code_change is True
+        assert recovery.needs_user_input is False
+
+    def test_network_error_is_retriable_environment_failure(self):
+        recovery = recovery_for(ErrorKind.NETWORK)
+        assert recovery.category == "environment"
+        assert recovery.retriable is True
+        assert recovery.needs_code_change is False
+
+    def test_timeout_is_retriable_internal_failure(self):
+        recovery = recovery_for(ErrorKind.TIMEOUT)
+        assert recovery.category == "internal"
+        assert recovery.retriable is True
+        assert recovery.needs_code_change is False
+
+    def test_all_error_kinds_have_recovery_contracts(self):
+        for kind in ErrorKind:
+            recovery = recovery_for(kind)
+            assert isinstance(recovery, Recovery), kind
+            assert recovery.category != "unknown" or kind is ErrorKind.UNKNOWN
 
 
 # ─────────────────────────────────────────────────────────────────────────────

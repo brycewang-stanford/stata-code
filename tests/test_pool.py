@@ -26,6 +26,25 @@ from stata_code.core._pool import (
 from stata_code.core._runtime import is_available
 from stata_code.core.schema import ErrorKind, RunResult
 
+
+def test_synthetic_pool_errors_include_recovery_contract() -> None:
+    from stata_code.core._pool import (
+        _build_adapter_crash_result,
+        _build_cancelled_result,
+        _build_timeout_result,
+    )
+
+    cases = [
+        _build_timeout_result(session_id="s", elapsed_ms=1, timeout_ms=1),
+        _build_adapter_crash_result(session_id="s", elapsed_ms=1, message="boom"),
+        _build_cancelled_result(session_id="s", elapsed_ms=1),
+    ]
+    for result in cases:
+        assert result.error is not None
+        assert result.error.recovery is not None
+        assert result.error.recovery.category == "internal"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Mock-worker scripts. Each script reads one JSON request per line and writes
 # one JSON response per line. They are launched via `python -c` so they get
@@ -503,7 +522,9 @@ class TestEndToEndWithStata:
         started = time.monotonic()
         r = pool_execute("sleep 30000", session_id="e2e_timeout", timeout_ms=1500)
         elapsed = time.monotonic() - started
-        assert elapsed < 10.0, f"timeout enforcement took {elapsed:.1f}s — workers not actually killed"
+        assert elapsed < 10.0, (
+            f"timeout enforcement took {elapsed:.1f}s — workers not actually killed"
+        )
         assert r.ok is False
         assert r.rc == -2
         assert r.error is not None and r.error.kind is ErrorKind.TIMEOUT

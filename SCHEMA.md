@@ -77,7 +77,38 @@ Every successful or failed Stata execution returns one result object:
         }
       }
     },
-    "last_estimation_cmd": "regress"
+    "last_estimation_cmd": "regress",
+    "estimation": {
+      "command": "regress",
+      "depvar": "mpg",
+      "n_obs": 74,
+      "df_model": 1,
+      "df_resid": null,
+      "statistic_kind": "z",
+      "source": "e_b_v",
+      "ci_level": 95.0,
+      "coefficients": [
+        {
+          "term": "weight",
+          "b": -0.006,
+          "se": null,
+          "statistic": null,
+          "p_value": null,
+          "ci_low": null,
+          "ci_high": null
+        },
+        {
+          "term": "_cons",
+          "b": 39.44,
+          "se": null,
+          "statistic": null,
+          "p_value": null,
+          "ci_low": null,
+          "ci_high": null
+        }
+      ],
+      "model_stats": {"N": 74, "df_m": 1, "r2": 0.219}
+    }
   },
 
   "dataset": {
@@ -140,7 +171,8 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 
   "results": { "r": {"scalars": {}, "macros": {}, "matrices": {}},
                "e": {"scalars": {}, "macros": {}, "matrices": {}},
-               "last_estimation_cmd": null },
+               "last_estimation_cmd": null,
+               "estimation": null },
 
   "dataset": { "frame": "default", "n_obs": 74, "n_vars": 12, "changed": false,
                "filename": "auto.dta", "variables": null },
@@ -167,7 +199,13 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
     "suggestions": [
       {"action": "Check the variable name. Did you mean `mpg`?",
        "command": "describe"}
-    ]
+    ],
+    "recovery": {
+      "category": "user_code",
+      "retriable": false,
+      "needs_code_change": true,
+      "needs_user_input": false
+    }
   },
 
   "schema_version": "1.0",
@@ -315,6 +353,34 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | Field | Type | Notes |
 | --- | --- | --- |
 | `last_estimation_cmd` | `string \| null` | Mirrors `e(cmd)` for callers who don't want to dig into `e.macros`. After multi-command code, this reflects the *last* command that wrote to `e()`. `null` if no estimation has been performed. |
+| `estimation` | `EstimationResult \| null` | Typed coefficient table derived from `r(table)` or `e(b)` / `e(V)`. `null` when no inline `e(b)` is available. |
+
+**`EstimationResult` shape:**
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `command` | `string \| null` | Mirrors `e(cmd)` when available; falls back to `last_estimation_cmd`. |
+| `depvar` | `string \| null` | Mirrors `e(depvar)`. |
+| `n_obs` | `int \| null` | Integer form of `e(N)` when available. |
+| `df_model` | `number \| null` | Mirrors `e(df_m)`. |
+| `df_resid` | `number \| null` | Mirrors `e(df_r)`. |
+| `statistic_kind` | `"t" \| "z"` | Which statistic fills each coefficient's `statistic` field. |
+| `source` | `"r_table" \| "e_b_v"` | `r_table` means values were copied from Stata's displayed `r(table)` after verifying its columns and `b` row match `e(b)`; `e_b_v` means point estimates come from `e(b)` and inference, when present, is computed from `e(V)` with a normal approximation. |
+| `ci_level` | `number` | Confidence level used for `ci_low` / `ci_high`; currently `95.0`. |
+| `coefficients` | `array<Coefficient>` | One row per term in `e(b)`. |
+| `model_stats` | `dict<str, number \| null>` | High-signal subset of `e()` scalars such as `N`, `df_m`, `df_r`, `r2`, `F`, `chi2`, `ll`, and `rmse`. Full scalars remain under `results.e.scalars`. |
+
+**`Coefficient` shape:**
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `term` | `string` | Term / coefficient column name. |
+| `b` | `number \| null` | Point estimate. |
+| `se` | `number \| null` | Standard error when available. |
+| `statistic` | `number \| null` | `t` or `z`, per `EstimationResult.statistic_kind`. |
+| `p_value` | `number \| null` | Two-sided p-value when available. |
+| `ci_low` | `number \| null` | Lower confidence interval bound when available. |
+| `ci_high` | `number \| null` | Upper confidence interval bound when available. |
 
 **Empty is empty.** Sub-dicts are `{}` when Stata returned nothing — never absent, never `null`.
 
@@ -377,6 +443,7 @@ Populated iff `ok: false`. The schema's most important contribution to agent UX:
 | `varname` | `string \| null` | For `varname_not_found` and related, the variable name at issue. |
 | `name` | `string \| null` | For `name_conflict` and `invalid_name`, the conflicting/invalid name. |
 | `suggestions` | `array<Suggestion>` | Producer-supplied remediation hints. Empty when none apply. See below. |
+| `recovery` | `Recovery \| null` | Machine-readable recovery contract for agents. Present on current producers; old or third-party producers may omit it, so consumers should handle `null`. |
 
 **`context` shape:**
 
@@ -398,6 +465,15 @@ Populated iff `ok: false`. The schema's most important contribution to agent UX:
 ```
 
 Suggestions are best-effort; agents should treat them as hints, not directives. A suggestion is not consent to mutate source files or silently retry changed code; consumers should apply fixes automatically only in workflows where the user requested repair or approved iteration. The `kind` enum below documents what suggestions are typically populated.
+
+**`Recovery` shape:**
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `category` | `"user_code" \| "data" \| "model" \| "resource" \| "environment" \| "internal" \| "unknown"` | Broad failure domain for routing. |
+| `retriable` | `bool` | Whether re-running the exact same code may succeed. True mainly for transient environment or producer-side failures. |
+| `needs_code_change` | `bool` | Whether the submitted Stata code must change to succeed. |
+| `needs_user_input` | `bool` | Whether resolution likely requires a human or out-of-band action such as permissions, license/edition limits, or re-acquiring a corrupt file. |
 
 **`kind` enum (v1.0):**
 
@@ -609,6 +685,8 @@ This section tracks how much of the schema is wired up in code. Not normative
   emit a `matrix://<request_id>/<r|e>/<name>` ref instead, retrievable
   via `get_matrix(ref)`.
 - `results.last_estimation_cmd` (mirrors `e(cmd)`).
+- `results.estimation` typed coefficient table, copied from verified
+  `r(table)` when possible and otherwise derived from inline `e(b)` / `e(V)`.
 - `dataset` block — `n_obs`, `n_vars`, `frame`, `changed`, `filename`,
   and `variables` (capped at 200 entries).
 - `graphs[]` with `ref` + on-disk capture pipeline; format restricted to
@@ -619,7 +697,8 @@ This section tracks how much of the schema is wired up in code. Not normative
   extracted from Stata's English error text by regex, structured
   `context` (`{before, failing, after}`), `commands_executed` parsed
   from pystata's multi-line transcript, `suggestions` generated by
-  `core.errors.suggestions_for`.
+  `core.errors.suggestions_for`, and `recovery` generated by
+  `core.errors.recovery_for`.
 - `request_id` (uuid4 hex), `started_at` (ISO 8601 UTC ms),
   `stata_elapsed_ms`, `capabilities`.
 - Multi-session via Stata frames — `session_id="main"` ↔ `default`

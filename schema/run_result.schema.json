@@ -8,6 +8,93 @@
       "title": "Backend",
       "type": "string"
     },
+    "Coefficient": {
+      "additionalProperties": true,
+      "description": "One row of a typed coefficient table (see ``EstimationResult``).",
+      "properties": {
+        "b": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "B"
+        },
+        "ci_high": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci High"
+        },
+        "ci_low": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Low"
+        },
+        "p_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "P Value"
+        },
+        "se": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Se"
+        },
+        "statistic": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Statistic"
+        },
+        "term": {
+          "title": "Term",
+          "type": "string"
+        }
+      },
+      "required": [
+        "term"
+      ],
+      "title": "Coefficient",
+      "type": "object"
+    },
     "DatasetInfo": {
       "additionalProperties": true,
       "properties": {
@@ -171,6 +258,17 @@
           "title": "Rc Label",
           "type": "string"
         },
+        "recovery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Recovery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "suggestions": {
           "items": {
             "$ref": "#/$defs/Suggestion"
@@ -234,6 +332,118 @@
       ],
       "title": "ErrorKind",
       "type": "string"
+    },
+    "EstimationResult": {
+      "additionalProperties": true,
+      "description": "Typed coefficient table derived from ``r(table)`` or ``e(b)``/``e(V)``.\n\n``source`` records provenance: ``\"r_table\"`` means the values are exactly\nwhat Stata displayed (referee-grade); ``\"e_b_v\"`` means they were computed\nfrom the coefficient vector and its VCV under a normal approximation.",
+      "properties": {
+        "ci_level": {
+          "default": 95.0,
+          "title": "Ci Level",
+          "type": "number"
+        },
+        "coefficients": {
+          "items": {
+            "$ref": "#/$defs/Coefficient"
+          },
+          "title": "Coefficients",
+          "type": "array"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "depvar": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depvar"
+        },
+        "df_model": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Df Model"
+        },
+        "df_resid": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Df Resid"
+        },
+        "model_stats": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Model Stats",
+          "type": "object"
+        },
+        "n_obs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Obs"
+        },
+        "source": {
+          "default": "r_table",
+          "enum": [
+            "r_table",
+            "e_b_v"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "statistic_kind": {
+          "default": "z",
+          "enum": [
+            "t",
+            "z"
+          ],
+          "title": "Statistic Kind",
+          "type": "string"
+        }
+      },
+      "title": "EstimationResult",
+      "type": "object"
     },
     "GraphFormat": {
       "enum": [
@@ -632,11 +842,59 @@
       "title": "OriginInfo",
       "type": "object"
     },
+    "Recovery": {
+      "additionalProperties": true,
+      "description": "Machine-readable recovery contract for an error kind.\n\nLets an agent decide its next move without parsing prose:\nretry the identical code, change the code, or escalate to the user.\n\n* ``retriable`` \u2014 re-running the *exact same* code may succeed (the cause was\n  transient or producer-side, e.g. a network blip or adapter crash).\n* ``needs_code_change`` \u2014 the submitted Stata code must change to succeed.\n* ``needs_user_input`` \u2014 resolution likely needs a human/out-of-band action\n  (upgrade Stata edition, fix permissions, re-acquire a file, free disk).",
+      "properties": {
+        "category": {
+          "default": "unknown",
+          "enum": [
+            "user_code",
+            "data",
+            "model",
+            "resource",
+            "environment",
+            "internal",
+            "unknown"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "needs_code_change": {
+          "default": false,
+          "title": "Needs Code Change",
+          "type": "boolean"
+        },
+        "needs_user_input": {
+          "default": false,
+          "title": "Needs User Input",
+          "type": "boolean"
+        },
+        "retriable": {
+          "default": false,
+          "title": "Retriable",
+          "type": "boolean"
+        }
+      },
+      "title": "Recovery",
+      "type": "object"
+    },
     "ResultsInfo": {
       "additionalProperties": true,
       "properties": {
         "e": {
           "$ref": "#/$defs/StataReturns"
+        },
+        "estimation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EstimationResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "last_estimation_cmd": {
           "anyOf": [

@@ -128,8 +128,7 @@ class LogInfo(_Base):
             raise ValueError("log.truncated=True requires log.ref to be set")
         if not self.truncated and self.tail != "":
             raise ValueError(
-                "log.truncated=False requires log.tail to be empty "
-                "(see SCHEMA.md §3.3)"
+                "log.truncated=False requires log.tail to be empty (see SCHEMA.md §3.3)"
             )
         if self.lines_total < 0 or self.bytes_total < 0:
             raise ValueError("log.lines_total and log.bytes_total must be ≥ 0")
@@ -149,16 +148,12 @@ class Matrix(_Base):
         if self.values is not None:
             if len(self.values) != len(self.rows):
                 raise ValueError(
-                    f"matrix.values has {len(self.values)} rows, "
-                    f"expected {len(self.rows)}"
+                    f"matrix.values has {len(self.values)} rows, expected {len(self.rows)}"
                 )
             ncols = len(self.cols)
             for i, row in enumerate(self.values):
                 if len(row) != ncols:
-                    raise ValueError(
-                        f"matrix.values row {i} has {len(row)} cols, "
-                        f"expected {ncols}"
-                    )
+                    raise ValueError(f"matrix.values row {i} has {len(row)} cols, expected {ncols}")
         return self
 
 
@@ -170,10 +165,43 @@ class StataReturns(_Base):
     matrices: dict[str, Matrix] = Field(default_factory=dict)
 
 
+class Coefficient(_Base):
+    """One row of a typed coefficient table (see ``EstimationResult``)."""
+
+    term: str
+    b: float | None = None
+    se: float | None = None
+    statistic: float | None = None  # t or z, per EstimationResult.statistic_kind
+    p_value: float | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+
+
+class EstimationResult(_Base):
+    """Typed coefficient table derived from ``r(table)`` or ``e(b)``/``e(V)``.
+
+    ``source`` records provenance: ``"r_table"`` means the values are exactly
+    what Stata displayed (referee-grade); ``"e_b_v"`` means they were computed
+    from the coefficient vector and its VCV under a normal approximation.
+    """
+
+    command: str | None = None  # e(cmd)
+    depvar: str | None = None  # e(depvar)
+    n_obs: int | None = None  # e(N)
+    df_model: float | None = None  # e(df_m)
+    df_resid: float | None = None  # e(df_r)
+    statistic_kind: Literal["t", "z"] = "z"
+    source: Literal["r_table", "e_b_v"] = "r_table"
+    ci_level: float = 95.0
+    coefficients: list[Coefficient] = Field(default_factory=list)
+    model_stats: dict[str, float | None] = Field(default_factory=dict)
+
+
 class ResultsInfo(_Base):
     r: StataReturns = Field(default_factory=StataReturns)
     e: StataReturns = Field(default_factory=StataReturns)
     last_estimation_cmd: str | None = None
+    estimation: EstimationResult | None = None
 
 
 class VariableInfo(_Base):
@@ -208,6 +236,33 @@ class Suggestion(_Base):
     command: str | None = None
 
 
+class Recovery(_Base):
+    """Machine-readable recovery contract for an error kind.
+
+    Lets an agent decide its next move without parsing prose:
+    retry the identical code, change the code, or escalate to the user.
+
+    * ``retriable`` — re-running the *exact same* code may succeed (the cause was
+      transient or producer-side, e.g. a network blip or adapter crash).
+    * ``needs_code_change`` — the submitted Stata code must change to succeed.
+    * ``needs_user_input`` — resolution likely needs a human/out-of-band action
+      (upgrade Stata edition, fix permissions, re-acquire a file, free disk).
+    """
+
+    category: Literal[
+        "user_code",
+        "data",
+        "model",
+        "resource",
+        "environment",
+        "internal",
+        "unknown",
+    ] = "unknown"
+    retriable: bool = False
+    needs_code_change: bool = False
+    needs_user_input: bool = False
+
+
 class ErrorContext(_Base):
     before: list[str] = Field(default_factory=list)
     failing: str = ""
@@ -239,6 +294,7 @@ class ErrorInfo(_Base):
     varname: str | None = None
     name: str | None = None
     suggestions: list[Suggestion] = Field(default_factory=list)
+    recovery: Recovery | None = None
 
     @field_validator("message")
     @classmethod
@@ -343,11 +399,7 @@ class RunResult(_Base):
                 raise ValueError(f"ok=True requires rc=0; got {self.rc}")
         else:
             if self.error is None:
-                raise ValueError(
-                    "ok=False requires error to be non-None (SCHEMA.md §3.1)"
-                )
+                raise ValueError("ok=False requires error to be non-None (SCHEMA.md §3.1)")
             if self.error.rc != self.rc:
-                raise ValueError(
-                    f"top-level rc ({self.rc}) must equal error.rc ({self.error.rc})"
-                )
+                raise ValueError(f"top-level rc ({self.rc}) must equal error.rc ({self.error.rc})")
         return self

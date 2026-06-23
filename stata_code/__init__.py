@@ -29,7 +29,16 @@ from stata_code.core._pool import (
     shutdown_default_pool,
 )
 from stata_code.core._runtime import PystataNotAvailable
-from stata_code.core.errors import classify_rc, label_for_rc, suggestions_for
+from stata_code.core.errors import (
+    classify_rc,
+    label_for_rc,
+    recovery_for,
+    suggestions_for,
+)
+from stata_code.core.estimation import (
+    build_estimation_from_returns,
+    build_estimation_result,
+)
 from stata_code.core.runner import (
     RefNotFound,
     get_graph,
@@ -38,16 +47,19 @@ from stata_code.core.runner import (
 )
 from stata_code.core.schema import (
     Backend,
+    Coefficient,
     DatasetInfo,
     ErrorContext,
     ErrorInfo,
     ErrorKind,
+    EstimationResult,
     GraphFormat,
     GraphInfo,
     IncludeGraphs,
     LogFileInfo,
     LogInfo,
     Matrix,
+    Recovery,
     ResultsInfo,
     RunResult,
     StataEdition,
@@ -198,16 +210,19 @@ __all__ = [
     "RefNotFound",
     # Schema enums and component types
     "Backend",
+    "Coefficient",
     "DatasetInfo",
     "ErrorContext",
     "ErrorInfo",
     "ErrorKind",
+    "EstimationResult",
     "GraphFormat",
     "GraphInfo",
     "IncludeGraphs",
     "LogInfo",
     "LogFileInfo",
     "Matrix",
+    "Recovery",
     "ResultsInfo",
     "StataEdition",
     "StataInfo",
@@ -218,5 +233,9 @@ __all__ = [
     # Error helpers
     "classify_rc",
     "label_for_rc",
+    "recovery_for",
     "suggestions_for",
+    # Estimation contract
+    "build_estimation_result",
+    "build_estimation_from_returns",
 ]

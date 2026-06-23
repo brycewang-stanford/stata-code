@@ -289,6 +289,37 @@ class TestRoundTrip:
                     },
                 },
                 "last_estimation_cmd": "regress",
+                "estimation": {
+                    "command": "regress",
+                    "depvar": "mpg",
+                    "n_obs": 74,
+                    "df_model": 1.0,
+                    "df_resid": None,
+                    "statistic_kind": "z",
+                    "source": "e_b_v",
+                    "ci_level": 95.0,
+                    "coefficients": [
+                        {
+                            "term": "weight",
+                            "b": -0.006,
+                            "se": None,
+                            "statistic": None,
+                            "p_value": None,
+                            "ci_low": None,
+                            "ci_high": None,
+                        },
+                        {
+                            "term": "_cons",
+                            "b": 39.44,
+                            "se": None,
+                            "statistic": None,
+                            "p_value": None,
+                            "ci_low": None,
+                            "ci_high": None,
+                        },
+                    ],
+                    "model_stats": {"N": 74.0, "df_m": 1.0, "r2": 0.219},
+                },
             },
             "dataset": {
                 "frame": "default",
@@ -348,6 +379,7 @@ class TestRoundTrip:
                 "r": {"scalars": {}, "macros": {}, "matrices": {}},
                 "e": {"scalars": {}, "macros": {}, "matrices": {}},
                 "last_estimation_cmd": None,
+                "estimation": None,
             },
             "dataset": {
                 "frame": "default",
@@ -377,11 +409,16 @@ class TestRoundTrip:
                 "name": None,
                 "suggestions": [
                     {
-                        "action": "Did you mean `mpg`? "
-                        "`mpgg` is not in the current dataset.",
+                        "action": "Did you mean `mpg`? `mpgg` is not in the current dataset.",
                         "command": "describe",
                     }
                 ],
+                "recovery": {
+                    "category": "user_code",
+                    "retriable": False,
+                    "needs_code_change": True,
+                    "needs_user_input": False,
+                },
             },
             "schema_version": "1.0",
             "capabilities": ["log_truncation"],

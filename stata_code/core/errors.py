@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import difflib
 
-from stata_code.core.schema import ErrorKind, Suggestion
+from stata_code.core.schema import ErrorKind, Recovery, Suggestion
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stata _rc → ErrorKind
@@ -217,6 +217,78 @@ def label_for_rc(rc: int) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Agent recovery contract
+#
+# Each ErrorKind carries a machine-readable verdict so a downstream agent can
+# decide its next move without parsing prose: retry the identical code, change
+# the code, or escalate to a human. The tuple is
+# (category, retriable, needs_code_change, needs_user_input). See
+# ``schema.Recovery`` for field semantics.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RECOVERY: dict[ErrorKind, tuple[str, bool, bool, bool]] = {
+    # User-code errors: the submitted code is wrong; fixing it requires editing
+    # the code, and re-running unchanged will fail identically.
+    ErrorKind.SYNTAX: ("user_code", False, True, False),
+    ErrorKind.COMMAND_NOT_FOUND: ("user_code", False, True, False),
+    ErrorKind.VARNAME_NOT_FOUND: ("user_code", False, True, False),
+    ErrorKind.INVALID_NAME: ("user_code", False, True, False),
+    ErrorKind.TYPE_MISMATCH: ("user_code", False, True, False),
+    ErrorKind.NAME_CONFLICT: ("user_code", False, True, False),
+    ErrorKind.NOT_SORTED: ("user_code", False, True, False),
+    ErrorKind.NO_ESTIMATION_RESULTS: ("user_code", False, True, False),
+    ErrorKind.DATA_IN_MEMORY: ("user_code", False, True, False),
+    ErrorKind.MATRIX_CONFORMABILITY: ("user_code", False, True, False),
+    ErrorKind.FILE_EXISTS: ("user_code", False, True, False),
+    ErrorKind.ENCODING: ("user_code", False, True, False),
+    # Data-state errors: the code may be fine but the sample/data does not
+    # support it. Usually an `if`/`in`/missing-data fix in the code.
+    ErrorKind.NO_OBSERVATIONS: ("data", False, True, False),
+    ErrorKind.ESTIMATION_SAMPLE_EMPTY: ("data", False, True, False),
+    ErrorKind.MATRIX_MISSING: ("data", False, True, False),
+    # Model/estimation errors: respecify the model or its options.
+    ErrorKind.CONVERGENCE: ("model", False, True, False),
+    ErrorKind.INFEASIBLE: ("model", False, True, False),
+    ErrorKind.ESTIMATION_FAILURE: ("model", False, True, False),
+    ErrorKind.MATRIX_SINGULAR: ("model", False, True, False),
+    # Resource limits: usually a human action (upgrade edition, raise maxvar) or
+    # a data-reduction code change.
+    ErrorKind.STATA_LIMIT: ("resource", False, False, True),
+    ErrorKind.OUT_OF_MEMORY: ("resource", True, True, True),
+    # Environment: filesystem / network. Often transient and retriable, or an
+    # out-of-band fix (permissions, re-acquire a file).
+    ErrorKind.NETWORK: ("environment", True, False, False),
+    ErrorKind.FILE_IO: ("environment", True, False, True),
+    ErrorKind.FILE_NOT_FOUND: ("environment", False, True, False),
+    ErrorKind.FILE_CORRUPT: ("environment", False, False, True),
+    ErrorKind.PERMISSION: ("environment", False, False, True),
+    # Internal / producer-side: nothing wrong with the Stata code itself.
+    ErrorKind.INTERRUPT: ("internal", True, False, False),
+    ErrorKind.CANCELLED: ("internal", False, False, False),
+    ErrorKind.TIMEOUT: ("internal", True, False, False),
+    ErrorKind.ADAPTER_CRASH: ("internal", True, False, False),
+    ErrorKind.UNKNOWN: ("unknown", False, False, False),
+}
+
+
+def recovery_for(kind: ErrorKind) -> Recovery:
+    """Return the recovery contract for an error kind.
+
+    Always returns a ``Recovery`` (an unmapped kind yields the conservative
+    ``unknown`` default), so callers never have to None-check.
+    """
+    category, retriable, needs_code, needs_user = _RECOVERY.get(
+        kind, ("unknown", False, False, False)
+    )
+    return Recovery(
+        category=category,  # type: ignore[arg-type]
+        retriable=retriable,
+        needs_code_change=needs_code,
+        needs_user_input=needs_user,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Curated catalog of common Stata commands for fuzzy "did you mean" matching
 # on rc 199 (command_not_found). Kept as a module constant so it's cheap to
 # import and easy to extend. This is intentionally not exhaustive — it covers
@@ -225,39 +297,110 @@ def label_for_rc(rc: int) -> str:
 
 COMMON_STATA_COMMANDS: tuple[str, ...] = (
     # Estimation
-    "regress", "logit", "probit", "areg", "ivregress", "reghdfe",
-    "xtreg", "xtivreg",
+    "regress",
+    "logit",
+    "probit",
+    "areg",
+    "ivregress",
+    "reghdfe",
+    "xtreg",
+    "xtivreg",
     # Summary / display
-    "summarize", "tabulate", "tabstat", "table", "list",
-    "describe", "codebook",
+    "summarize",
+    "tabulate",
+    "tabstat",
+    "table",
+    "list",
+    "describe",
+    "codebook",
     # Data manipulation
-    "generate", "replace", "drop", "keep", "sort", "gsort",
-    "by", "bysort", "merge", "append", "save", "use", "sysuse",
-    "import", "export", "encode", "decode", "recode", "label",
-    "rename", "reshape", "collapse", "egen",
+    "generate",
+    "replace",
+    "drop",
+    "keep",
+    "sort",
+    "gsort",
+    "by",
+    "bysort",
+    "merge",
+    "append",
+    "save",
+    "use",
+    "sysuse",
+    "import",
+    "export",
+    "encode",
+    "decode",
+    "recode",
+    "label",
+    "rename",
+    "reshape",
+    "collapse",
+    "egen",
     # Postestimation
-    "predict", "estimates", "margins", "test", "testparm",
-    "lincom", "nlcom",
+    "predict",
+    "estimates",
+    "margins",
+    "test",
+    "testparm",
+    "lincom",
+    "nlcom",
     # Programming primitives. Note: `cap`/`qui`/`noi`/`mat`/`di` are
     # accepted by Stata as short forms of the spelled-out versions
     # listed here. We register only the canonical long forms because
     # difflib's fuzzy match returns at most ``n=3`` candidates per
     # mistyped token — including both short and long would crowd out
     # legitimate "did you mean" alternatives with near-duplicates.
-    "matrix", "scalar", "local", "global",
-    "display", "set", "clear", "exit", "do", "run",
-    "capture", "quietly", "noisily",
-    "foreach", "forvalues", "while", "if", "else",
-    "program", "return", "ereturn",
-    "postutil", "post", "postclose",
-    "putexcel", "putdocx", "file",
+    "matrix",
+    "scalar",
+    "local",
+    "global",
+    "display",
+    "set",
+    "clear",
+    "exit",
+    "do",
+    "run",
+    "capture",
+    "quietly",
+    "noisily",
+    "foreach",
+    "forvalues",
+    "while",
+    "if",
+    "else",
+    "program",
+    "return",
+    "ereturn",
+    "postutil",
+    "post",
+    "postclose",
+    "putexcel",
+    "putdocx",
+    "file",
     # Logging / I/O / shell
-    "log", "cmdlog", "cd", "pwd", "mkdir", "dir", "ls",
+    "log",
+    "cmdlog",
+    "cd",
+    "pwd",
+    "mkdir",
+    "dir",
+    "ls",
     # Versions / help / packages
-    "version", "which", "ssc", "net", "search", "help", "findit",
-    "view", "browse", "edit",
+    "version",
+    "which",
+    "ssc",
+    "net",
+    "search",
+    "help",
+    "findit",
+    "view",
+    "browse",
+    "edit",
     # Time-series / panel setup
-    "tsset", "xtset", "stset",
+    "tsset",
+    "xtset",
+    "stset",
 )
 
 
@@ -333,10 +476,7 @@ def suggestions_for(
     elif kind == ErrorKind.NOT_SORTED:
         out.append(
             Suggestion(
-                action=(
-                    "Data must be sorted before this command. "
-                    "Run `sort <by-vars>` first."
-                ),
+                action=("Data must be sorted before this command. Run `sort <by-vars>` first."),
                 command="sort",
             )
         )
@@ -344,10 +484,7 @@ def suggestions_for(
     elif kind == ErrorKind.DATA_IN_MEMORY:
         out.append(
             Suggestion(
-                action=(
-                    "Data in memory would be lost. "
-                    "Use `clear` to discard, or save first."
-                ),
+                action=("Data in memory would be lost. Use `clear` to discard, or save first."),
                 command="clear",
             )
         )
@@ -370,10 +507,7 @@ def suggestions_for(
         target = f"`{path}`" if path else "the target file"
         out.append(
             Suggestion(
-                action=(
-                    f"{target} already exists. "
-                    "Pass the `replace` option to overwrite."
-                ),
+                action=(f"{target} already exists. Pass the `replace` option to overwrite."),
             )
         )
 
@@ -575,16 +709,11 @@ def _varname_suggestions(
             )
         ]
     if available_varnames:
-        matches = difflib.get_close_matches(
-            varname, available_varnames, n=3, cutoff=0.6
-        )
+        matches = difflib.get_close_matches(varname, available_varnames, n=3, cutoff=0.6)
         if matches:
             return [
                 Suggestion(
-                    action=(
-                        f"Did you mean `{cand}`? "
-                        f"`{varname}` is not in the current dataset."
-                    ),
+                    action=(f"Did you mean `{cand}`? `{varname}` is not in the current dataset."),
                     command="describe",
                 )
                 for cand in matches
@@ -610,9 +739,7 @@ def _command_suggestions(command: str | None) -> list[Suggestion]:
     """
     out: list[Suggestion] = []
     if command:
-        matches = difflib.get_close_matches(
-            command, COMMON_STATA_COMMANDS, n=3, cutoff=0.65
-        )
+        matches = difflib.get_close_matches(command, COMMON_STATA_COMMANDS, n=3, cutoff=0.65)
         for cand in matches:
             out.append(
                 Suggestion(

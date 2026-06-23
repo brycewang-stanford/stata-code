@@ -49,6 +49,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from stata_code.core import _refs
+from stata_code.core.errors import recovery_for
 from stata_code.core.schema import (
     Backend,
     DatasetInfo,
@@ -402,7 +403,11 @@ class WorkerProcess:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _WorkerTimeout("deadline exceeded waiting for worker response")
-            thread.join(timeout=min(_POLL_INTERVAL_S, remaining) if remaining is not None else _POLL_INTERVAL_S)
+            thread.join(
+                timeout=min(_POLL_INTERVAL_S, remaining)
+                if remaining is not None
+                else _POLL_INTERVAL_S
+            )
             if not thread.is_alive():
                 if "err" in result:
                     raise _WorkerError(f"reader thread error: {result['err']!r}")
@@ -645,9 +650,7 @@ class SessionPool:
                 elapsed_ms=max(1, int((time.monotonic() - started) * 1000)),
             )
         try:
-            result_dict, ref_blobs = worker.execute(
-                code, worker_options, timeout_ms=timeout_ms
-            )
+            result_dict, ref_blobs = worker.execute(code, worker_options, timeout_ms=timeout_ms)
         except _WorkerTimeout:
             worker.kill()
             with self._lock:
@@ -760,9 +763,9 @@ class SessionPool:
         :meth:`list_session_info_detailed` when callers need to know whether
         the result is partial.
         """
-        return self.list_session_info_detailed(
-            per_worker_timeout_ms=per_worker_timeout_ms
-        )["sessions"]
+        return self.list_session_info_detailed(per_worker_timeout_ms=per_worker_timeout_ms)[
+            "sessions"
+        ]
 
     def list_session_info_detailed(
         self,
@@ -787,16 +790,12 @@ class SessionPool:
             if not worker.is_alive():
                 continue
             try:
-                response = worker.send_simple_op(
-                    "list_sessions", timeout_ms=per_worker_timeout_ms
-                )
+                response = worker.send_simple_op("list_sessions", timeout_ms=per_worker_timeout_ms)
             except _WorkerTimeout:
                 warnings.append({"session_id": sid, "reason": "timeout"})
                 continue
             except _WorkerError as exc:
-                warnings.append(
-                    {"session_id": sid, "reason": f"worker_error: {exc}"}
-                )
+                warnings.append({"session_id": sid, "reason": f"worker_error: {exc}"})
                 continue
             for entry in response.get("sessions") or []:
                 inner_sid = entry.get("session_id")
@@ -819,9 +818,7 @@ class SessionPool:
         """
         worker = self._get_or_spawn(session_id)
         try:
-            response = worker.send_simple_op(
-                "stata_info", timeout_ms=timeout_ms, spawn=True
-            )
+            response = worker.send_simple_op("stata_info", timeout_ms=timeout_ms, spawn=True)
         except (_WorkerError, _WorkerTimeout):
             worker.kill()
             with self._lock:
@@ -882,6 +879,7 @@ def _build_timeout_result(
         varname=None,
         name=None,
         suggestions=[],
+        recovery=recovery_for(ErrorKind.TIMEOUT),
     )
     return RunResult(
         ok=False,
@@ -935,6 +933,7 @@ def _build_adapter_crash_result(
         varname=None,
         name=None,
         suggestions=[],
+        recovery=recovery_for(ErrorKind.ADAPTER_CRASH),
     )
     return RunResult(
         ok=False,
@@ -995,6 +994,7 @@ def _build_cancelled_result(
         varname=None,
         name=None,
         suggestions=[],
+        recovery=recovery_for(ErrorKind.CANCELLED),
     )
     return RunResult(
         ok=False,
@@ -1060,9 +1060,7 @@ def pool_execute(
     Routes through the module's default `SessionPool`. See `SessionPool.execute`
     for behavior.
     """
-    return get_default_pool().execute(
-        code, session_id=session_id, timeout_ms=timeout_ms, **options
-    )
+    return get_default_pool().execute(code, session_id=session_id, timeout_ms=timeout_ms, **options)
 
 
 def pool_stata_info(
