@@ -401,34 +401,36 @@ Suggestions are best-effort; agents should treat them as hints, not directives. 
 
 **`kind` enum (v1.0):**
 
+rc(s) below cite StataCorp `[P] error` (Stata 19, 2025). The code is authoritative; this table is a readable mirror.
+
 | `kind` | Typical rc(s) | Notes / suggestion seed |
 | --- | --- | --- |
-| `syntax` | 9, 100, 101, 102, 103, 121, 130, 132, 197, 198 | Generic parser failure. No automatic suggestion. |
+| `syntax` | 100, 101, 102, 103, 121–127, 130, 132, 197, 198 | Generic parser failure (incl. numlist errors 121–127). No automatic suggestion. |
 | `command_not_found` | 199 | Often resolved by `ssc install` or `net install`; suggestions populated when Stata reports a likely package name. |
 | `varname_not_found` | 111 | `varname` populated. Suggestions may include similar varnames from `dataset.variables`. |
-| `invalid_name` | 122, 123 | `name` populated. |
-| `type_mismatch` | 109, 408 | |
+| `invalid_name` | (no dedicated rc) | Stata folds "invalid name" into r(198). `name` populated when constructed by a producer. |
+| `type_mismatch` | 109, 408 | Suggestion: `destring`/`tostring`. |
 | `name_conflict` | 110 | `name` populated. Suggestion typically: `replace`. |
-| `not_sorted` | 119, 459 | Suggestion: `sort <varlist>`. |
+| `not_sorted` | 5 | Suggestion: `sort <varlist>`. |
 | `convergence` | 430 | |
-| `infeasible` | 491 | Distinct from convergence: starting values not feasible. |
-| `estimation_sample_empty` | 1400, 2000 (in estimation context) | |
-| `estimation_failure` | 1401, 1402 | |
+| `infeasible` | 480, 491 | Distinct from convergence: starting values not feasible (e.g. `nl`, `ml`). |
+| `estimation_sample_empty` | (no dedicated rc) | Empty estimation samples surface as r(2000); producer-set otherwise. |
+| `estimation_failure` | 322, 1400, 1401, 1402 | Postestimation/prefix saw an unexpected result, or numerical overflow. |
 | `no_estimation_results` | 301 | Common when calling `predict`/`margins` without prior estimation. |
 | `no_observations` | 2000, 2001 | |
 | `data_in_memory` | 4 | Suggestion: `clear`. |
 | `matrix_singular` | 506, 508 | Matrix not positive definite / not invertible. |
-| `matrix_conformability` | 503, 507 | Dimension mismatch. |
+| `matrix_conformability` | 503, 507 | Dimension mismatch; 507 is a `matrix post` row/col name conflict kept in the matrix bucket. |
 | `matrix_missing` | 504 | Matrix has missing values. |
-| `file_not_found` | 322, 601 | `path` populated. |
+| `file_not_found` | 601 | `path` populated. |
 | `file_exists` | 602 | `path` populated. Suggestion: pass `replace` option. |
-| `file_corrupt` | 604, 610 | `path` populated. Often "not a Stata file." |
-| `file_io` | 603, 691 (local) | `path` populated. Catch-all for open/read/write failures not otherwise classified. |
-| `network` | 691 (network), 692, 693 | URL fetches, network reads. |
-| `permission` | 608 | `path` populated. Includes Stata-license-limit errors (615/616 family that surface as permission denials). |
-| `encoding` | 615, 616 | Unicode / encoding-conversion failures. |
-| `stata_limit` | 901, 902, 903 | Edition / matsize / similar Stata-imposed caps. Distinct from OS OOM. Suggestion: `set maxvar` or upgrade edition. |
-| `out_of_memory` | 480, 909 | OS-level memory exhaustion. |
+| `file_corrupt` | 610, 688 | `path` populated. "Not a Stata file" (610) or genuinely corrupt (688). |
+| `file_io` | 603, 691, 692, 693 | `path` populated. Catch-all for open/read/write failures (691–693 are local filesystem I/O). |
+| `network` | 2, 631, 672, 677 | Connection timed out / host not found / server refused / remote connection failed. |
+| `permission` | 608 | `path` populated. File is read-only / not writable. |
+| `encoding` | (no dedicated rc) | Unicode / encoding-conversion failures; producer-set. |
+| `stata_limit` | 901, 902, 903, 907 | Edition / maxvar / width caps. Distinct from OS OOM. Suggestion: `set maxvar` or upgrade edition. |
+| `out_of_memory` | 909, 950 | OS-level memory exhaustion. Suggestion: `compress`. |
 | `interrupt` | 1 | User Break / Ctrl-C from a frontend. |
 | `cancelled` | (synthetic `rc: -3`) | Cancellation was requested. Subprocess-backed producers may terminate an in-flight worker; the direct in-process runner only short-circuits before Stata receives code. |
 | `timeout` | (synthetic `rc: -2`) | Adapter-imposed time limit exceeded. |

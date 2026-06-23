@@ -10,7 +10,13 @@ from stata_code.core._runtime import (
     get_runtime,
     is_available,
 )
-from stata_code.core.errors import RC_TO_KIND, classify_rc, suggestions_for
+from stata_code.core.errors import (
+    RC_LABEL,
+    RC_TO_KIND,
+    classify_rc,
+    label_for_rc,
+    suggestions_for,
+)
 from stata_code.core.runner import (
     execute,
     get_graph,
@@ -51,7 +57,9 @@ __all__ = [
     "is_available",
     "get_runtime",
     "RC_TO_KIND",
+    "RC_LABEL",
     "classify_rc",
+    "label_for_rc",
     "suggestions_for",
     "RunResult",
     "ErrorKind",

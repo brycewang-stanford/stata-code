@@ -29,7 +29,7 @@ from stata_code.core._pool import (
     shutdown_default_pool,
 )
 from stata_code.core._runtime import PystataNotAvailable
-from stata_code.core.errors import classify_rc, suggestions_for
+from stata_code.core.errors import classify_rc, label_for_rc, suggestions_for
 from stata_code.core.runner import (
     RefNotFound,
     get_graph,
@@ -217,5 +217,6 @@ __all__ = [
     "VariableInfo",
     # Error helpers
     "classify_rc",
+    "label_for_rc",
     "suggestions_for",
 ]

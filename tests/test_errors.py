@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from stata_code.core.errors import (
     COMMON_STATA_COMMANDS,
+    RC_LABEL,
+    RC_TO_KIND,
+    classify_rc,
+    label_for_rc,
     suggestions_for,
 )
 from stata_code.core.schema import ErrorKind
@@ -229,3 +233,159 @@ class TestQuietKinds:
         # without parsing the message further). Lock in [] so any future
         # change is intentional.
         assert suggestions_for(ErrorKind.INVALID_NAME) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# rc → kind classification, verified against StataCorp [P] error (Stata 19).
+#
+# Each assertion below cites the manual's canonical message for the rc so the
+# mapping is auditable. The previous table mis-classified several codes; these
+# tests lock in the corrected behavior and guard against regressions.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestClassifyRcAgainstManual:
+    def test_not_sorted_is_rc_5_not_119_or_459(self):
+        # r(5) "not sorted" is the canonical code. r(119) is "statement out of
+        # context" and r(459) is "something that should be true of your data is
+        # not" — neither is a sort error, so they must NOT classify as such.
+        assert classify_rc(5) == ErrorKind.NOT_SORTED
+        assert classify_rc(119) == ErrorKind.UNKNOWN
+        assert classify_rc(459) == ErrorKind.UNKNOWN
+
+    def test_numlist_errors_are_syntax_not_invalid_name(self):
+        # r(122)/r(123) are "invalid numlist has too few/many elements" —
+        # numlist parse failures, not name errors.
+        for rc in (121, 122, 123, 124, 125, 126, 127):
+            assert classify_rc(rc) == ErrorKind.SYNTAX, rc
+
+    def test_rc_322_is_estimation_failure_not_file_not_found(self):
+        # r(322) "something that should be true of your estimation results is
+        # not" — a postestimation/prefix consistency failure, not a file error.
+        assert classify_rc(322) == ErrorKind.ESTIMATION_FAILURE
+
+    def test_rc_480_is_infeasible_not_out_of_memory(self):
+        # r(480) "starting values invalid or some RHS variables have missing
+        # values" (nl) — an infeasibility, not memory exhaustion.
+        assert classify_rc(480) == ErrorKind.INFEASIBLE
+        assert classify_rc(491) == ErrorKind.INFEASIBLE
+
+    def test_rc_1400_is_estimation_failure(self):
+        # r(1400) "numerical overflow" — not an empty-sample error.
+        assert classify_rc(1400) == ErrorKind.ESTIMATION_FAILURE
+
+    def test_local_io_codes_are_file_io_not_network(self):
+        # r(691)/r(692)/r(693) are local filesystem I/O errors, not network.
+        for rc in (691, 692, 693):
+            assert classify_rc(rc) == ErrorKind.FILE_IO, rc
+
+    def test_real_network_codes_classify_as_network(self):
+        # r(2) connection timed out, r(631) host not found, r(672) server
+        # refused to send file, r(677) remote connection failed.
+        for rc in (2, 631, 672, 677):
+            assert classify_rc(rc) == ErrorKind.NETWORK, rc
+
+    def test_corrupt_and_memory_additions(self):
+        assert classify_rc(688) == ErrorKind.FILE_CORRUPT  # file is corrupt
+        assert classify_rc(610) == ErrorKind.FILE_CORRUPT  # not Stata format
+        assert classify_rc(907) == ErrorKind.STATA_LIMIT   # maxvar too small
+        assert classify_rc(950) == ErrorKind.OUT_OF_MEMORY  # insufficient memory
+
+    def test_removed_mismappings_fall_through_to_unknown(self):
+        # Previously these were (incorrectly) mapped; they have no good kind.
+        assert classify_rc(9) == ErrorKind.UNKNOWN    # assertion is false
+        assert classify_rc(604) == ErrorKind.UNKNOWN  # log file already open
+        assert classify_rc(615) == ErrorKind.UNKNOWN  # (not in manual table)
+        assert classify_rc(616) == ErrorKind.UNKNOWN  # checksum file error
+
+    def test_stable_known_mappings_unchanged(self):
+        assert classify_rc(111) == ErrorKind.VARNAME_NOT_FOUND
+        assert classify_rc(199) == ErrorKind.COMMAND_NOT_FOUND
+        assert classify_rc(198) == ErrorKind.SYNTAX
+        assert classify_rc(4) == ErrorKind.DATA_IN_MEMORY
+        assert classify_rc(909) == ErrorKind.OUT_OF_MEMORY
+
+    def test_every_classified_code_is_a_known_error_kind(self):
+        # Guard: the table never maps to a value outside the enum.
+        for rc, kind in RC_TO_KIND.items():
+            assert isinstance(kind, ErrorKind), rc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# rc_label — canonical Stata short messages (label_for_rc / RC_LABEL)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRcLabel:
+    def test_known_labels_match_manual(self):
+        assert label_for_rc(111) == "variable not found"
+        assert label_for_rc(199) == "unrecognized command"
+        assert label_for_rc(5) == "not sorted"
+        assert label_for_rc(430) == "convergence not achieved"
+        assert label_for_rc(2000) == "no observations"
+
+    def test_synthetic_labels(self):
+        assert label_for_rc(-1) == "adapter_crash"
+        assert label_for_rc(-2) == "timeout"
+        assert label_for_rc(-3) == "cancelled"
+
+    def test_unknown_rc_returns_empty_string(self):
+        # Never guess: an unverified code yields "" so consumers can tell.
+        assert label_for_rc(99999) == ""
+        assert label_for_rc(408) == ""  # not in the public manual table
+
+    def test_every_mapped_rc_has_a_label(self):
+        # Coverage guard: each classified Stata rc should carry a label so
+        # error.rc_label is never silently empty for a code we do classify.
+        # (408/1401/1402 are kept from prior art but absent from the manual,
+        # so they are deliberately label-less.)
+        no_manual_label = {408, 1401, 1402}
+        for rc in RC_TO_KIND:
+            if rc in no_manual_label:
+                continue
+            assert RC_LABEL.get(rc), f"rc {rc} classified but has no label"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Newly-covered remediation suggestions (previously emitted nothing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestExpandedSuggestions:
+    def test_network_mentions_connectivity_or_retry(self):
+        text = " ".join(s.action for s in suggestions_for(ErrorKind.NETWORK))
+        assert "retry" in text.lower() or "connect" in text.lower()
+
+    def test_infeasible_mentions_starting_values(self):
+        text = " ".join(s.action for s in suggestions_for(ErrorKind.INFEASIBLE))
+        assert "start" in text.lower() or "from(" in text.lower()
+
+    def test_estimation_failure_suggests_ereturn(self):
+        suggs = suggestions_for(ErrorKind.ESTIMATION_FAILURE)
+        assert any(s.command == "ereturn list" for s in suggs)
+
+    def test_type_mismatch_suggests_destring(self):
+        text = " ".join(s.action for s in suggestions_for(ErrorKind.TYPE_MISMATCH))
+        assert "destring" in text or "tostring" in text
+
+    def test_matrix_missing_suggests_matrix_list(self):
+        suggs = suggestions_for(ErrorKind.MATRIX_MISSING)
+        assert any(s.command == "matrix list" for s in suggs)
+
+    def test_file_io_mentions_writable_or_disk(self):
+        suggs = suggestions_for(ErrorKind.FILE_IO, path="out.dta")
+        text = " ".join(s.action for s in suggs).lower()
+        assert "writable" in text or "disk" in text
+        assert any("out.dta" in s.action for s in suggs)
+
+    def test_file_corrupt_mentions_stata_file(self):
+        text = " ".join(
+            s.action for s in suggestions_for(ErrorKind.FILE_CORRUPT, path="x.dta")
+        ).lower()
+        assert "stata" in text or "corrupt" in text
+
+    def test_permission_mentions_read_only_or_writable(self):
+        text = " ".join(
+            s.action for s in suggestions_for(ErrorKind.PERMISSION, path="x.dta")
+        ).lower()
+        assert "read-only" in text or "writable" in text

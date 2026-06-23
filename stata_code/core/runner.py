@@ -32,7 +32,7 @@ from typing import Any, ParamSpec, TypeVar
 
 from stata_code.core import _refs
 from stata_code.core._runtime import PystataNotAvailable, get_runtime
-from stata_code.core.errors import classify_rc, suggestions_for
+from stata_code.core.errors import classify_rc, label_for_rc, suggestions_for
 from stata_code.core.log_artifacts import (
     FileSnapshot,
     changed_output_files,
@@ -727,6 +727,7 @@ def _build_error(
     return ErrorInfo(
         kind=kind,
         rc=rc,
+        rc_label=label_for_rc(rc),
         message=short_msg,
         command=pinpoint["command"],
         line=pinpoint["line"],

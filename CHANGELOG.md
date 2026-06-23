@@ -4,6 +4,37 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
+## Unreleased
+
+### Fixed
+
+- **Error-taxonomy correctness.** Audited the `_rc` → `ErrorKind` table against
+  StataCorp's `[P] error` manual (Stata 19) and corrected several
+  misclassifications: `not_sorted` is now `r(5)` (was the unrelated `r(119)`
+  "statement out of context" / `r(459)` "data is not…"); numlist errors
+  `r(122)`/`r(123)` are now `syntax` (were `invalid_name`); `r(322)` and
+  `r(1400)` map to `estimation_failure` (was `file_not_found` /
+  `estimation_sample_empty`); `r(480)` maps to `infeasible` (was
+  `out_of_memory`); local I/O `r(691)`–`r(693)` map to `file_io` (were
+  `network`). Misleading mappings for `r(9)`/`r(604)`/`r(615)`/`r(616)` were
+  removed (they fall through to `unknown` rather than assert a wrong kind).
+
+### Added
+
+- **`error.rc_label` is now populated for real Stata errors.** New
+  `RC_LABEL` table and `label_for_rc()` (public API) supply Stata's canonical
+  short message (e.g. `r(111)` → "variable not found") so agents have a stable,
+  transcript-independent descriptor to branch and group on. Unverified codes
+  yield an empty label rather than a guess.
+- **More return codes classified** (shrinking `unknown`): real network codes
+  `r(2)`/`r(631)`/`r(672)`/`r(677)` → `network`; `r(688)` → `file_corrupt`;
+  `r(907)` → `stata_limit`; `r(950)` → `out_of_memory`; numlist `r(124)`–`r(127)`
+  → `syntax`.
+- **Remediation suggestions for more error kinds.** `suggestions_for()` now
+  emits actionable hints for `network`, `infeasible`, `type_mismatch`,
+  `file_io`, `file_corrupt`, `permission`, `estimation_failure`, and
+  `matrix_missing`, so nearly every common failure ships a recovery hint.
+
 ## 0.8.1 — 2026-06-20
 
 ### Changed
