@@ -19,13 +19,18 @@ A unified release ships **four artifacts under the same version number**:
 | VS Code Marketplace (`stata-code-vscode`) | `vscode-vX.Y.Z` | [.github/workflows/vscode-release.yml](.github/workflows/vscode-release.yml) |
 | GitHub Release | `vX.Y.Z` | tail end of `release.yml` |
 
-Four files hold version literals — bump all of them together, or the release will
-ship inconsistent metadata:
+**Eight version literals** (across six files) must move together, or the
+`release.yml` "Verify tag matches project versions" gate (`scripts/check_versions.py`)
+fails the build *before* any publish runs. Bump all of them, or run the guard
+locally first (`python3 scripts/check_versions.py --tag vX.Y.Z`):
 
 1. `pyproject.toml` → `[project] version`
 2. `stata_code/__init__.py` → `__version__`
 3. `stata_code/mcp/server.py` → `__version__`
 4. `vscode/package.json` → `version`
+5. `vscode/package-lock.json` → top-level `version` **and** `packages[""].version` (two sites)
+6. `.claude-plugin/plugin.json` → `version`
+7. `.claude-plugin/marketplace.json` → `metadata.version` **and** each `plugins[*].version` (two sites)
 
 `vscode/src/mcpClient.ts` imports the extension version from
 `vscode/package.json` for the MCP handshake, so it should not carry a separate
