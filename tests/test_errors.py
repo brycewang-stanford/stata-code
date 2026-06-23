@@ -420,3 +420,43 @@ class TestExpandedSuggestions:
             s.action for s in suggestions_for(ErrorKind.PERMISSION, path="x.dta")
         ).lower()
         assert "read-only" in text or "writable" in text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Typed-field extraction from real Stata error messages
+#
+# These assert the regexes match Stata's *actual* wording (verified against the
+# live runtime), which synthetic suggestion tests bypass by passing fields in
+# directly. A regex that only matched invented phrasing left fuzzy "did you
+# mean?" dead in production despite green unit tests — these guard against that.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestTypedFieldExtraction:
+    def test_unrecognized_command_real_message(self):
+        # Stata says "command <X> is unrecognized" (not "<X> unrecognized
+        # command"); the extracted name must drive a fuzzy suggestion.
+        from stata_code.core.runner import _extract_typed_fields
+
+        fields = _extract_typed_fields(
+            ErrorKind.COMMAND_NOT_FOUND, "command regresss is unrecognized"
+        )
+        assert fields["command"] == "regresss"
+        suggs = suggestions_for(ErrorKind.COMMAND_NOT_FOUND, command=fields["command"])
+        assert any("Did you mean" in s.action and "regress" in s.action for s in suggs)
+
+    def test_varname_not_found_real_message(self):
+        from stata_code.core.runner import _extract_typed_fields
+
+        fields = _extract_typed_fields(
+            ErrorKind.VARNAME_NOT_FOUND, "variable mpgg not found"
+        )
+        assert fields["varname"] == "mpgg"
+
+    def test_command_extraction_fallback_phrasing(self):
+        from stata_code.core.runner import _extract_typed_fields
+
+        fields = _extract_typed_fields(
+            ErrorKind.COMMAND_NOT_FOUND, "xyz unrecognized command"
+        )
+        assert fields["command"] == "xyz"

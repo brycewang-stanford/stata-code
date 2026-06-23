@@ -18,6 +18,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `out_of_memory`); local I/O `r(691)`–`r(693)` map to `file_io` (were
   `network`). Misleading mappings for `r(9)`/`r(604)`/`r(615)`/`r(616)` were
   removed (they fall through to `unknown` rather than assert a wrong kind).
+- **Command "did you mean?" now fires.** The `command_not_found` (rc 199) name
+  extractor expected `"<X> unrecognized command"`, but Stata's actual message is
+  `"command <X> is unrecognized"` — so the fuzzy suggestion never matched in
+  practice (synthetic unit tests passed the name in directly and hid it). Fixed
+  the regex and added a real-Stata integration test so a typo like `regresss`
+  now surfaces "Did you mean `regress`?".
 
 ### Added
 

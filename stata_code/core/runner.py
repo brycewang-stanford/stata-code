@@ -84,7 +84,13 @@ _ERETURN_NAME_RE = re.compile(r"^\s*(?:e|r)\(([A-Za-z_][A-Za-z0-9_]*)\)\s*[=:]")
 _VARNAME_RE = re.compile(r"variable (\w+) (?:not found|already defined)")
 _FILE_PATH_RE = re.compile(r"file\s+(\S+?)\s+(?:not\s+found|already\s+exists|could\s+not)")
 _NAME_CONFLICT_RE = re.compile(r"(\w+)\s+already\s+(?:defined|exists)")
-_UNRECOGNIZED_CMD_RE = re.compile(r"(\S+)\s+(?:is\s+)?unrecognized\s+command")
+# Stata's actual rc 199 message is "command <X> is unrecognized" (verified
+# against the live runtime and the [P] error manual). The second alternative is
+# a defensive fallback for any "<X> unrecognized command" phrasing. The command
+# token is whichever group matched (see _extract_typed_fields).
+_UNRECOGNIZED_CMD_RE = re.compile(
+    r"command\s+(\S+)\s+is\s+unrecognized|(\S+)\s+unrecognized\s+command"
+)
 
 # Cooperative cancellation for the IN-PROCESS runner only. A per-session
 # "cancel-pending" flag, settable from any thread via `cancel(session_id)`.
@@ -627,7 +633,7 @@ def _extract_typed_fields(kind: ErrorKind, message: str) -> dict[str, str | None
     if kind == ErrorKind.COMMAND_NOT_FOUND:
         m = _UNRECOGNIZED_CMD_RE.search(message)
         if m:
-            fields["command"] = m.group(1)
+            fields["command"] = m.group(1) or m.group(2)
     return fields
 
 

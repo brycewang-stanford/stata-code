@@ -158,6 +158,22 @@ class TestErrorClassification:
         # Suggestion mentions ssc install
         assert any("ssc install" in s.action for s in r.error.suggestions)
 
+    def test_unrecognized_command_fuzzy_match(self):
+        # A typo for a real command must surface a "did you mean" suggestion.
+        # Stata's actual rc 199 message is "command <X> is unrecognized"; this
+        # exercises the command-name extraction against the live runtime (a
+        # regex that only matched synthetic phrasing left this dead).
+        from stata_code.core.runner import execute
+
+        r = execute("regresss price mpg")
+        assert r.ok is False
+        assert r.rc == 199
+        assert r.error.kind == ErrorKind.COMMAND_NOT_FOUND
+        assert any(
+            "Did you mean" in s.action and "regress" in s.action
+            for s in r.error.suggestions
+        ), [s.action for s in r.error.suggestions]
+
     def test_syntax_error(self):
         from stata_code.core.runner import execute
 
