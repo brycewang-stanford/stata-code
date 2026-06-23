@@ -83,33 +83,44 @@ is the kind of trust an empirical economist and a referee both need.
 ## Long-term goals (6–12 months), by leverage
 
 Ranked. Each ties back to a roadmap pillar and is phrased as a durable outcome,
-not a feature list.
+not a feature list. Status legend: ✅ shipped · 🟡 foundation shipped, stretch
+remaining · ⬜ not started.
 
-1. **Own "agent-native typed Stata errors" as the headline.** *(in progress)*
-   Keep `error.kind` a stable, manual-verified, versioned contract; every kind
-   ships a `rc_label` and a remediation `suggestion`. Add a documented
-   "agent recovery contract" so a downstream agent has a defined next action per
-   kind. → Roadmap pillar 1 (reliable execution contract).
-2. **Per-command typed `r()/e()` result contracts for mandated commands.** Turn
-   the generic returns bag into typed, per-command contracts for the commands
-   economists are *required* to use (`reghdfe`, `ivreghdfe`, `csdid`,
-   `did_multiplegt_dyn`, `ppmlhdfe`, `xtabond2`). This is also the
-   StatsPAI-defense: referee-grade numbers from the exact mandated command,
-   not a Python reimplementation. → Roadmap pillar 2.
-3. **Reproducibility / provenance envelope.** Capture Stata version, `e(cmd)`,
-   package install provenance (`ssc`/`net` + version), seed, and a re-runnable
-   `.do` per `RunResult`. "Referee-grade reproducibility" is the moat against
-   both raw-log MCPs and Python reimplementations, and serves publication
-   workflows directly. *(Speculative upside: a journal-submission export.)*
-   → Roadmap pillar 1 + 3.
-4. **Data-MCP integration bridge** (FRED / World Bank / Census). Document and
-   validate the handoff (raw file + metadata + key checks) so an agent can
-   compose `data-MCP fetch → stata-code estimate`. Cheap, complementary, expands
-   reach; **no Stata MCP has done this composition.** → Roadmap pillar 4.
-5. **Typed-schema-anchored skills catalog** — replication audits, robustness
+1. ✅ **Own "agent-native typed Stata errors" as the headline.** *Shipped
+   2026-06-23.* `error.kind` is a stable, manual-verified contract (audited
+   against `[P] error`); every classified rc ships a canonical `rc_label`
+   (`label_for_rc`) and, where actionable, a remediation `suggestion`. The
+   **agent recovery contract** (`error.recovery` / `recovery_for`) gives a
+   defined next action per kind: retry-as-is, change-code, or escalate.
+   → Roadmap pillar 1 (reliable execution contract).
+2. 🟡 **Per-command typed `r()/e()` result contracts for mandated commands.**
+   *Foundation shipped:* `RunResult.results.estimation` is a typed coefficient
+   table (term/b/se/statistic/p/CI + model_stats) derived from referee-grade
+   `r(table)` (or `e(b)`/`e(V)` fallback) — works for any estimator without a
+   per-command table. *Stretch:* command-aware specializations for the commands
+   economists must use (`reghdfe`, `ivreghdfe`, `csdid`, `did_multiplegt_dyn`,
+   `ppmlhdfe`, `xtabond2`) that surface their bespoke `e()` scalars. This is the
+   StatsPAI-defense: referee-grade numbers from the exact mandated command.
+   → Roadmap pillar 2.
+3. ✅ **Reproducibility / provenance envelope.** *Shipped 2026-06-23.*
+   `build_provenance()` captures Stata version/edition, `e(cmd)`, stata-code +
+   schema versions, timestamp, and seed; `build_reproducible_do()` renders a
+   self-contained, `version`-pinned, seed-set re-runnable `.do`. *Stretch:*
+   per-package install provenance (`ssc`/`net` + version) and a journal-style
+   submission-package export. → Roadmap pillar 1 + 3.
+4. 🟡 **Data-MCP integration bridge** (FRED / World Bank / Census).
+   *Foundation shipped:* `verify_dataset()` enforces the handoff's key checks
+   (row/var counts, required columns) on the captured `DatasetInfo`, the
+   executable companion to the `data-mcp-handoff` skill protocol. *Stretch:*
+   first-class adapters that ferry source metadata (row hash, series ids) into
+   the check automatically. **No Stata MCP has done this composition.**
+   → Roadmap pillar 4.
+5. ⬜ **Typed-schema-anchored skills catalog** — replication audits, robustness
    sweeps, publication QA, legacy `.do` modernization — each anchored to typed
-   results + provenance, under MIT. Matches tmonk's main soft advantage (their
-   skills catalog) while staying license-clean. → Roadmap pillar 2.
+   results + provenance, under MIT. The core primitives now exist (typed
+   estimation table → publication tables; provenance → replication; recovery →
+   self-repair); the catalog itself lives in the skills lane
+   (`skills/stata-code/references/**`). → Roadmap pillar 2.
 
 ## Risks & threats
 
