@@ -49,6 +49,7 @@ The skill ships a `references/` library of dense Stata domain knowledge. **Progr
 | Data fetched by external MCPs should become Stata inputs | `references/data-mcp-handoff.md` |
 | Cross-package or cross-language robustness / parity checks | `references/parity-audit.md` |
 | Turnkey empirical recipes — DiD/event study, IV/2SLS, RDD, publication tables, cross-validation | `references/recipes/<recipe>.md` |
+| Interpreting `results.estimation` (coefficient table, diagnostics), `error.recovery`, reproducible-do / submission bundles, `verify_dataset` | `references/structured-results.md` |
 | Diagnosing a failed run, Stata `rc` codes, the self-repair loop | `references/error-codes.md` |
 | Writing correct, reproducible Stata that fails loudly (not silently) | `references/defensive-coding.md` |
 | A specific community package | `references/packages/<pkg>.md` — `reghdfe`, `csdid`, `drdid`, `did_imputation`, `eventstudyinteract`, `did_multiplegt_dyn`, `rdrobust`, `ivreg2`, `ivreghdfe`, `boottest`, `estout`, `outreg2`, `coefplot`, `gtools` |

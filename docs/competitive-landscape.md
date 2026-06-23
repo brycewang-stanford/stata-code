@@ -93,34 +93,40 @@ remaining · ⬜ not started.
    **agent recovery contract** (`error.recovery` / `recovery_for`) gives a
    defined next action per kind: retry-as-is, change-code, or escalate.
    → Roadmap pillar 1 (reliable execution contract).
-2. 🟡 **Per-command typed `r()/e()` result contracts for mandated commands.**
-   *Foundation shipped:* `RunResult.results.estimation` is a typed coefficient
-   table (term/b/se/statistic/p/CI + model_stats) derived from referee-grade
-   `r(table)` (or `e(b)`/`e(V)` fallback) — works for any estimator without a
-   per-command table. *Stretch:* command-aware specializations for the commands
-   economists must use (`reghdfe`, `ivreghdfe`, `csdid`, `did_multiplegt_dyn`,
-   `ppmlhdfe`, `xtabond2`) that surface their bespoke `e()` scalars. This is the
+2. ✅ **Per-command typed `r()/e()` result contracts for mandated commands.**
+   *Shipped 2026-06-23.* `RunResult.results.estimation` is a typed coefficient
+   table (term/b/se/statistic/p/CI + model_stats) from referee-grade `r(table)`
+   (or `e(b)`/`e(V)` fallback). It now also carries `command_family`
+   (ols/iv/gmm/panel/count/…) and command-aware `diagnostics` — the
+   identification/spec tests economists must report (`ivreg2`/`ivreghdfe`
+   weak-ID F + Hansen J, `xtabond2` AR(2)/Hansen, `reghdfe` within-R²/absorbed
+   FE, `xtreg` rho), surfaced only when present in `e()`. This is the
    StatsPAI-defense: referee-grade numbers from the exact mandated command.
    → Roadmap pillar 2.
 3. ✅ **Reproducibility / provenance envelope.** *Shipped 2026-06-23.*
    `build_provenance()` captures Stata version/edition, `e(cmd)`, stata-code +
-   schema versions, timestamp, and seed; `build_reproducible_do()` renders a
-   self-contained, `version`-pinned, seed-set re-runnable `.do`. *Stretch:*
-   per-package install provenance (`ssc`/`net` + version) and a journal-style
-   submission-package export. → Roadmap pillar 1 + 3.
-4. 🟡 **Data-MCP integration bridge** (FRED / World Bank / Census).
-   *Foundation shipped:* `verify_dataset()` enforces the handoff's key checks
-   (row/var counts, required columns) on the captured `DatasetInfo`, the
-   executable companion to the `data-mcp-handoff` skill protocol. *Stretch:*
-   first-class adapters that ferry source metadata (row hash, series ids) into
-   the check automatically. **No Stata MCP has done this composition.**
-   → Roadmap pillar 4.
-5. ⬜ **Typed-schema-anchored skills catalog** — replication audits, robustness
+   schema versions, timestamp, seed, and **per-package dependencies** parsed
+   from the script (`ssc`/`net install` → `Provenance.packages`);
+   `build_reproducible_do()` renders a `version`-pinned, seed-set re-runnable
+   `.do`; and `build_submission_package()` assembles a replication/journal
+   bundle (do + `PROVENANCE.json` + README manifest). *Stretch:* package
+   *version* pinning (vs. name only) and a journal-specific layout.
+   → Roadmap pillar 1 + 3.
+4. ✅ **Data-MCP integration bridge** (FRED / World Bank / Census).
+   *Shipped 2026-06-23.* `verify_dataset()` enforces the handoff's key checks
+   (row/var counts, observation bounds, required columns) on the captured
+   `DatasetInfo` — the executable companion to the `data-mcp-handoff` protocol,
+   documented in `references/structured-results.md`. *Stretch:* first-class
+   adapters that ferry source metadata (row hash, series ids) into the check
+   automatically. **No Stata MCP has done this composition.** → Roadmap pillar 4.
+5. 🟡 **Typed-schema-anchored skills catalog** — replication audits, robustness
    sweeps, publication QA, legacy `.do` modernization — each anchored to typed
-   results + provenance, under MIT. The core primitives now exist (typed
-   estimation table → publication tables; provenance → replication; recovery →
-   self-repair); the catalog itself lives in the skills lane
-   (`skills/stata-code/references/**`). → Roadmap pillar 2.
+   results + provenance, under MIT. *Foundation shipped:*
+   `references/structured-results.md` teaches agents to consume the typed
+   contracts (`results.estimation`/`diagnostics`, `error.recovery`/`rc_label`,
+   reproducible-do / submission bundles, `verify_dataset`). *Stretch:* the
+   audit/robustness/QA recipe set in the skills lane
+   (`skills/stata-code/references/recipes/**`). → Roadmap pillar 2.
 
 ## Risks & threats
 
