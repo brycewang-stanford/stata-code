@@ -4,7 +4,7 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
-## Unreleased
+## 0.9.0 — 2026-06-23
 
 ### Fixed
 
