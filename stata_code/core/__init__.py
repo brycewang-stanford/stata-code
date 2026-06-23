@@ -22,6 +22,7 @@ from stata_code.core.estimation import (
     build_estimation_from_returns,
     build_estimation_result,
 )
+from stata_code.core.handoff import DatasetCheck, verify_dataset
 from stata_code.core.provenance import build_provenance, build_reproducible_do
 from stata_code.core.runner import (
     execute,
@@ -76,6 +77,8 @@ __all__ = [
     "build_estimation_from_returns",
     "build_provenance",
     "build_reproducible_do",
+    "verify_dataset",
+    "DatasetCheck",
     "RunResult",
     "ErrorKind",
     "ErrorInfo",

@@ -37,6 +37,9 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `RunResult` plus original code into a runtime provenance envelope and a
   re-runnable `.do` script preamble with Stata `version`, `set more off`, and an
   optional `set seed`.
+- **Data-MCP handoff verifier.** New `verify_dataset()` and `DatasetCheck`
+  helpers validate imported datasets against provider metadata such as expected
+  row count, variable count, observation bounds, and required variables.
 - **`error.rc_label` is now populated for real Stata errors.** New
   `RC_LABEL` table and `label_for_rc()` (public API) supply Stata's canonical
   short message (e.g. `r(111)` → "variable not found") so agents have a stable,
