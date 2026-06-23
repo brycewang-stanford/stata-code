@@ -59,6 +59,92 @@ _MODEL_STAT_KEYS: tuple[str, ...] = (
     "rank",
 )
 
+# Coarse estimator family per e(cmd), so an agent can branch on the *kind* of
+# model without a command lookup table. Best-effort; unknown commands map to
+# None. Keys are the canonical e(cmd) names of commands economists use most.
+_COMMAND_FAMILY: dict[str, str] = {
+    # OLS / linear with fixed effects
+    "regress": "ols",
+    "areg": "ols",
+    "reghdfe": "ols",
+    "hdfe": "ols",
+    # Panel
+    "xtreg": "panel",
+    "xtgls": "panel",
+    "xtscc": "panel",
+    # Instrumental variables
+    "ivregress": "iv",
+    "ivreg": "iv",
+    "ivreg2": "iv",
+    "ivreghdfe": "iv",
+    # Dynamic-panel GMM
+    "xtabond": "gmm",
+    "xtabond2": "gmm",
+    "xtdpdsys": "gmm",
+    "xtdpd": "gmm",
+    # Count / Poisson (incl. PPML)
+    "poisson": "count",
+    "nbreg": "count",
+    "ppml": "count",
+    "ppmlhdfe": "count",
+    "fepois": "count",
+    # Binary / limited dependent
+    "logit": "binary",
+    "probit": "binary",
+    "cloglog": "binary",
+    "tobit": "limited",
+    "heckman": "limited",
+    # Modern difference-in-differences
+    "csdid": "did",
+    "did_multiplegt_dyn": "did",
+    "did_imputation": "did",
+    "eventstudyinteract": "did",
+    "didregress": "did",
+    "xtdidregress": "did",
+}
+
+# Command-specific identification / specification diagnostics, keyed by e(cmd).
+# Each entry maps an e() scalar name to a friendly label. Only scalars actually
+# present in e() are surfaced, so an entry that does not apply to a given run
+# (or Stata version) is silently skipped — we never fabricate a value.
+_IV_DIAGNOSTICS: tuple[tuple[str, str], ...] = (
+    ("widstat", "weak_id_F"),  # Kleibergen-Paap / Cragg-Donald weak-ID stat
+    ("rkf", "kp_rk_wald_F"),
+    ("idstat", "underid_stat"),
+    ("iddf", "underid_df"),
+    ("j", "overid_j"),  # Hansen J / Sargan
+    ("jdf", "overid_j_df"),
+    ("arf", "anderson_rubin_F"),
+)
+_GMM_DIAGNOSTICS: tuple[tuple[str, str], ...] = (
+    ("ar1p", "ar1_p"),  # Arellano-Bond AR(1) test p-value
+    ("ar2p", "ar2_p"),  # AR(2) — the one that must NOT reject
+    ("hansenp", "hansen_p"),  # Hansen overid p
+    ("sarganp", "sargan_p"),
+)
+_COMMAND_DIAGNOSTICS: dict[str, tuple[tuple[str, str], ...]] = {
+    "reghdfe": (
+        ("r2_within", "r2_within"),
+        ("N_hdfe", "n_absorbed_fe_dims"),
+        ("df_a", "absorbed_df"),
+    ),
+    "ivregress": (("widstat", "weak_id_F"),),
+    "ivreg2": _IV_DIAGNOSTICS,
+    "ivreghdfe": _IV_DIAGNOSTICS,
+    "ivreg": _IV_DIAGNOSTICS,
+    "xtabond2": _GMM_DIAGNOSTICS,
+    "xtdpdsys": _GMM_DIAGNOSTICS,
+    "xtabond": _GMM_DIAGNOSTICS,
+    "xtreg": (
+        ("rho", "rho"),  # fraction of variance from u_i
+        ("corr", "corr_u_xb"),
+        ("sigma_u", "sigma_u"),
+        ("sigma_e", "sigma_e"),
+    ),
+    "ppmlhdfe": (("r2_p", "pseudo_r2"),),
+    "fepois": (("r2_p", "pseudo_r2"),),
+}
+
 
 def _normal_cdf(x: float) -> float:
     """Standard normal CDF via the error function (stdlib only)."""
@@ -203,6 +289,29 @@ def _model_stats(scalars: dict[str, float | None]) -> dict[str, float | None]:
     return {k: scalars[k] for k in _MODEL_STAT_KEYS if k in scalars}
 
 
+def _command_family(command: str | None) -> str | None:
+    """Coarse estimator family for an e(cmd) name (None if unrecognized)."""
+    if not command:
+        return None
+    return _COMMAND_FAMILY.get(command)
+
+
+def _command_diagnostics(
+    command: str | None, scalars: dict[str, float | None]
+) -> dict[str, float | None]:
+    """Surface command-specific identification/spec-test scalars.
+
+    Only scalars actually present in e() are included, so an entry that does not
+    apply to a given run (or Stata version) is skipped rather than fabricated.
+    """
+    if not command:
+        return {}
+    spec = _COMMAND_DIAGNOSTICS.get(command)
+    if spec is None:
+        return {}
+    return {label: scalars[key] for key, label in spec if key in scalars}
+
+
 def build_estimation_result(results: ResultsInfo) -> EstimationResult | None:
     """Derive a typed coefficient table from captured r()/e() values.
 
@@ -255,6 +364,7 @@ def build_estimation_from_returns(
 
     return EstimationResult(
         command=command,
+        command_family=_command_family(command),
         depvar=depvar,
         n_obs=n_obs,
         df_model=e.scalars.get("df_m"),
@@ -263,4 +373,5 @@ def build_estimation_from_returns(
         source=source,  # type: ignore[arg-type]
         coefficients=coeffs,
         model_stats=_model_stats(e.scalars),
+        diagnostics=_command_diagnostics(command, e.scalars),
     )

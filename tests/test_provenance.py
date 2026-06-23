@@ -76,3 +76,118 @@ def test_public_exports_include_provenance_helpers() -> None:
     assert stata_code.Provenance is not None
     assert stata_code.build_provenance is build_provenance
     assert stata_code.build_reproducible_do is build_reproducible_do
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-package provenance (extract_package_installs)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from stata_code.core.provenance import extract_package_installs  # noqa: E402
+
+
+def test_extract_ssc_and_net_installs() -> None:
+    code = (
+        "ssc install reghdfe, replace\n"
+        "ssc install ftools\n"
+        "net install grc1leg, from(http://www.stata.com/users/vwiggins)\n"
+        "ssc inst coefplot\n"
+    )
+    pkgs = extract_package_installs(code)
+    by_name = {p.name: p for p in pkgs}
+    assert by_name["reghdfe"].source == "ssc"
+    assert by_name["ftools"].source == "ssc"
+    assert by_name["coefplot"].source == "ssc"  # `ssc inst` abbreviation
+    assert by_name["grc1leg"].source == "net"
+    assert by_name["grc1leg"].url == "http://www.stata.com/users/vwiggins"
+
+
+def test_extract_dedups_and_ignores_comments() -> None:
+    code = (
+        "ssc install reghdfe\n"
+        "* ssc install fake_in_comment\n"
+        "ssc install reghdfe\n"  # duplicate
+    )
+    pkgs = extract_package_installs(code)
+    assert [p.name for p in pkgs] == ["reghdfe"]
+
+
+def test_extract_empty_when_no_installs() -> None:
+    assert extract_package_installs("regress y x\nsummarize y") == []
+
+
+def test_build_provenance_includes_packages_when_code_given() -> None:
+    prov = build_provenance(_result(), code="ssc install reghdfe\nreghdfe y x")
+    assert [p.name for p in prov.packages] == ["reghdfe"]
+
+
+def test_build_provenance_packages_empty_without_code() -> None:
+    assert build_provenance(_result()).packages == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Journal / replication submission package (build_submission_package)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import json  # noqa: E402
+
+from stata_code.core.provenance import build_submission_package  # noqa: E402
+
+
+def test_submission_package_contains_expected_files() -> None:
+    pkg = build_submission_package(
+        _result(),
+        "ssc install reghdfe\nreghdfe price mpg",
+        seed=7,
+        title="My DiD paper",
+    )
+    assert set(pkg) == {"analysis.do", "PROVENANCE.json", "README.md"}
+
+
+def test_submission_do_is_runnable_and_pinned() -> None:
+    pkg = build_submission_package(_result(), "regress price mpg", seed=7)
+    do = pkg["analysis.do"]
+    assert "version 18" in do
+    assert "set seed 7" in do
+    assert "regress price mpg" in do
+
+
+def test_submission_provenance_json_is_valid_and_typed() -> None:
+    pkg = build_submission_package(
+        _result(), "ssc install reghdfe\nreghdfe y x", seed=7
+    )
+    data = json.loads(pkg["PROVENANCE.json"])
+    assert data["stata_version"] == "18.0"
+    assert data["seed"] == 7
+    assert [p["name"] for p in data["packages"]] == ["reghdfe"]
+
+
+def test_submission_readme_lists_packages_and_runtime() -> None:
+    pkg = build_submission_package(
+        _result(),
+        "ssc install reghdfe\nnet install grc1leg, from(http://x.org)\nreghdfe y x",
+        seed=7,
+        title="Paper X",
+    )
+    readme = pkg["README.md"]
+    assert readme.startswith("# Paper X")
+    assert "reghdfe" in readme
+    assert "grc1leg" in readme
+    assert "http://x.org" in readme
+    assert "do analysis.do" in readme
+    assert "RNG seed: 7" in readme
+
+
+def test_submission_custom_do_filename() -> None:
+    pkg = build_submission_package(
+        _result(), "di 1", do_filename="replicate.do"
+    )
+    assert "replicate.do" in pkg
+    assert "do replicate.do" in pkg["README.md"]
+
+
+def test_public_exports_include_submission_helpers() -> None:
+    import stata_code
+
+    assert stata_code.build_submission_package is build_submission_package
+    assert stata_code.extract_package_installs is extract_package_installs
+    assert stata_code.PackageInstall is not None

@@ -216,3 +216,58 @@ class TestGuards:
         assert stata_code.Coefficient is not None
         assert stata_code.build_estimation_result is build_estimation_result
         assert stata_code.build_estimation_from_returns is build_estimation_from_returns
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Command-aware family classification + identification/spec diagnostics
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCommandSpecialization:
+    def _est(self, cmd: str, scalars: dict[str, float]):
+        cols = ["x", "_cons"]
+        e = StataReturns(
+            macros={"cmd": cmd},
+            scalars={"N": 500, **scalars},
+            matrices={"b": _b([1.0, 0.5], cols), "V": _v([0.04, 0.01], cols)},
+        )
+        return build_estimation_from_returns(e, StataReturns())
+
+    def test_iv_family_and_weak_id_and_overid(self):
+        est = self._est("ivreghdfe", {"widstat": 23.5, "j": 1.8, "jdf": 2})
+        assert est.command_family == "iv"
+        assert est.diagnostics["weak_id_F"] == 23.5
+        assert est.diagnostics["overid_j"] == 1.8
+        assert est.diagnostics["overid_j_df"] == 2.0
+
+    def test_reghdfe_family_and_within_r2(self):
+        est = self._est("reghdfe", {"r2_within": 0.31, "N_hdfe": 2})
+        assert est.command_family == "ols"
+        assert est.diagnostics["r2_within"] == 0.31
+        assert est.diagnostics["n_absorbed_fe_dims"] == 2.0
+
+    def test_gmm_family_and_ar_hansen(self):
+        est = self._est("xtabond2", {"ar1p": 0.001, "ar2p": 0.43, "hansenp": 0.27})
+        assert est.command_family == "gmm"
+        assert est.diagnostics["ar1_p"] == 0.001
+        assert est.diagnostics["ar2_p"] == 0.43
+        assert est.diagnostics["hansen_p"] == 0.27
+
+    def test_panel_family_and_rho(self):
+        est = self._est("xtreg", {"rho": 0.8, "sigma_u": 1.2, "sigma_e": 0.6})
+        assert est.command_family == "panel"
+        assert est.diagnostics["rho"] == 0.8
+
+    def test_absent_scalars_are_not_fabricated(self):
+        # ivreghdfe entry lists widstat/j/jdf/... but only widstat is present.
+        est = self._est("ivreghdfe", {"widstat": 10.0})
+        assert est.diagnostics == {"weak_id_F": 10.0}
+
+    def test_unknown_command_has_no_family_or_diagnostics(self):
+        est = self._est("mycustomcmd", {"widstat": 99.0})
+        assert est.command_family is None
+        assert est.diagnostics == {}
+
+    def test_did_family(self):
+        est = self._est("csdid", {})
+        assert est.command_family == "did"

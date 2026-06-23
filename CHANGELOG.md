@@ -26,7 +26,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   possible, or from inline `e(b)` / `e(V)` as a clearly marked fallback. New
   public helpers `build_estimation_result()` and
   `build_estimation_from_returns()` keep the contract unit-testable without
-  Stata.
+  Stata. The contract also carries a coarse `command_family`
+  (ols/iv/gmm/panel/count/did/…) and command-aware `diagnostics` — identification
+  and specification tests surfaced from `e()` for the commands economists must
+  report (`ivreg2`/`ivreghdfe` weak-ID F and Hansen J, `xtabond2` AR(2)/Hansen,
+  `reghdfe` within-R²/absorbed FE, `xtreg` rho). Only scalars actually present in
+  `e()` are surfaced — never fabricated.
 - **Machine-readable recovery contract.** `error.recovery` now classifies each
   `ErrorKind` by failure domain and tells agents whether an unchanged retry,
   code edit, or user/out-of-band action is likely needed. Synthetic timeout,
@@ -36,7 +41,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `build_provenance()`, and `build_reproducible_do()` helpers turn a completed
   `RunResult` plus original code into a runtime provenance envelope and a
   re-runnable `.do` script preamble with Stata `version`, `set more off`, and an
-  optional `set seed`.
+  optional `set seed`. Provenance now also records **per-package dependencies**
+  parsed from the script (`extract_package_installs()` →
+  `Provenance.packages`: `ssc`/`net install` name, source, and `from()` URL),
+  and `build_submission_package()` assembles a self-contained
+  replication/journal-submission bundle (`analysis.do` + `PROVENANCE.json` +
+  a `README.md` manifest listing runtime, seed, and required community packages).
 - **Data-MCP handoff verifier.** New `verify_dataset()` and `DatasetCheck`
   helpers validate imported datasets against provider metadata such as expected
   row count, variable count, observation bounds, and required variables.

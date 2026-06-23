@@ -23,7 +23,12 @@ from stata_code.core.estimation import (
     build_estimation_result,
 )
 from stata_code.core.handoff import DatasetCheck, verify_dataset
-from stata_code.core.provenance import build_provenance, build_reproducible_do
+from stata_code.core.provenance import (
+    build_provenance,
+    build_reproducible_do,
+    build_submission_package,
+    extract_package_installs,
+)
 from stata_code.core.runner import (
     execute,
     get_graph,
@@ -45,6 +50,7 @@ from stata_code.core.schema import (
     LogFileInfo,
     LogInfo,
     Matrix,
+    PackageInstall,
     Provenance,
     Recovery,
     ResultsInfo,
@@ -77,6 +83,9 @@ __all__ = [
     "build_estimation_from_returns",
     "build_provenance",
     "build_reproducible_do",
+    "build_submission_package",
+    "extract_package_installs",
+    "PackageInstall",
     "verify_dataset",
     "DatasetCheck",
     "RunResult",

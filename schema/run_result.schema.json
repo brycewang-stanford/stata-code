@@ -361,6 +361,18 @@
           "default": null,
           "title": "Command"
         },
+        "command_family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command Family"
+        },
         "depvar": {
           "anyOf": [
             {
@@ -396,6 +408,20 @@
           ],
           "default": null,
           "title": "Df Resid"
+        },
+        "diagnostics": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Diagnostics",
+          "type": "object"
         },
         "model_stats": {
           "additionalProperties": {

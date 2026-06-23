@@ -186,6 +186,7 @@ class EstimationResult(_Base):
     """
 
     command: str | None = None  # e(cmd)
+    command_family: str | None = None  # coarse estimator family (ols/iv/gmm/...)
     depvar: str | None = None  # e(depvar)
     n_obs: int | None = None  # e(N)
     df_model: float | None = None  # e(df_m)
@@ -195,6 +196,7 @@ class EstimationResult(_Base):
     ci_level: float = 95.0
     coefficients: list[Coefficient] = Field(default_factory=list)
     model_stats: dict[str, float | None] = Field(default_factory=dict)
+    diagnostics: dict[str, float | None] = Field(default_factory=dict)
 
 
 class ResultsInfo(_Base):
@@ -263,6 +265,14 @@ class Recovery(_Base):
     needs_user_input: bool = False
 
 
+class PackageInstall(_Base):
+    """A community package the script installs (parsed from ssc/net install)."""
+
+    name: str
+    source: Literal["ssc", "net", "unknown"] = "unknown"
+    url: str | None = None  # the from(...) URL for `net install`, when given
+
+
 class Provenance(_Base):
     """Reproducibility envelope describing what produced a result.
 
@@ -280,6 +290,7 @@ class Provenance(_Base):
     generated_at: str | None = None  # the run's started_at (ISO 8601 UTC)
     command: str | None = None  # e(cmd), when an estimation is in scope
     seed: int | None = None  # `set seed` value, when known to the caller
+    packages: list[PackageInstall] = Field(default_factory=list)
 
 
 class ErrorContext(_Base):
