@@ -263,6 +263,25 @@ class Recovery(_Base):
     needs_user_input: bool = False
 
 
+class Provenance(_Base):
+    """Reproducibility envelope describing what produced a result.
+
+    Captures the runtime identity (Stata + stata-code + schema versions), when
+    the run happened, and - when known - the RNG seed and estimation command,
+    so a result can be traced and re-run. Consumers can render a self-contained
+    re-runnable script via ``core.provenance.build_reproducible_do``.
+    """
+
+    stata_version: str | None = None
+    stata_edition: StataEdition = StataEdition.UNKNOWN
+    stata_code_version: str | None = None
+    schema_version: str = "1.0"
+    backend: Backend | None = None
+    generated_at: str | None = None  # the run's started_at (ISO 8601 UTC)
+    command: str | None = None  # e(cmd), when an estimation is in scope
+    seed: int | None = None  # `set seed` value, when known to the caller
+
+
 class ErrorContext(_Base):
     before: list[str] = Field(default_factory=list)
     failing: str = ""

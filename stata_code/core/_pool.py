@@ -536,6 +536,11 @@ class WorkerProcess:
 
 
 def _worker_exit_message(proc: subprocess.Popen[str], rc: int | None) -> str:
+    if rc is None:
+        try:
+            rc = proc.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
     message = f"worker exited (returncode={rc}) before responding"
     if rc is None:
         return message

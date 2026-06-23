@@ -208,3 +208,11 @@ class TestGuards:
         e = StataReturns(matrices={"b": _b([5.0], cols), "V": _v([1.0], cols)})
         est = build_estimation_from_returns(e, StataReturns(), last_estimation_cmd="reghdfe")
         assert est.command == "reghdfe"
+
+    def test_public_exports_include_estimation_contract(self):
+        import stata_code
+
+        assert stata_code.EstimationResult is not None
+        assert stata_code.Coefficient is not None
+        assert stata_code.build_estimation_result is build_estimation_result
+        assert stata_code.build_estimation_from_returns is build_estimation_from_returns

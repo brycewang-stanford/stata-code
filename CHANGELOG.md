@@ -21,6 +21,22 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ### Added
 
+- **Typed estimation contract.** `RunResult.results.estimation` now exposes a
+  frontend-neutral coefficient table derived from verified `r(table)` when
+  possible, or from inline `e(b)` / `e(V)` as a clearly marked fallback. New
+  public helpers `build_estimation_result()` and
+  `build_estimation_from_returns()` keep the contract unit-testable without
+  Stata.
+- **Machine-readable recovery contract.** `error.recovery` now classifies each
+  `ErrorKind` by failure domain and tells agents whether an unchanged retry,
+  code edit, or user/out-of-band action is likely needed. Synthetic timeout,
+  cancellation, and adapter-crash errors carry the same recovery metadata as
+  ordinary Stata errors.
+- **Reproducibility provenance helpers.** New `Provenance`,
+  `build_provenance()`, and `build_reproducible_do()` helpers turn a completed
+  `RunResult` plus original code into a runtime provenance envelope and a
+  re-runnable `.do` script preamble with Stata `version`, `set more off`, and an
+  optional `set seed`.
 - **`error.rc_label` is now populated for real Stata errors.** New
   `RC_LABEL` table and `label_for_rc()` (public API) supply Stata's canonical
   short message (e.g. `r(111)` → "variable not found") so agents have a stable,

@@ -370,6 +370,12 @@ class TestRecoveryContract:
             assert isinstance(recovery, Recovery), kind
             assert recovery.category != "unknown" or kind is ErrorKind.UNKNOWN
 
+    def test_public_exports_include_recovery_contract(self):
+        import stata_code
+
+        assert stata_code.Recovery is Recovery
+        assert stata_code.recovery_for is recovery_for
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Newly-covered remediation suggestions (previously emitted nothing)

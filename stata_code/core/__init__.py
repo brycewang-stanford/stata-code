@@ -22,6 +22,7 @@ from stata_code.core.estimation import (
     build_estimation_from_returns,
     build_estimation_result,
 )
+from stata_code.core.provenance import build_provenance, build_reproducible_do
 from stata_code.core.runner import (
     execute,
     get_graph,
@@ -43,6 +44,7 @@ from stata_code.core.schema import (
     LogFileInfo,
     LogInfo,
     Matrix,
+    Provenance,
     Recovery,
     ResultsInfo,
     RunResult,
@@ -72,12 +74,15 @@ __all__ = [
     "suggestions_for",
     "build_estimation_result",
     "build_estimation_from_returns",
+    "build_provenance",
+    "build_reproducible_do",
     "RunResult",
     "ErrorKind",
     "ErrorInfo",
     "ErrorContext",
     "Suggestion",
     "Recovery",
+    "Provenance",
     "Coefficient",
     "EstimationResult",
     "LogInfo",
