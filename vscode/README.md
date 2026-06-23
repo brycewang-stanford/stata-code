@@ -183,8 +183,9 @@ stata-code doctor --no-stata-probe
 ```
 
 It reports whether `stata-code-mcp` is on `PATH`, whether the MCP extra is
-installed, where `pystata` would be discovered, and which absolute-path /
-`python -m stata_code.mcp` fallback is safest for GUI clients.
+installed, where `pystata` would be discovered, which project/user MCP config
+files mention `stata-code`, and which absolute-path / `python -m
+stata_code.mcp` fallback is safest for GUI clients.
 
 ## Configuration
 

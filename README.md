@@ -145,12 +145,14 @@ Verify the local setup with the read-only doctor:
 stata-code doctor
 stata-code doctor --json          # machine-readable output
 stata-code doctor --no-stata-probe # skip live Stata initialization
+stata-code doctor --workspace /path/to/project --no-user-config-scan
 ```
 
 The doctor reports the package/Python version, MCP and Jupyter extras, `pystata`
-discovery, console scripts on `PATH`, client/VS Code configuration hints, and a
-best-effort Stata version/edition probe. It never edits shell, Stata, Claude, or
-VS Code config.
+discovery, console scripts on `PATH`, common project/user MCP client config
+files, client/VS Code configuration hints, and a best-effort Stata
+version/edition probe. It never edits shell, Stata, Claude, Cursor, or VS Code
+config.
 
 ---
 
@@ -379,7 +381,9 @@ If the extension or an MCP client cannot find the server, run
 `stata-code doctor --no-stata-probe` in the same Python environment. It reports
 whether `stata-code-mcp` is on `PATH` and suggests absolute-path or
 `python -m stata_code.mcp` fallbacks for GUI clients whose `PATH` differs from
-your shell.
+your shell. It also reads common MCP config files in the current workspace and
+user config directories so you can see whether a client is already wired to
+`stata-code`.
 
 #### Cell and section conventions
 

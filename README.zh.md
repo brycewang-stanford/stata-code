@@ -139,11 +139,13 @@ pip install -e ".[mcp,kernel]"
 stata-code doctor
 stata-code doctor --json          # 机器可读输出
 stata-code doctor --no-stata-probe # 跳过实时 Stata 初始化
+stata-code doctor --workspace /path/to/project --no-user-config-scan
 ```
 
 doctor 会报告 package/Python 版本、MCP 和 Jupyter extras、`pystata` 发现结果、
-`PATH` 上的 console scripts、client/VS Code 配置提示，以及 best-effort 的
-Stata 版本/edition 探测。它不会改 shell、Stata、Claude 或 VS Code 配置。
+`PATH` 上的 console scripts、常见项目级/用户级 MCP client 配置文件、
+client/VS Code 配置提示，以及 best-effort 的 Stata 版本/edition 探测。它不会
+改 shell、Stata、Claude、Cursor 或 VS Code 配置。
 
 ---
 
@@ -336,7 +338,8 @@ code --install-extension brycewang-stanford.stata-code-vscode
 如果扩展或 MCP client 找不到 server，请在同一个 Python 环境里运行
 `stata-code doctor --no-stata-probe`。它会报告 `stata-code-mcp` 是否在
 `PATH` 上，并提示 GUI client 常见的绝对路径或 `python -m stata_code.mcp`
-兜底配置。
+兜底配置。它也会读取当前 workspace 和用户目录里常见的 MCP 配置文件，告诉你
+client 是否已经指向 `stata-code`。
 
 ---
 

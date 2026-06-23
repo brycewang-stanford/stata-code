@@ -5,10 +5,12 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import json
+import os
 import platform
 import shutil
 import sys
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from stata_code import __version__
@@ -55,6 +57,8 @@ def run_doctor(
     *,
     probe_stata: bool = True,
     stata_timeout_ms: int = 15_000,
+    workspace: str | Path | None = None,
+    include_user_configs: bool = True,
 ) -> DoctorReport:
     """Run read-only diagnostics without mutating user or editor config."""
     checks = [
@@ -63,7 +67,7 @@ def run_doctor(
         _optional_module_check(
             "mcp",
             "mcp_extra",
-            'MCP SDK importable; `stata-code-mcp` can run in this environment.',
+            "MCP SDK importable; `stata-code-mcp` can run in this environment.",
             'MCP SDK missing; install with `python -m pip install "stata-code[mcp]"`.',
         ),
         _optional_module_check(
@@ -74,7 +78,10 @@ def run_doctor(
         ),
         _pystata_discovery_check(),
         _console_scripts_check(),
-        _client_config_check(),
+        _client_config_check(
+            workspace=workspace,
+            include_user_configs=include_user_configs,
+        ),
         _stata_probe_check(probe_stata=probe_stata, timeout_ms=stata_timeout_ms),
     ]
     return DoctorReport(
@@ -192,8 +199,7 @@ def _console_scripts_check() -> DiagnosticCheck:
     found = {name: shutil.which(name) for name in expected}
     missing = [name for name, path in found.items() if path is None]
     detail = "; ".join(
-        f"{name}={path if path is not None else '<missing>'}"
-        for name, path in found.items()
+        f"{name}={path if path is not None else '<missing>'}" for name, path in found.items()
     )
     if not missing:
         return DiagnosticCheck(
@@ -211,23 +217,58 @@ def _console_scripts_check() -> DiagnosticCheck:
     )
 
 
-def _client_config_check() -> DiagnosticCheck:
+def _client_config_check(
+    *,
+    workspace: str | Path | None,
+    include_user_configs: bool,
+) -> DiagnosticCheck:
     mcp_path = shutil.which("stata-code-mcp")
+    config_summary = _client_config_summary(
+        workspace=workspace,
+        include_user_configs=include_user_configs,
+    )
+
     if mcp_path:
-        summary = "MCP clients can use the discovered `stata-code-mcp` command."
-        detail = f"command={mcp_path}"
+        command_summary = "MCP clients can use the discovered `stata-code-mcp` command."
+        command_detail = f"command={mcp_path}"
     else:
-        summary = "MCP clients should point at an absolute `stata-code-mcp` path or `python -m stata_code.mcp`."
-        detail = (
+        command_summary = (
+            "MCP clients should point at an absolute `stata-code-mcp` path "
+            "or `python -m stata_code.mcp`."
+        )
+        command_detail = (
             "Claude/Cursor/VS Code configs should avoid relying on GUI PATH when "
             "the server lives inside a project virtualenv."
         )
+
+    summary = command_summary
+    status: Status = "ok"
+    if config_summary.found:
+        if config_summary.errors:
+            status = "warn"
+            summary = (
+                f"Found {config_summary.found} MCP client config file(s); "
+                f"{config_summary.errors} could not be read as JSON."
+            )
+        elif config_summary.configured:
+            summary = (
+                f"Found {config_summary.configured} MCP client config file(s) "
+                f"that mention stata-code. {command_summary}"
+            )
+        else:
+            status = "warn"
+            summary = (
+                f"Found {config_summary.found} MCP client config file(s), "
+                "but none mention stata-code."
+            )
+    detail = f"{command_detail}; configs={config_summary.detail}"
+
     return DiagnosticCheck(
         id="client_config",
-        status="ok",
+        status=status,
         summary=summary,
         detail=detail,
-        hint='VS Code can also set `stataCode.pythonPath` or `stataCode.serverCommand`.',
+        hint="VS Code can also set `stataCode.pythonPath` or `stataCode.serverCommand`.",
     )
 
 
@@ -269,8 +310,6 @@ def _module_available(module: str) -> bool:
 
 
 def _first_existing_pystata_candidate() -> str | None:
-    from pathlib import Path
-
     for path in _candidate_pystata_paths():
         if Path(path).joinpath("pystata").is_dir():
             return path
@@ -283,3 +322,121 @@ def _format_paths(paths: list[str], *, limit: int = 6) -> str:
     shown = paths[:limit]
     suffix = "" if len(paths) <= limit else f"; ... +{len(paths) - limit} more"
     return "; ".join(shown) + suffix
+
+
+@dataclass(frozen=True)
+class _ClientConfigSummary:
+    found: int
+    configured: int
+    errors: int
+    detail: str
+
+
+_STATA_CODE_CONFIG_MARKERS = (
+    "stata-code",
+    "stata-code-mcp",
+    "stata_code.mcp",
+)
+
+
+def _client_config_summary(
+    *,
+    workspace: str | Path | None,
+    include_user_configs: bool,
+) -> _ClientConfigSummary:
+    entries: list[str] = []
+    found = 0
+    configured = 0
+    errors = 0
+
+    for path in _candidate_client_config_paths(
+        workspace=workspace,
+        include_user_configs=include_user_configs,
+    ):
+        if not path.is_file():
+            continue
+        found += 1
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors += 1
+            entries.append(f"{path}=invalid-json:{type(exc).__name__}")
+            continue
+
+        if _json_mentions_stata_code(payload):
+            configured += 1
+            entries.append(f"{path}=mentions-stata-code")
+        else:
+            entries.append(f"{path}=no-stata-code-entry")
+
+    if not entries:
+        return _ClientConfigSummary(
+            found=0,
+            configured=0,
+            errors=0,
+            detail="<none found>",
+        )
+    return _ClientConfigSummary(
+        found=found,
+        configured=configured,
+        errors=errors,
+        detail="; ".join(entries),
+    )
+
+
+def _candidate_client_config_paths(
+    *,
+    workspace: str | Path | None,
+    include_user_configs: bool,
+) -> list[Path]:
+    root = Path.cwd() if workspace is None else Path(workspace).expanduser()
+    candidates = [
+        root / ".mcp.json",
+        root / ".cursor" / "mcp.json",
+        root / ".vscode" / "mcp.json",
+    ]
+
+    if include_user_configs:
+        home = Path.home()
+        candidates.extend(
+            [
+                home / ".claude" / "mcp.json",
+                home / ".cursor" / "mcp.json",
+                home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+            ]
+        )
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            candidates.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
+
+    return _dedupe_paths(candidates)
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _json_mentions_stata_code(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            _text_mentions_stata_code(str(key)) or _json_mentions_stata_code(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_json_mentions_stata_code(child) for child in value)
+    if isinstance(value, str):
+        return _text_mentions_stata_code(value)
+    return False
+
+
+def _text_mentions_stata_code(value: str) -> bool:
+    normalized = value.lower()
+    return any(marker in normalized for marker in _STATA_CODE_CONFIG_MARKERS)

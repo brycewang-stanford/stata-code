@@ -30,7 +30,7 @@ take or finish a work lane.
 | Turnkey method recipes + method prompts | Claude | Week 1 pass complete; maintain as recipe lane | `skills/stata-code/references/recipes/**`, method prompts in `stata_code/mcp/server.py`, `tests/test_method_prompts.py` |
 | Core runner / schema changes | Unclaimed | Open | `stata_code/core/**`, `SCHEMA.md`, `schema/**` |
 | VS Code UX and table/data preview polish | Claude | Complete — Week 3 data/artifact surfacing: (1) persistent "Data" variables-browser view (`dataBrowser.ts`/`DataProvider`); (2) "Outputs" table/export-artifact view (`outputs.ts`/`OutputsHistoryProvider`, sourced from run-bundle `log.files.output_paths`, open + reveal-in-OS actions). New `dataBrowser.test.ts` + `outputs.test.ts`; 49 VS Code tests pass; esbuild bundle clean | `vscode/src/**`, `vscode/README.md`, VS Code tests |
-| Release and distribution hardening | Codex | Week 2 diagnostic pass complete; keep release/docs checks in sync | `stata_code/doctor.py`, `stata_code/cli.py`, `pyproject.toml`, README install sections, tests |
+| Release and distribution hardening | Codex | 2026-06-23 pass complete: read-only MCP client config visibility in `doctor`; keep release/docs checks in sync | `stata_code/doctor.py`, `stata_code/cli.py`, `pyproject.toml`, README install sections, tests |
 | README hero & econ-facing positioning | Claude | Complete (additive hero added to README.md + README.zh.md; 378 non-Stata tests + ruff green; 18-tools guard phrases intact) | `README.md`, `README.zh.md` |
 
 ## One-Month Milestones

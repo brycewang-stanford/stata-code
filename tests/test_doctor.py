@@ -28,7 +28,7 @@ def test_doctor_reports_ok_when_runtime_surface_is_available(monkeypatch):
         },
     )
 
-    report = doctor.run_doctor()
+    report = doctor.run_doctor(include_user_configs=False)
 
     assert report.ok is True
     checks = {check.id: check for check in report.checks}
@@ -52,7 +52,7 @@ def test_doctor_surfaces_degraded_environment_without_crashing(monkeypatch):
 
     monkeypatch.setattr(doctor, "pool_stata_info", fail_probe)
 
-    report = doctor.run_doctor()
+    report = doctor.run_doctor(include_user_configs=False)
     checks = {check.id: check for check in report.checks}
 
     assert report.ok is False
@@ -81,7 +81,7 @@ def test_doctor_can_skip_live_stata_probe(monkeypatch):
 
     monkeypatch.setattr(doctor, "pool_stata_info", should_not_probe)
 
-    report = doctor.run_doctor(probe_stata=False)
+    report = doctor.run_doctor(probe_stata=False, include_user_configs=False)
     checks = {check.id: check for check in report.checks}
 
     assert report.ok is True
@@ -94,13 +94,66 @@ def test_doctor_json_renderer_is_stable(monkeypatch):
 
     monkeypatch.setattr(doctor, "_module_available", lambda _name: True)
     monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/bin/{name}")
-    report = doctor.run_doctor(probe_stata=False)
+    report = doctor.run_doctor(probe_stata=False, include_user_configs=False)
 
     payload = json.loads(doctor.format_json(report))
 
     assert payload["ok"] is True
     assert payload["counts"]["skip"] == 1
     assert [check["id"] for check in payload["checks"]][-1] == "stata_probe"
+
+
+def test_doctor_reports_workspace_mcp_config(tmp_path, monkeypatch):
+    from stata_code import doctor
+
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "stata-code": {
+                        "command": "python",
+                        "args": ["-m", "stata_code.mcp"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(doctor, "_module_available", lambda _name: True)
+    monkeypatch.setattr(doctor.shutil, "which", lambda _name: None)
+
+    report = doctor.run_doctor(
+        probe_stata=False,
+        workspace=tmp_path,
+        include_user_configs=False,
+    )
+    checks = {check.id: check for check in report.checks}
+
+    assert checks["client_config"].status == "ok"
+    assert "mention stata-code" in checks["client_config"].summary
+    assert ".mcp.json=mentions-stata-code" in (checks["client_config"].detail or "")
+
+
+def test_doctor_warns_on_invalid_workspace_mcp_config(tmp_path, monkeypatch):
+    from stata_code import doctor
+
+    cursor_dir = tmp_path / ".cursor"
+    cursor_dir.mkdir()
+    (cursor_dir / "mcp.json").write_text("{", encoding="utf-8")
+    monkeypatch.setattr(doctor, "_module_available", lambda _name: True)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/bin/{name}")
+
+    report = doctor.run_doctor(
+        probe_stata=False,
+        workspace=tmp_path,
+        include_user_configs=False,
+    )
+    checks = {check.id: check for check in report.checks}
+
+    assert report.ok is True
+    assert checks["client_config"].status == "warn"
+    assert "could not be read as JSON" in checks["client_config"].summary
+    assert ".cursor/mcp.json=invalid-json" in (checks["client_config"].detail or "")
 
 
 def test_cli_doctor_json_exit_code(monkeypatch, capsys):
@@ -123,6 +176,48 @@ def test_cli_doctor_json_exit_code(monkeypatch, capsys):
 
     assert rc == 0
     assert json.loads(out)["ok"] is True
+
+
+def test_cli_doctor_passes_workspace_and_config_scan_options(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from stata_code import cli, doctor
+
+    captured: dict[str, object] = {}
+    report = doctor.DoctorReport(
+        ok=True,
+        checks=[
+            doctor.DiagnosticCheck(
+                id="package",
+                status="ok",
+                summary="ok",
+            )
+        ],
+    )
+
+    def fake_run_doctor(**kwargs):
+        captured.update(kwargs)
+        return report
+
+    monkeypatch.setattr(cli, "run_doctor", fake_run_doctor)
+
+    rc = cli.main(
+        [
+            "doctor",
+            "--workspace",
+            str(tmp_path),
+            "--no-user-config-scan",
+            "--no-stata-probe",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert captured["workspace"] == str(tmp_path)
+    assert captured["include_user_configs"] is False
+    assert captured["probe_stata"] is False
 
 
 def test_cli_verify_alias_returns_failure(monkeypatch, capsys):

@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         report = run_doctor(
             probe_stata=not args.no_stata_probe,
             stata_timeout_ms=args.stata_timeout_ms,
+            workspace=args.workspace,
+            include_user_configs=not args.no_user_config_scan,
         )
         print(format_json(report) if args.json else format_text(report))
         return 0 if report.ok else 1
@@ -66,6 +68,16 @@ def _add_doctor_parser(
         type=int,
         default=15_000,
         help="Timeout for the live Stata probe (default: 15000).",
+    )
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace root to scan for project MCP client configs (default: current directory).",
+    )
+    parser.add_argument(
+        "--no-user-config-scan",
+        action="store_true",
+        help="Only inspect project-level MCP client configs, not user-level config paths.",
     )
 
 

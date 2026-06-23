@@ -46,6 +46,21 @@ causal libraries, or paid services. Those are separate tools. The durable
 boundary is: external data/model tools produce files or results; `stata-code`
 executes and audits the Stata side with traceable artifacts.
 
+## Market Refresh (2026-06-23)
+
+| Adjacent tool | Current strength | Implication for `stata-code` |
+| --- | --- | --- |
+| Official Stata PyStata + Jupyter support | Official Python-side Stata API, IPython magics, and notebook workflow | Keep `pystata` discovery reliable and treat official Stata as the execution source of truth |
+| `nbstata` / `stata_kernel` | Stata-first notebooks, autocomplete, graphs, data browsing, and rich notebook interaction | Win on the shared execution contract across notebooks, MCP, and VS Code rather than duplicating every notebook UI feature |
+| Stata Workbench / `mcp-stata` | Agent-facing IDE workflow with Stata execution, variables, graphs, logs, and multi-session framing | Compete through structured `RunResult`, token-economic artifacts, and clear audit trails |
+| `stata-mcp` / DeepEcon Stata MCP | One-command multi-agent install story, doctor diagnostics, and broad client messaging | Close setup-confidence gaps with read-only client-config visibility and explicit fallback commands |
+| Stata All in One / Stata Enhanced | Human editor polish: syntax, outline, hints, execution, and data viewing | Keep VS Code ergonomics practical, but route execution and artifacts through the same MCP/core schema |
+
+Near-term priority: keep the project boringly dependable for agents. That means
+read-only setup diagnostics, visible MCP client wiring, stable schema contracts,
+and artifact discovery should outrank broad new integrations unless a testable
+workflow needs them.
+
 ## One-Month Execution Plan
 
 ### Week 1: Workflow Layer
