@@ -238,3 +238,5 @@ stata_code_test_export.png
 
 # Demo / scratch notebooks (real tests live under tests/)
 demo-tests/*.ipynb
+
+社媒文件/
