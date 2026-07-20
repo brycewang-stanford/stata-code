@@ -526,9 +526,16 @@ The `stata_required` marker tags the real-Stata integration tests. CI uses `pyte
 
 ## Contributing
 
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, the checks CI runs, and PR guidelines. In short:
+
 - Read [LICENSE-POLICY.md](LICENSE-POLICY.md) before opening a PR.
 - Add a one-line acknowledgement to your first PR description; the template is in the policy file.
 - Tests are required for any new schema field or runner behavior.
+
+Bug reports and support questions go through
+[GitHub issues](https://github.com/brycewang-stanford/stata-code/issues);
+security reports go through [SECURITY.md](SECURITY.md).
 
 ---
 

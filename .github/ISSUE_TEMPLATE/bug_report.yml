@@ -1,0 +1,54 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! The fastest path to a fix
+        is a report we can reproduce.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Ran `stata-code-mcp` from Claude Code
+        2. Called the `stata_run` tool with `summarize mpg`
+        3. Expected ... but got ...
+    validations:
+      required: true
+  - type: dropdown
+    id: frontend
+    attributes:
+      label: Which frontend?
+      options:
+        - Python library (stata_code.core)
+        - MCP server (stata-code-mcp)
+        - Jupyter kernel
+        - VS Code extension
+        - CLI / doctor
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`stata-code doctor` output"
+      description: >
+        Run `stata-code doctor` (or `python -m stata_code doctor`) and paste the
+        output. It captures your OS, Python, Stata edition, and pystata
+        discovery state in one shot.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: stata-code version
+      placeholder: "e.g. 0.9.0 (pip show stata-code)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output / traceback
+      render: text
