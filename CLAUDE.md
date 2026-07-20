@@ -103,10 +103,12 @@ curl -s -H "Accept: application/vnd.pypi.simple.v1+json" \
 
 ## VS Code extension upgrade
 
-The repo ships a `.vsix` under `vscode/` for sideload installs:
+For a sideload install, build the `.vsix` locally (the repo does not track
+built artifacts):
 
 ```bash
-code --install-extension vscode/stata-code-vscode-X.Y.Z.vsix --force
+cd vscode && npm ci && npm run package:vsix
+code --install-extension stata-code-vscode-X.Y.Z.vsix --force
 ```
 
 The Marketplace publish runs on the `vscode-vX.Y.Z` tag, independent of the PyPI

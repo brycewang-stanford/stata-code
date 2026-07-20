@@ -360,6 +360,7 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | Field | Type | Notes |
 | --- | --- | --- |
 | `command` | `string \| null` | Mirrors `e(cmd)` when available; falls back to `last_estimation_cmd`. |
+| `command_family` | `string \| null` | Coarse estimator family derived from the command name (`ols` / `iv` / `gmm` / `panel` / `count` / `did` / …); `null` when the command is unrecognized. |
 | `depvar` | `string \| null` | Mirrors `e(depvar)`. |
 | `n_obs` | `int \| null` | Integer form of `e(N)` when available. |
 | `df_model` | `number \| null` | Mirrors `e(df_m)`. |
@@ -369,6 +370,7 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | `ci_level` | `number` | Confidence level used for `ci_low` / `ci_high`; currently `95.0`. |
 | `coefficients` | `array<Coefficient>` | One row per term in `e(b)`. |
 | `model_stats` | `dict<str, number \| null>` | High-signal subset of `e()` scalars such as `N`, `df_m`, `df_r`, `r2`, `F`, `chi2`, `ll`, and `rmse`. Full scalars remain under `results.e.scalars`. |
+| `diagnostics` | `dict<str, number \| null>` | Command-aware identification/specification statistics surfaced from `e()` (e.g. weak-ID F and Hansen J for `ivreg2`/`ivreghdfe`, AR(2)/Hansen for `xtabond2`, within-R² for `reghdfe`, `rho` for `xtreg`). Only scalars actually present in `e()` appear — never fabricated. |
 
 **`Coefficient` shape:**
 

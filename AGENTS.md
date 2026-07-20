@@ -19,13 +19,16 @@ A unified release ships **four artifacts under the same version number**:
 | VS Code Marketplace (`stata-code-vscode`) | `vscode-vX.Y.Z` | [.github/workflows/vscode-release.yml](.github/workflows/vscode-release.yml) |
 | GitHub Release | `vX.Y.Z` | tail end of `release.yml` |
 
-Four files hold version literals — bump all of them together, or the release will
-ship inconsistent metadata:
+Eight version literals across six files must move together, or the release
+build fails at the `scripts/check_versions.py` gate before any publish runs:
 
 1. `pyproject.toml` → `[project] version`
 2. `stata_code/__init__.py` → `__version__`
 3. `stata_code/mcp/server.py` → `__version__`
 4. `vscode/package.json` → `version`
+5. `vscode/package-lock.json` → top-level `version` and `packages[""].version`
+6. `.claude-plugin/plugin.json` → `version` and `.claude-plugin/marketplace.json`
+   → `metadata.version` + each `plugins[*].version`
 
 `vscode/src/mcpClient.ts` imports the extension version from
 `vscode/package.json` for the MCP handshake, so it should not carry a separate
@@ -98,10 +101,12 @@ curl -s -H "Accept: application/vnd.pypi.simple.v1+json" \
 
 ## VS Code extension upgrade
 
-The repo ships a `.vsix` under `vscode/` for sideload installs:
+For a sideload install, build the `.vsix` locally (the repo does not track
+built artifacts):
 
 ```bash
-code --install-extension vscode/stata-code-vscode-X.Y.Z.vsix --force
+cd vscode && npm ci && npm run package:vsix
+code --install-extension stata-code-vscode-X.Y.Z.vsix --force
 ```
 
 The Marketplace publish runs on the `vscode-vX.Y.Z` tag, independent of the PyPI

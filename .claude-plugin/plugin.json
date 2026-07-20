@@ -19,7 +19,7 @@
   },
   "installation": {
     "notes": "Requires Stata 17+ (pystata ships with Stata) and Python 3.10+. Install the server binary first: `pip install \"stata-code[mcp]\"` or run ephemerally with `uvx --from stata-code stata-code-mcp`.",
-    "verify": "stata-code-mcp --help"
+    "verify": "stata-code doctor --no-stata-probe"
   },
   "skills": [
     {

@@ -79,7 +79,7 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.8（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
+**当前状态：v0.9（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
 
 当前代码树明确支持的三类用户 / agent 工作流：
 
@@ -217,6 +217,30 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
 
 `uvx` 会在首次启动时下载并缓存 `stata-code`。注意：`pystata` **不在 PyPI 上**，仍需要在宿主机上能找到。runner 会自动把标准 Stata 安装路径（macOS 上的 `/Applications/Stata/utilities/pystata` 等）加到 `sys.path`；如果你的 Stata 在别处，请用 env 设置 `PYTHONPATH`。
 
+#### 通过 plugin marketplace 接入 Claude Code
+
+本仓库还带有 Claude Code 插件清单（`.claude-plugin/`）。把 marketplace 加入你的 Claude Code 配置后，两条命令即可同时接好 MCP server 和教会 Claude v1.0 结果 schema 的 agent skill：
+
+```bash
+claude plugin marketplace add brycewang-stanford/stata-code
+claude plugin install stata-code
+```
+
+插件会注册 `stata-code` MCP server，并安装 [`stata-code` skill](skills/stata-code/SKILL.md)，让 Claude 学会按 `error.kind` 分支、惰性调用 `get_log(ref)`、并直接使用 notebook 编辑工具，无需每个会话重新解释。
+
+#### 其它 MCP client（Cursor / Claude Desktop / Cline / Continue / Windsurf / Antigravity）
+
+大多数非 Claude Code 的 MCP client 都接受同一段 JSON 配置。把它放进对应 client 的 MCP 配置文件即可：
+
+| Client | 配置文件 |
+| --- | --- |
+| Claude Desktop | macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`；Windows：`%APPDATA%\Claude\claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json`（用户级）或 `<workspace>/.cursor/mcp.json`（项目级） |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Cline（VS Code） | settings 中的 `cline.mcpServers` |
+| Continue | `~/.continue/config.json` 的 `experimental.modelContextProtocolServers` |
+| Antigravity / 通用 | `~/.claude/mcp.json` 或该 client 文档指定的位置 |
+
 #### 手动 JSON 配置（Cursor / Claude Desktop / 兜底方案）
 
 对于没有 `mcp add` CLI 的客户端，直接编辑配置文件即可（`~/.claude/mcp.json`、Cursor settings、Claude Desktop 的 `claude_desktop_config.json` 等）：
@@ -331,9 +355,22 @@ jupyter kernelspec list
 code --install-extension brycewang-stanford.stata-code-vscode
 ```
 
-或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。
+或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。扩展同时发布在 [Open VSX](https://open-vsx.org/)，因此 Cursor、Windsurf 等 VS Code 兼容编辑器不必经过微软 Marketplace 也能安装。
+
+首次激活时，扩展会在 `PATH`（以及 workspace 下的 `.venv` / `venv`）里探测 `stata-code-mcp`。如果找不到，会弹出一次性的安装提示，附上准确的 `pip install "stata-code[mcp]"` 命令——选择 **Don't show again** 可对当前扩展版本永久静默。
 
 扩展仍然依赖系统 Python 上安装了 MCP extra（`pip install "stata-code[mcp]"`），从而保证 `stata-code-mcp` 在 `PATH` 上可用，并且能导入 MCP SDK。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
+
+#### Cell 与 section 约定
+
+扩展识别 `.do` 文件里两类互补的结构标记。二者可以混用在同一个文件里，互不冲突：
+
+| 标记 | 用途 | 示例 |
+| --- | --- | --- |
+| `* %% [标题]` | Cell 边界。每个标记有一个 **▶ Run Cell** code-lens；"Run Cell" 提交该标记到下一个标记之间的内容。与 `kylebutts/vscode-stata` 的 Jupyter 风格 cell 约定兼容。 | `* %% 02 model fit` |
+| `**# 标题` … `**###### 标题` | Section 标题，1–6 级。每个标题有一个 **▶ Run Section** code-lens，并进入 Outline 视图。"Run Section" 提交该标题到下一个同级或更高级标题之间的内容，与 `ZihaoVistonWang.stata-all-in-one` 的层级执行模型一致。 | `**## DiD specification` |
+
+`program define … end` 代码块也会出现在 Outline 里，嵌套在所属 section 之下。
 
 如果扩展或 MCP client 找不到 server，请在同一个 Python 环境里运行
 `stata-code doctor --no-stata-probe`。它会报告 `stata-code-mcp` 是否在

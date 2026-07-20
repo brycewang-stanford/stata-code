@@ -76,12 +76,15 @@ The environment doesn't need any secrets — Trusted Publishing handles auth.
 
 Once the one-time setup above is done, every release is just:
 
-1. **Bump the version everywhere**:
+1. **Bump the version everywhere** (eight literals across six files —
+   `scripts/check_versions.py` gates the release build on all of them):
    - `pyproject.toml` → `[project] version`
    - `stata_code/__init__.py` → `__version__`
    - `stata_code/mcp/server.py` → `__version__`
    - `vscode/package.json` → `version`
-   - `vscode/package-lock.json` → root package `version`
+   - `vscode/package-lock.json` → top-level `version` **and** `packages[""].version`
+   - `.claude-plugin/plugin.json` → `version`
+   - `.claude-plugin/marketplace.json` → `metadata.version` **and** each `plugins[*].version`
 2. **Run the version guard** before tagging:
 
    ```bash
