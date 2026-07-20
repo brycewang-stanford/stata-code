@@ -248,3 +248,26 @@ class TestEvictionSkipsBusyWorkers:
             assert "returncode=-15" not in json.dumps(a.model_dump(mode="json"))
         finally:
             pool.shutdown()
+
+
+class TestSimpleOpBoundedLockWait:
+    """A status query must not hang for the duration of a long run."""
+
+    def test_busy_worker_times_out_instead_of_hanging(self):
+        from stata_code.core._pool import _WorkerTimeout
+
+        w = WorkerProcess("busy", worker_cmd=_cmd_for(_SLEEPY_OK_WORKER))
+        try:
+            t = threading.Thread(
+                target=lambda: w.execute("slow", {"session_id": "busy"}, timeout_ms=15000)
+            )
+            t.start()
+            time.sleep(0.3)  # let the execute acquire the worker lock
+            start = time.monotonic()
+            with pytest.raises(_WorkerTimeout, match="busy"):
+                w.send_simple_op("list_sessions", timeout_ms=200)
+            assert time.monotonic() - start < 2.0
+            t.join(timeout=20)
+            assert not t.is_alive()
+        finally:
+            w.kill()

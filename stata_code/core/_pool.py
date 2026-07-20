@@ -548,8 +548,21 @@ class WorkerProcess:
         worker; if the subprocess isn't running, raises :class:`_WorkerError`.
         Caller should treat that as "this worker has nothing to report"
         rather than block on a fresh pystata init for a status query.
+
+        The worker lock is held by an in-flight ``execute()`` for the whole
+        run, so acquiring it counts against ``timeout_ms`` too — a status
+        query must not hang for the duration of a long Stata run. Lock
+        acquisition failure raises :class:`_WorkerTimeout` ("worker busy").
         """
-        with self._lock:
+        if timeout_ms is None:
+            acquired = self._lock.acquire()
+        else:
+            acquired = self._lock.acquire(timeout=timeout_ms / 1000.0)
+        if not acquired:
+            raise _WorkerTimeout(
+                f"worker for {self.session_id!r} is busy (request in flight)"
+            )
+        try:
             if spawn:
                 proc = self._ensure_alive()
             elif self._proc is None or self._proc.poll() is not None:
@@ -582,6 +595,8 @@ class WorkerProcess:
                     f"worker reported failure: {response.get('error', '<no error>')}"
                 )
             return dict(response)
+        finally:
+            self._lock.release()
 
     def kill(self) -> None:
         """Terminate the worker. SIGTERM with grace, then SIGKILL.
