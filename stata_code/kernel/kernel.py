@@ -155,7 +155,10 @@ class StataKernel(_KernelBase):
 
     # ── Execution ──────────────────────────────────────────────────────────
 
-    def do_execute(
+    # ipykernel types do_execute/do_complete/do_inspect as coroutines, but the
+    # dispatcher awaits the result only when it is awaitable, so plain dict
+    # returns are supported at runtime (and keep the test suite synchronous).
+    def do_execute(  # type: ignore[override]
         self,
         code: str,
         silent: bool = False,
@@ -266,7 +269,7 @@ class StataKernel(_KernelBase):
 
     # ── Completion / Inspection (unchanged from prior kernel) ──────────────
 
-    def do_complete(self, code: str, cursor_pos: int) -> dict[str, Any]:
+    def do_complete(self, code: str, cursor_pos: int) -> dict[str, Any]:  # type: ignore[override]
         line = code[:cursor_pos]
         token_start = len(line) - 1
         while token_start > 0 and line[token_start - 1] not in (" \t\n\r(,"):
@@ -288,7 +291,7 @@ class StataKernel(_KernelBase):
             "cursor_end": cursor_pos,
         }
 
-    def do_inspect(
+    def do_inspect(  # type: ignore[override]
         self,
         code: Any,
         cursor_pos: Any,

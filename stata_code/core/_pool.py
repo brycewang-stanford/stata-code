@@ -559,7 +559,7 @@ def _read_process_stderr_tail(
     if proc.stderr is None:
         return ""
     try:
-        text = proc.stderr.read()
+        text: str = proc.stderr.read()
     except Exception:  # noqa: BLE001
         return ""
     return text.strip()[-max_chars:]
