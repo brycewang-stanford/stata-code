@@ -4,6 +4,87 @@ All notable changes to `stata-code` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres
 to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
+## [Unreleased]
+
+Quality-hardening pass: correctness fixes from an adversarial code review,
+a large offline test expansion, and a documentation accuracy audit. No new
+features, no API or schema changes, no version bump.
+
+### Fixed
+
+- **Worker stderr pipe is now drained continuously.** The subprocess pool
+  only read a worker's stderr after death, so a worker whose cumulative
+  stderr output (pystata banners, Stata C-side messages, warnings) exceeded
+  the ~64 KB OS pipe buffer blocked mid-write and never responded — the
+  parent then misreported the healthy worker as a `timeout` and killed it
+  (or hung forever with `timeout_ms=None`). A per-worker daemon thread now
+  drains stderr into a bounded tail buffer, which also enriches crash
+  messages.
+- **A worker-reported failure no longer destroys the session.** A live
+  worker answering `{ok:false, error_kind:"worker_error"}` was handled like
+  a dead process: killed and dropped from the pool, wiping the session's
+  loaded dataset and `r()`/`e()` state — reachable from a mere argument
+  type typo. Such failures now surface as structured errors while the
+  worker (and the session's data) survives; the worker also classifies
+  `TypeError` as `invalid_request`.
+- **LRU eviction skips busy workers.** `last_used` is stale for a mid-run
+  worker, so capacity pressure from an unrelated new session preferred the
+  longest-running request as its eviction victim (SIGTERM mid-run →
+  `adapter_crash`, session data lost). Eviction now skips in-flight
+  workers, bumps `last_used` at request start, and kills victims outside
+  the pool lock; timeout/error cleanup no longer removes a newer worker
+  handle registered in the interim.
+- **Status queries no longer hang behind a long run.** `send_simple_op`
+  blocked unboundedly on the worker lock held by an in-flight `execute()`;
+  lock acquisition now counts against the same timeout budget and surfaces
+  as a per-session "busy" warning.
+- **`rc` is taken from the last `r(NNN);` in a failure transcript.** An
+  earlier successful command echoing a literal `r(NNN);` (display string,
+  help output) previously hijacked the return code — and therefore the
+  `ErrorKind` classification, suggestions, and recovery contract.
+- **Indented notes are no longer double-counted as warnings.** An indented
+  `note: … omitted because of collinearity` line produced both an
+  `omitted_collinear` and a generic `note` warning.
+- **A session literally named `"default"` no longer aliases `"main"`.** In
+  in-process mode it silently shared `main`'s Stata frame (one dataset for
+  two nominally distinct sessions); it now routes through the private
+  mapped-frame path.
+- **Matrices with missing sfi row/col names are no longer dropped.**
+  Positional names (`r1…`/`c1…`) are synthesized instead of letting the
+  shape validator silently discard successfully read values.
+- **`get_graph(format=…)` is no longer a silent no-op.** Requesting a
+  format different from the stored one now returns `invalid_request`
+  instead of returning mismatched bytes.
+- **Post-run file snapshots survive escaping symlinks.** A symlink inside
+  the working dir pointing outside it crashed `changed_output_files` with
+  an uncaught `ValueError`; it is now skipped.
+
+### Added
+
+- **≈300 new offline tests** (467 → 724 passing without Stata); coverage
+  73% → 90% overall (`mcp/server` 74→99%, `kernel` 73→98%, `_pool` 68→96%,
+  `_refs` 68→100%, `log_artifacts` 76→96%, `runner` 29→72%). The package is
+  now fully mypy-clean, including the previously unchecked top-level
+  modules.
+- **Community health files**: `CONTRIBUTING.md` (dev setup + the exact CI
+  gates), `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`,
+  and GitHub issue templates that ask for `stata-code doctor` output.
+
+### Docs
+
+- Regenerated the skill's `rc → kind` reference from `errors.py` — it still
+  documented the pre-0.9.0 mappings the taxonomy audit had corrected; fixed
+  the "32 kinds" claims (the enum has 31).
+- `plugin.json` install verify no longer uses `stata-code-mcp --help`
+  (which hangs); it runs `stata-code doctor --no-stata-probe`.
+- PUBLISHING.md / AGENTS.md version-bump lists now cover all eight version
+  literals the release gate checks; removed the stale claim that a built
+  `.vsix` ships in the repo.
+- SCHEMA.md documents `EstimationResult.command_family` and `.diagnostics`;
+  status lines updated v0.8 → v0.9; README.zh.md re-synced with the English
+  README (plugin-marketplace install, per-client MCP config table, Open VSX
+  and first-activation notes, cell/section conventions).
+
 ## 0.9.0 — 2026-06-23
 
 ### Fixed
