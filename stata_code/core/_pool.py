@@ -45,6 +45,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -236,7 +237,9 @@ def _worker_main() -> int:
                 }
             else:
                 response = {"id": req_id, "ok": False, "error": f"unknown op: {op}"}
-        except (ValueError, NotImplementedError) as exc:
+        except (ValueError, TypeError, NotImplementedError) as exc:
+            # TypeError is included: a malformed option (e.g. a string where
+            # an int is expected) is a caller error, not a worker crash.
             response = {
                 "id": req_id,
                 "ok": False,
@@ -282,8 +285,61 @@ class _WorkerError(RuntimeError):
     """Raised on worker-side execution failure (non-Stata, e.g., crash)."""
 
 
+class _WorkerReportedError(_WorkerError):
+    """The worker itself responded ``ok=false`` (an unexpected exception
+    inside the worker's request handler).
+
+    Unlike a dead/corrupt worker, the subprocess is alive and its protocol
+    stream is in a clean state — the pool reports the failure without
+    killing the worker, so the session's loaded data survives.
+    """
+
+
 class _WorkerTimeout(TimeoutError):
     """Raised when a request exceeds its deadline. Parent kills the worker."""
+
+
+class _StderrTail:
+    """Bounded, thread-safe tail buffer for a worker's drained stderr."""
+
+    def __init__(self, max_chars: int = 4000) -> None:
+        self._chunks: deque[str] = deque()
+        self._total = 0
+        self._max = max_chars
+        self._lock = threading.Lock()
+
+    def append(self, chunk: str) -> None:
+        with self._lock:
+            self._chunks.append(chunk)
+            self._total += len(chunk)
+            while self._total > self._max and len(self._chunks) > 1:
+                self._total -= len(self._chunks.popleft())
+
+    def text(self) -> str:
+        with self._lock:
+            return "".join(self._chunks)[-self._max :]
+
+
+def _drain_stderr(stream: Any, tail: _StderrTail) -> None:
+    """Continuously consume a worker's stderr pipe.
+
+    Runs in a daemon thread for the worker's lifetime. Without this, a worker
+    whose cumulative stderr output (pystata banners, Stata C-side messages,
+    Python warnings) exceeds the OS pipe buffer (~64 KB on Linux) blocks in
+    the stderr write and never sends its stdout response — surfacing as a
+    spurious "timeout" against a healthy worker. readline() keeps consuming
+    from the pipe even for very long lines, so the pipe can never fill.
+    """
+    try:
+        for line in stream:
+            tail.append(line)
+    except Exception:  # noqa: BLE001 - reader must never propagate
+        pass
+    finally:
+        try:
+            stream.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class WorkerProcess:
@@ -305,12 +361,15 @@ class WorkerProcess:
         self._proc: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
         self.last_used: float = time.monotonic()
+        # True while an execute() request is in flight. Read by the pool's
+        # LRU eviction to avoid killing a worker mid-run.
+        self.busy: bool = False
 
     def _spawn(self) -> subprocess.Popen[str]:
         env = os.environ.copy()
         # Force unbuffered I/O even if PYTHONUNBUFFERED isn't already set.
         env.setdefault("PYTHONUNBUFFERED", "1")
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -319,6 +378,18 @@ class WorkerProcess:
             bufsize=1,  # line-buffered
             env=env,
         )
+        # Drain stderr for the worker's lifetime (see _drain_stderr). The
+        # tail/thread ride on the Popen object so the module-level helpers
+        # that only receive `proc` can find them.
+        if proc.stderr is not None:
+            tail = _StderrTail()
+            thread = threading.Thread(
+                target=_drain_stderr, args=(proc.stderr, tail), daemon=True
+            )
+            proc._stata_code_stderr_tail = tail  # type: ignore[attr-defined]
+            proc._stata_code_stderr_thread = thread  # type: ignore[attr-defined]
+            thread.start()
+        return proc
 
     def _ensure_alive(self) -> subprocess.Popen[str]:
         if self._proc is None or self._proc.poll() is not None:
@@ -346,29 +417,41 @@ class WorkerProcess:
             assert proc.stdin is not None and proc.stdout is not None  # for mypy
             req_id = uuid.uuid4().hex
             request = {"id": req_id, "op": "execute", "code": code, "options": options}
-            try:
-                proc.stdin.write(json.dumps(request) + "\n")
-                proc.stdin.flush()
-            except BrokenPipeError as exc:
-                raise _WorkerError(f"worker pipe broken on write: {exc}") from exc
-
-            deadline: float | None
-            deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
-
-            response = self._read_json_response_with_deadline(proc, deadline)
+            # Mark the request window: `busy` keeps LRU eviction away from a
+            # mid-run worker, and bumping `last_used` at request START (not
+            # just completion) keeps a long-running request from looking like
+            # the least-recently-used entry.
+            self.busy = True
             self.last_used = time.monotonic()
+            try:
+                try:
+                    proc.stdin.write(json.dumps(request) + "\n")
+                    proc.stdin.flush()
+                except BrokenPipeError as exc:
+                    raise _WorkerError(f"worker pipe broken on write: {exc}") from exc
 
-            if response.get("id") != req_id:
-                raise _WorkerError(
-                    f"worker response id mismatch: expected {req_id}, got {response.get('id')}"
+                deadline: float | None
+                deadline = (
+                    None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
                 )
-            if not response.get("ok"):
-                if response.get("error_kind") == "invalid_request":
-                    raise ValueError(response.get("error", "<no error>"))
-                raise _WorkerError(
-                    f"worker reported failure: {response.get('error', '<no error>')}"
-                )
-            return response["result"], response.get("ref_blobs", {})
+
+                response = self._read_json_response_with_deadline(proc, deadline)
+                self.last_used = time.monotonic()
+
+                if response.get("id") != req_id:
+                    raise _WorkerError(
+                        f"worker response id mismatch: expected {req_id}, "
+                        f"got {response.get('id')}"
+                    )
+                if not response.get("ok"):
+                    if response.get("error_kind") == "invalid_request":
+                        raise ValueError(response.get("error", "<no error>"))
+                    raise _WorkerReportedError(
+                        f"worker reported failure: {response.get('error', '<no error>')}"
+                    )
+                return response["result"], response.get("ref_blobs", {})
+            finally:
+                self.busy = False
 
     @staticmethod
     def _readline_with_deadline(
@@ -525,12 +608,15 @@ class WorkerProcess:
                     pass
         except ProcessLookupError:
             pass
-        # Drain any buffered stderr so we don't leak a fd.
-        try:
-            if proc.stderr is not None:
-                proc.stderr.read()
-        except Exception:  # noqa: BLE001
-            pass
+        # Drain any buffered stderr so we don't leak a fd. When a drain
+        # thread is attached it owns the stream (it hits EOF and closes it);
+        # reading here too would race it.
+        if getattr(proc, "_stata_code_stderr_tail", None) is None:
+            try:
+                if proc.stderr is not None:
+                    proc.stderr.read()
+            except Exception:  # noqa: BLE001
+                pass
         if self._proc is proc:
             self._proc = None
 
@@ -555,7 +641,18 @@ def _read_process_stderr_tail(
     *,
     max_chars: int = 4000,
 ) -> str:
-    """Best-effort stderr tail for a worker that has already exited."""
+    """Best-effort stderr tail for a worker that has already exited.
+
+    Pool-spawned workers carry a drain thread (see ``_drain_stderr``) whose
+    bounded tail is the source of truth; give it a beat to consume the final
+    bytes. Bare procs (tests, external callers) fall back to a direct read.
+    """
+    tail: _StderrTail | None = getattr(proc, "_stata_code_stderr_tail", None)
+    if tail is not None:
+        thread: threading.Thread | None = getattr(proc, "_stata_code_stderr_thread", None)
+        if thread is not None:
+            thread.join(timeout=0.2)
+        return tail.text().strip()[-max_chars:]
     if proc.stderr is None:
         return ""
     try:
@@ -595,21 +692,36 @@ class SessionPool:
                     w.kill()
                 w = WorkerProcess(session_id, worker_cmd=self._worker_cmd)
                 self._workers[session_id] = w
-                self._evict_to_capacity_locked(keep=session_id)
-            return w
+                victims = self._evict_to_capacity_locked(keep=session_id)
+            else:
+                victims = []
+        # Kill outside the pool lock: kill() can block for the SIGTERM/SIGKILL
+        # grace periods, which would stall every other pool operation.
+        for victim in victims:
+            victim.kill()
+        return w
 
-    def _evict_to_capacity_locked(self, *, keep: str) -> None:
+    def _evict_to_capacity_locked(self, *, keep: str) -> list[WorkerProcess]:
+        """Pop LRU workers beyond capacity; return them for the caller to kill.
+
+        Never evicts the just-added worker or a worker with a request in
+        flight — `last_used` is stale for a busy worker, so without the guard
+        the longest-running request would be the preferred victim and an
+        unrelated session starting up would abort it mid-run. If every other
+        worker is busy the pool temporarily exceeds capacity instead.
+        """
         if len(self._workers) <= self._capacity:
-            return
-        # LRU by `last_used`. Never evict the just-added worker.
+            return []
         candidates = sorted(
-            ((sid, w) for sid, w in self._workers.items() if sid != keep),
+            ((sid, w) for sid, w in self._workers.items() if sid != keep and not w.busy),
             key=lambda kv: kv[1].last_used,
         )
+        victims: list[WorkerProcess] = []
         while len(self._workers) > self._capacity and candidates:
             sid, w = candidates.pop(0)
-            w.kill()
             self._workers.pop(sid, None)
+            victims.append(w)
+        return victims
 
     def execute(
         self,
@@ -659,18 +771,42 @@ class SessionPool:
         except _WorkerTimeout:
             worker.kill()
             with self._lock:
-                self._workers.pop(session_id, None)
+                # Only remove the handle we actually killed — a newer worker
+                # registered for this session in the interim must survive.
+                if self._workers.get(session_id) is worker:
+                    self._workers.pop(session_id, None)
             elapsed_ms = int((time.monotonic() - started) * 1000)
             return _build_timeout_result(
                 session_id=session_id,
                 elapsed_ms=elapsed_ms,
                 timeout_ms=timeout_ms or 0,
             )
+        except _WorkerReportedError as exc:
+            # The worker is alive and answered with a well-formed failure —
+            # report it without killing the worker, so the session's loaded
+            # data and r()/e() state survive (e.g. an argument typo must not
+            # wipe the user's whole Stata session).
+            cancelled = self._consume_cancel(session_id)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            if cancelled:
+                return _build_cancelled_result(
+                    session_id=session_id,
+                    elapsed_ms=max(1, elapsed_ms),
+                    aborted_mid_run=True,
+                )
+            return _build_adapter_crash_result(
+                session_id=session_id,
+                elapsed_ms=elapsed_ms,
+                message=str(exc),
+            )
         except _WorkerError as exc:
             cancelled = self._consume_cancel(session_id)
             worker.kill()
             with self._lock:
-                self._workers.pop(session_id, None)
+                # Only remove the handle we actually killed — a newer worker
+                # registered for this session in the interim must survive.
+                if self._workers.get(session_id) is worker:
+                    self._workers.pop(session_id, None)
             elapsed_ms = int((time.monotonic() - started) * 1000)
             if cancelled:
                 return _build_cancelled_result(

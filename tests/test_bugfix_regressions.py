@@ -96,3 +96,155 @@ class TestSnapshotEscapingSymlink:
         snapshot = snapshot_working_dir_files(str(workdir))
         assert any(p.endswith("normal.csv") for p in snapshot)
         assert not any("target.csv" in p for p in snapshot)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subprocess-pool fixes
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+import json  # noqa: E402
+import sys  # noqa: E402
+import textwrap  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+from stata_code.core._pool import (  # noqa: E402
+    SessionPool,
+    WorkerProcess,
+    _WorkerReportedError,
+)
+
+
+def _cmd_for(script: str) -> list[str]:
+    return [sys.executable, "-u", "-c", script]
+
+
+# Writes a large stderr payload (past the ~64 KB OS pipe buffer) BEFORE
+# responding. Without a continuous stderr drain this deadlocks: the worker
+# blocks in the stderr write, never responds, and the parent misreports a
+# healthy worker as a timeout.
+_NOISY_STDERR_WORKER = textwrap.dedent(
+    """
+    import json, sys
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        sys.stderr.write("x" * 262144)
+        sys.stderr.flush()
+        sys.stdout.write(json.dumps({"id": req["id"], "ok": True, "pong": True}) + "\\n")
+        sys.stdout.flush()
+    """
+).strip()
+
+
+# Responds ok=false with a generic (non-invalid_request) error kind, then
+# keeps serving. A well-formed failure response must NOT get the worker
+# killed.
+_REPORTED_FAILURE_WORKER = textwrap.dedent(
+    """
+    import json, sys
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        resp = {"id": req["id"], "ok": False,
+                "error": "RuntimeError: transient boom",
+                "error_kind": "worker_error"}
+        sys.stdout.write(json.dumps(resp) + "\\n")
+        sys.stdout.flush()
+    """
+).strip()
+
+
+# Sleeps while "executing" so a concurrent spawn can trigger eviction while
+# the request is in flight.
+_SLEEPY_OK_WORKER = textwrap.dedent(
+    """
+    import json, sys, time
+    from stata_code.core._pool import _build_adapter_crash_result
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        req = json.loads(line)
+        sid = req.get("options", {}).get("session_id", "main")
+        time.sleep(1.0)
+        r = _build_adapter_crash_result(session_id=sid, elapsed_ms=1, message="ok")
+        resp = {"id": req["id"], "ok": True,
+                "result": json.loads(r.model_dump_json()), "ref_blobs": {}}
+        sys.stdout.write(json.dumps(resp) + "\\n")
+        sys.stdout.flush()
+    """
+).strip()
+
+
+class TestStderrDrain:
+    """A worker flooding stderr must not deadlock into a phantom timeout."""
+
+    def test_large_stderr_before_response_does_not_block(self):
+        w = WorkerProcess("noisy", worker_cmd=_cmd_for(_NOISY_STDERR_WORKER))
+        try:
+            start = time.monotonic()
+            resp = w.send_simple_op("ping", timeout_ms=8000, spawn=True)
+            elapsed = time.monotonic() - start
+            assert resp["pong"] is True
+            assert elapsed < 5.0  # far below the timeout budget
+        finally:
+            w.kill()
+
+
+class TestWorkerReportedFailureKeepsWorker:
+    """ok=false from a live worker must not destroy the session's worker."""
+
+    def test_worker_process_raises_reported_error(self):
+        w = WorkerProcess("rep", worker_cmd=_cmd_for(_REPORTED_FAILURE_WORKER))
+        try:
+            with pytest.raises(_WorkerReportedError):
+                w.execute("boom", {"session_id": "rep"}, timeout_ms=5000)
+            assert w.is_alive()  # the worker survived its own failure report
+        finally:
+            w.kill()
+
+    def test_pool_keeps_worker_after_reported_failure(self):
+        pool = SessionPool(capacity=4, worker_cmd=_cmd_for(_REPORTED_FAILURE_WORKER))
+        try:
+            result = pool.execute("boom", session_id="rep", timeout_ms=5000)
+            assert result.ok is False
+            assert result.error is not None
+            assert result.error.kind.value == "adapter_crash"
+            # The worker must still be registered and alive — its session
+            # state (loaded data, r()/e()) survives the failure report.
+            worker = pool._workers.get("rep")
+            assert worker is not None
+            assert worker.is_alive()
+        finally:
+            pool.shutdown()
+
+
+class TestEvictionSkipsBusyWorkers:
+    """LRU eviction must not kill a worker with a request in flight."""
+
+    def test_in_flight_worker_survives_capacity_pressure(self):
+        pool = SessionPool(capacity=1, worker_cmd=_cmd_for(_SLEEPY_OK_WORKER))
+        results: dict[str, object] = {}
+        try:
+            def _run_a() -> None:
+                results["a"] = pool.execute("slow", session_id="a", timeout_ms=15000)
+
+            t = threading.Thread(target=_run_a)
+            t.start()
+            time.sleep(0.3)  # let session a get in flight
+            results["b"] = pool.execute("other", session_id="b", timeout_ms=15000)
+            t.join(timeout=20)
+            assert not t.is_alive()
+            a = results["a"]
+            # Before the fix, spawning session b evicted (SIGTERMed) session
+            # a's worker mid-run and a came back as a killed-worker crash
+            # with "returncode=-15" in the message.
+            assert "returncode=-15" not in json.dumps(a.model_dump(mode="json"))
+        finally:
+            pool.shutdown()
