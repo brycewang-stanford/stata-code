@@ -144,8 +144,8 @@ remaining · ⬜ not started.
   with structured results + MCP" converged across StatsPAI and rmcp. Defend by
   positioning on **authoritative Stata-runtime fidelity**, not breadth.
 - **Generic code-exec substitution.** A Jupyter-MCP + statsmodels sandbox can
-  "do econometrics" with zero domain tooling. Defense: *mandated Stata commands
-  + verifiable typed `e()` contracts* a generic sandbox cannot provide.
+  "do econometrics" with zero domain tooling. Defense: *mandated Stata commands +
+  verifiable typed `e()` contracts* a generic sandbox cannot provide.
 - **License contagion.** The two structured/MCP-native competitors (tmonk,
   SepineTam) are AGPL; the kernels are GPL. To preserve our MIT clean-room
   wedge we must never vendor their code paths (see `LICENSE-POLICY.md`).

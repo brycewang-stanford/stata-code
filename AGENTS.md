@@ -68,10 +68,12 @@ Fix without re-tagging:
 1. Configure / correct the trusted publisher on PyPI (values above).
 2. Re-run **only the failed job** — the sdist/wheel artifact is still attached to
    the original run, so no rebuild is needed:
+
    ```bash
    gh run rerun <run-id> --failed
    gh run watch <run-id> --exit-status
    ```
+
 3. Verify (next section).
 
 Do **not** delete and re-push `vX.Y.Z` to retry. The artifact is already on the

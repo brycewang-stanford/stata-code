@@ -20,12 +20,12 @@ Trusted Publishing has two modes:
 - **Pending publisher** (preferred for the first release of a brand-new
   project): you configure the trusted publisher *before* the project exists
   on PyPI, and the first successful publish creates it. Go to
-  https://pypi.org/manage/account/publishing/ and add a "pending publisher"
+  <https://pypi.org/manage/account/publishing/> and add a "pending publisher"
   with the values listed in step 2.
 - **Existing project**: if you already pushed an initial release manually
   (e.g. via `twine upload` with a one-off API token), configure trusted
   publishing on the project page at
-  https://pypi.org/manage/project/stata-code/settings/publishing/.
+  <https://pypi.org/manage/project/stata-code/settings/publishing/>.
 
 Either path lands you in the same place after the first run.
 
@@ -83,23 +83,29 @@ Once the one-time setup above is done, every release is just:
    - `vscode/package.json` → `version`
    - `vscode/package-lock.json` → root package `version`
 2. **Run the version guard** before tagging:
+
    ```bash
    python scripts/check_versions.py
    ```
+
 3. **Update `CHANGELOG.md`**: move the `[Unreleased]` entries under a new
    `## [X.Y.Z] - YYYY-MM-DD` heading, leaving an empty `[Unreleased]` shell
    on top.
 4. **Commit** the bump:
+
    ```bash
    git add pyproject.toml stata_code/__init__.py stata_code/mcp/server.py vscode/package.json vscode/package-lock.json CHANGELOG.md
    git commit -m "release: vX.Y.Z"
    ```
+
 5. **Tag and push**:
+
    ```bash
    git tag vX.Y.Z
    git push origin main
    git push origin vX.Y.Z
    ```
+
 6. Watch the **`release` workflow** under the Actions tab. It will:
    - build the sdist + wheel
    - run `twine check` on the artifacts
@@ -127,14 +133,14 @@ version if a publish has already succeeded under that number.
 
 ## Manual / emergency publish
 
-`release.yml` also accepts `workflow_dispatch`, so you can trigger a build
-+ publish from the Actions UI without pushing a tag. The `github-release`
+`release.yml` also accepts `workflow_dispatch`, so you can trigger a build +
+publish from the Actions UI without pushing a tag. The `github-release`
 job will fail in that mode (no tag to attach to) — that's fine; the PyPI
 publish itself will have already happened in `publish-pypi`.
 
 If Trusted Publishing is broken for some reason and you need an emergency
 release, generate a short-lived API token at
-https://pypi.org/manage/account/token/ and run locally:
+<https://pypi.org/manage/account/token/> and run locally:
 
 ```bash
 python -m build

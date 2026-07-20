@@ -226,8 +226,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ### Added
 
-- **Claude Code plugin marketplace manifest.** `.claude-plugin/marketplace.json`
-  + `.claude-plugin/plugin.json` expose the repo as a single-plugin
+- **Claude Code plugin marketplace manifest.** `.claude-plugin/marketplace.json` +
+  `.claude-plugin/plugin.json` expose the repo as a single-plugin
   marketplace, so users can install everything (MCP server config + agent
   skill) with `claude plugin marketplace add brycewang-stanford/stata-code`
   followed by `claude plugin install stata-code`.
@@ -668,6 +668,9 @@ Aggregated from the prior `Unreleased` section; covers 0.6.1 and 0.6.2.
   `vscode/package.json`, and the VSCode MCP-client handshake all
   declare `0.3.0`.
 
+- **MCP server tool count is now 8** (added `get_matrix`,
+  `cancel_session`).
+
 ### Added
 
 - **VSCode extension v0.3 — full UI surface** (`vscode/`). Beyond the
@@ -749,11 +752,6 @@ Aggregated from the prior `Unreleased` section; covers 0.6.1 and 0.6.2.
   not interrupt code that is currently mid-`stata.run()` (pystata is
   in-process and has no clean cancel primitive). Hard interruption
   remains deferred to the subprocess-based runtime planned for v0.3+.
-
-### Changed
-
-- **MCP server tool count is now 8** (added `get_matrix`,
-  `cancel_session`).
 
 ## [0.2.0] — 2026-05-07
 
