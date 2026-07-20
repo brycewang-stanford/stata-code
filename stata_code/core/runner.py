@@ -336,8 +336,8 @@ def cancel(session_id: str = "main") -> bool:
     Cooperative: does **not** interrupt code that is currently mid-execution
     inside pystata. The flag is consumed (and the run short-circuited)
     when ``execute(session_id=...)`` is next invoked for the same session.
-    The short-circuit returns a ``RunResult`` with ``ok=False``, ``rc=-1``,
-    and ``error.kind=cancelled``.
+    The short-circuit returns a ``RunResult`` with ``ok=False``, ``rc=-3``
+    (synthetic), and ``error.kind=cancelled``.
 
     Returns ``True`` if a new cancel was registered, ``False`` if one was
     already pending (idempotent).
@@ -524,6 +524,13 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
             ]
             n_rows = len(norm_values)
             n_cols = len(norm_values[0]) if n_rows else 0
+            # sfi can return None/short name lists for a non-empty matrix;
+            # synthesize positional names rather than letting the Matrix shape
+            # validator reject (and silently drop) successfully read values.
+            if len(rows) != n_rows:
+                rows = [f"r{i + 1}" for i in range(n_rows)]
+            if len(cols) != n_cols:
+                cols = [f"c{j + 1}" for j in range(n_cols)]
             if n_rows * n_cols > MATRIX_INLINE_CELL_CAP:
                 ref = f"matrix://{request_id}/{prefix}/{name}"
                 _refs.put(
@@ -1133,7 +1140,14 @@ def _frame_for_session(session_id: str) -> str:
             f"session_id must match [A-Za-z0-9_-]+; got {session_id!r}. "
             "':' is reserved for future remote prefixing."
         )
-    if _STATA_NAME_RE.fullmatch(session_id) and not session_id.startswith(_MAPPED_FRAME_PREFIX):
+    if (
+        _STATA_NAME_RE.fullmatch(session_id)
+        and not session_id.startswith(_MAPPED_FRAME_PREFIX)
+        # "default" is the frame "main" maps to; letting a session named
+        # "default" claim it would silently alias the two sessions onto one
+        # dataset. Route it through the mapped-frame path instead.
+        and session_id != "default"
+    ):
         return session_id
     mapped = _session_frame_map.get(session_id)
     if mapped is None:
@@ -1275,9 +1289,11 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
             out.append(StataWarning(kind=kind, message=msg))
 
     # Generic notes: any `note: ...` line not already matched by a specific
-    # pattern. Avoid double-counting.
+    # pattern. Avoid double-counting. _NOTE_RE's span starts at the line's
+    # leading whitespace while the specific patterns anchor at `note:` itself,
+    # so containment of m.start() is not enough — test for span overlap.
     for m in _NOTE_RE.finditer(log):
-        if any(s <= m.start() < e for s, e in matched_spans):
+        if any(s < m.end() and m.start() < e for s, e in matched_spans):
             continue
         msg = m.group(0).strip()
         key = ("note", msg)
@@ -1475,10 +1491,20 @@ def get_graph(ref: str, format: str | None = None) -> dict[str, Any]:
     Per SCHEMA.md §5. Returns a dict with `format`, `bytes_b64`, `width`,
     `height`. Raises :class:`RefNotFound` (a ``KeyError`` subclass) when
     the ref is unknown (expired, never existed, or session reset).
+
+    ``format`` is a consistency check, not a converter: graph bytes are
+    stored in the format the original run exported. Requesting a different
+    format raises ``ValueError`` instead of silently returning mismatched
+    bytes — re-run with ``graph_format=...`` to get another format.
     """
     payload = _refs.get(ref)
     if payload is None:
         raise RefNotFound(ref, kind="unknown_graph_ref")
+    if format is not None and format != payload["format"]:
+        raise ValueError(
+            f"graph {ref} is stored as {payload['format']!r}; conversion to "
+            f"{format!r} is not supported — re-run with graph_format={format!r}"
+        )
     return {
         "format": payload["format"],
         "bytes_b64": _b64(payload["bytes"]),

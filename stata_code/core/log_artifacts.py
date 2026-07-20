@@ -234,10 +234,12 @@ def snapshot_working_dir_files(
                 continue
             try:
                 resolved = path.resolve()
+                # relative_to raises ValueError for a symlink that escapes
+                # the working dir — skip it rather than crash the snapshot.
                 if len(resolved.relative_to(root).parts) > max_depth:
                     continue
                 stat = path.stat()
-            except OSError:
+            except (OSError, ValueError):
                 continue
             if origin is not None and resolved == origin:
                 continue

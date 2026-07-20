@@ -48,6 +48,18 @@ _PYSTATA_SEARCH_PATHS: tuple[str, ...] = (
 )
 
 _RC_RE = re.compile(r"r\((-?\d+)\);")
+
+
+def _extract_rc(err_text: str) -> int:
+    """Pull the Stata return code out of a pystata SystemError transcript.
+
+    The transcript may echo literal ``r(NNN);`` text from earlier, successful
+    commands (display strings, help output). The real return code is the
+    trailing one Stata appends at failure, so take the LAST match. Returns
+    ``-1`` when no return code is present.
+    """
+    matches = _RC_RE.findall(err_text)
+    return int(matches[-1]) if matches else -1
 _LATE_OUTPUT_SLEEP_S = 0.005
 
 _lock = threading.Lock()
@@ -210,8 +222,7 @@ class PystataRuntime:
             except SystemError as exc:
                 self._drain_output_buffer(buf, wait_if_empty=False)
                 err_text = str(exc.args[0]) if exc.args else str(exc)
-                m = _RC_RE.search(err_text)
-                rc = int(m.group(1)) if m else -1
+                rc = _extract_rc(err_text)
                 return buf.getvalue(), rc, err_text.strip()
             except Exception as exc:  # noqa: BLE001
                 return buf.getvalue(), -1, f"{type(exc).__name__}: {exc}"

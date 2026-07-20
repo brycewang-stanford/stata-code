@@ -2333,7 +2333,10 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _json_result(payload)
         if name == "get_graph":
             ref = arguments["ref"]
-            payload = get_graph(arguments["ref"])
+            # Forward the advertised `format` argument; a mismatch with the
+            # stored format raises ValueError -> invalid_request rather than
+            # silently returning bytes in a different format than requested.
+            payload = get_graph(ref, arguments.get("format"))
             mime = _GRAPH_MIME.get(payload["format"], "image/png")
             metadata = {
                 "ref": ref,

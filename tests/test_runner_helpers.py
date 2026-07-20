@@ -521,14 +521,15 @@ class TestExtractWarnings:
         out = runner._extract_warnings("note: x omitted because of collinearity.\n")
         assert [w.kind for w in out] == ["omitted_collinear"]
 
-    def test_indented_collinear_note_double_counts(self):
-        """CURRENT BEHAVIOR (suspected bug): an *indented* collinearity note is
-        reported twice — once as omitted_collinear and once as a generic note —
-        because the span-overlap check compares the generic match's start
-        (which includes leading whitespace via ^\\s*) against the specific
-        match's start (anchored at 'note:')."""
+    def test_indented_collinear_note_not_double_counted(self):
+        """An *indented* collinearity note yields only the specific warning.
+
+        The generic-note dedup tests span overlap, so the leading whitespace
+        that _NOTE_RE includes (and the specific pattern does not) no longer
+        defeats it.
+        """
         out = runner._extract_warnings("  note: x omitted because of collinearity.\n")
-        assert [w.kind for w in out] == ["omitted_collinear", "note"]
+        assert [w.kind for w in out] == ["omitted_collinear"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -931,17 +932,21 @@ class TestCollectReturns:
         assert payload["rows"] == ["a", "b"]
         assert payload["cols"] == ["x", "y"]
 
-    def test_matrix_with_missing_row_names_dropped(self):
-        """CURRENT BEHAVIOR: sfi returning None row/col names for a non-empty
-        matrix produces rows=[] which fails the Matrix shape validator, so the
-        whole matrix is silently dropped by the blanket except."""
+    def test_matrix_with_missing_row_names_gets_positional_names(self):
+        """sfi returning None row/col names must not drop the matrix.
+
+        The collector synthesizes positional names (r1.../c1...) so the
+        successfully read values survive the Matrix shape validator.
+        """
         text = "matrices:\n              r(noname) :  1 x 1\n"
         rt = FakeRt(
             capture={"return list": (text, 0, None)},
             matrices={"r(noname)": {"values": [[5.0]], "rows": None, "cols": None}},
         )
         out = runner._collect_returns(rt, "r", "req-noname")
-        assert out.matrices == {}
+        assert out.matrices["noname"].rows == ["r1"]
+        assert out.matrices["noname"].cols == ["c1"]
+        assert out.matrices["noname"].values == [[5.0]]
 
 
 class TestCollectDataset:
