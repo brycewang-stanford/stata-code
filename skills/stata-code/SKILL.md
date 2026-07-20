@@ -138,7 +138,7 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 - **Do not** read `get_log(ref)` proactively; prefer `search_log(ref, pattern)` to pull just the lines you need, and only fall back to `get_log` for the full transcript.
 - **Do** quote specific numbers from `results.e.scalars` / `results.r.scalars` rather than dumping JSON.
 
-## 7. The typed-error taxonomy (32 kinds)
+## 7. The typed-error taxonomy (31 kinds)
 
 On failure, the `error` block looks like:
 
@@ -160,10 +160,10 @@ On failure, the `error` block looks like:
 Kinds you will see most often:
 
 - `varname_not_found` (rc 111) — `varname` is filled; check `dataset.variables` for the right name.
-- `syntax` (rc 9/100/198) — usually a typo; inspect `context.failing`.
+- `syntax` (rc 100–103/121–127/130/132/197/198) — usually a typo; inspect `context.failing`.
 - `command_not_found` (rc 199) — often a community package: `install_package(name=...)`.
-- `file_not_found` / `file_exists` / `file_corrupt` (rc 322/601/602/604) — `path` is filled.
-- `not_sorted` (rc 119) — prepend `sort <var>`.
+- `file_not_found` / `file_exists` / `file_corrupt` (rc 601/602/610/688) — `path` is filled.
+- `not_sorted` (rc 5) — prepend `sort <var>`.
 - `name_conflict` (rc 110) — use `replace` or pick a fresh name.
 - `convergence` / `infeasible` (rc 430/491) — model issue, not a typo; do not loop on it.
 - `no_estimation_results` (rc 301) — likely `predict`/`margins` before any `regress`.

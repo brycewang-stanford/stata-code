@@ -35,34 +35,34 @@ report `kind` + `line` + `context.failing` + the suggestions and stop.
 
 | rc | `error.kind` | What it means | First fix to try |
 |----|--------------|---------------|------------------|
-| 9, 100–103, 121, 130, 132, 197, 198 | `syntax` | Parser rejected the line | Fix the typo on `error.line`; check `context.failing` |
+| 100–103, 121–127, 130, 132, 197, 198 | `syntax` | Parser rejected the line (incl. numlist errors 121–127) | Fix the typo on `error.line`; check `context.failing` |
 | 199 | `command_not_found` | Command/program unknown | If a community pkg: `install_package(name=...)` (`ssc install`); else fuzzy-match a builtin (see `suggestions`) |
 | 111 | `varname_not_found` | Variable not in memory | Use `error.varname` + `dataset.variables` to pick the closest real name |
-| 122, 123 | `invalid_name` | Illegal name | Rename to `[A-Za-z_][A-Za-z0-9_]{0,31}`, not starting with a digit |
+| — | `invalid_name` | Illegal name (no dedicated rc — Stata folds it into r(198); kind set from the message) | Rename to `[A-Za-z_][A-Za-z0-9_]{0,31}`, not starting with a digit |
 | 110 | `name_conflict` | Object already exists | Add `replace`, or `drop`/`capture drop` the object first |
 | 109, 408 | `type_mismatch` | String vs numeric op | `destring`/`tostring`/`encode`; check the operand types |
-| 119, 459 | `not_sorted` | Command needs sorted data | Prepend `sort <byvars>` (or `bysort`) |
+| 5 | `not_sorted` | Command needs sorted data | Prepend `sort <byvars>` (or `bysort`) |
 | 430 | `convergence` | Optimizer didn't converge | `iterate()`, relax `nrtolerance()`, try `technique(bfgs)`; this is a model issue, not a typo |
-| 491 | `infeasible` | No feasible solution | Respecify the model; check perfect prediction / collinearity |
+| 480, 491 | `infeasible` | No feasible solution / invalid starting values | Respecify the model; check perfect prediction / collinearity |
 | 301 | `no_estimation_results` | `predict`/`margins`/`test` before any estimation | Run a model first; check `results.last_estimation_cmd` |
-| 1400 | `estimation_sample_empty` | Sample empty after `if`/missing exclusions | `count if <cond>`; `misstable summarize` |
-| 1401, 1402 | `estimation_failure` | Estimation aborted | Inspect data/spec; often collinearity or singletons |
+| — | `estimation_sample_empty` | Sample empty after `if`/missing exclusions (no dedicated rc; kind set from the message) | `count if <cond>`; `misstable summarize` |
+| 322, 1400, 1401, 1402 | `estimation_failure` | Estimation aborted (incl. numerical overflow) | Inspect data/spec; often collinearity or singletons |
 | 2000, 2001 | `no_observations` | No / too few obs match | `count if <cond>`; widen or drop the `if`/`in` |
 | 4 | `data_in_memory` | Unsaved data would be lost | `clear` (or save first) |
-| 503, 507 | `matrix_conformability` | Non-conformable matrices | Check shapes with `rowsof()` / `colsof()` |
+| 503, 507 | `matrix_conformability` | Non-conformable matrices (507: `matrix post` name conflict) | Check shapes with `rowsof()` / `colsof()` |
 | 504 | `matrix_missing` | Matrix has missing entries | Inspect inputs; drop/handle missings first |
 | 506, 508 | `matrix_singular` | Singular / not pos-def | Find collinearity (`corr`, `estat vif`); consider `noconst` |
-| 322, 601 | `file_not_found` | Path doesn't resolve | Check `pwd`/`ls`; fix path or add `.dta`/`.do`; in stata-code pass `origin_path`/`working_dir` |
+| 601 | `file_not_found` | Path doesn't resolve | Check `pwd`/`ls`; fix path or add `.dta`/`.do`; in stata-code pass `origin_path`/`working_dir` |
 | 602 | `file_exists` | Output file exists | Add `replace` |
-| 603 | `file_io` | Read/write failed | Check permissions / disk |
-| 604, 610 | `file_corrupt` | File unreadable/wrong format | Verify it's a valid `.dta`/correct version |
-| 691, 692, 693 | `network` | Download/SSC/net failed | Retry; check connectivity; `install_package` may need a proxy |
+| 603, 691–693 | `file_io` | Local read/write failed | Check permissions / disk |
+| 610, 688 | `file_corrupt` | File unreadable/wrong format | Verify it's a valid `.dta`/correct version |
+| 2, 631, 672, 677 | `network` | Download/SSC/net failed | Retry; check connectivity; `install_package` may need a proxy |
 | 608 | `permission` | Permission denied | Fix file/dir permissions or target a writable dir |
-| 615, 616 | `encoding` | Encoding problem | Set `encoding()` on import; check the source file's charset |
-| 901, 902, 903 | `stata_limit` | Edition/`maxvar`/matsize limit | `set maxvar`; reduce vars; a bigger edition (SE→MP) raises the ceiling |
-| 480, 909 | `out_of_memory` | Out of memory | `compress`; drop unneeded vars/obs; bigger edition |
+| — | `encoding` | Encoding problem (no dedicated rc; kind set from the message) | Set `encoding()` on import; check the source file's charset |
+| 901–903, 907 | `stata_limit` | Edition/`maxvar`/width limit | `set maxvar`; reduce vars; a bigger edition (SE→MP) raises the ceiling |
+| 909, 950 | `out_of_memory` | Out of memory | `compress`; drop unneeded vars/obs; bigger edition |
 | 1 | `interrupt` | User/system interrupt | Re-run if intended |
-| — | `unknown` | rc not yet mapped | Read `message`/`context`; treat conservatively |
+| — | `unknown` | rc not yet mapped (e.g. 9, 119, 459, 604, 615/616) | Read `message`/`context`; treat conservatively |
 
 ### Synthetic codes (set by stata-code, not by Stata)
 
