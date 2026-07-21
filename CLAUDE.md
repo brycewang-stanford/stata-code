@@ -5,8 +5,7 @@ docs live in [PUBLISHING.md](PUBLISHING.md); this file captures what isn't obvio
 from reading the workflows.
 
 ## Communication
-
-写完代码后，始终用**中文**给出一段简短总结：做了什么、为什么、用户接下来要做什么。即使本轮对话之前是英文，代码改动结束时的总结也要用中文。
+Please think and talk with me in English.
 
 ## Release coordination
 
