@@ -34,6 +34,7 @@ from stata_code.core._pool import (
     SessionPool,
     WorkerProcess,
     _WorkerError,
+    _WorkerTimeout,
     pool_execute,
     shutdown_default_pool,
 )
@@ -473,11 +474,16 @@ def _cmd_for(script: str) -> list[str]:
 
 
 class TestWorkerProcessProtocolErrors:
-    def test_execute_response_id_mismatch_raises(self):
+    def test_execute_discards_mismatched_id_then_times_out(self):
+        """A response carrying a foreign id is a stale reply to an earlier,
+        already-timed-out request. It must be discarded rather than matched
+        against the current request — so this run sees no answer at all and
+        ends at its deadline, not with a protocol error.
+        """
         w = WorkerProcess("s1", worker_cmd=_cmd_for(_WRONG_ID_WORKER))
         try:
-            with pytest.raises(_WorkerError, match="response id mismatch"):
-                w.execute("noop", {"session_id": "s1"}, timeout_ms=5000)
+            with pytest.raises(_WorkerTimeout):
+                w.execute("noop", {"session_id": "s1"}, timeout_ms=700)
         finally:
             w.kill()
 
@@ -511,11 +517,12 @@ class TestWorkerProcessProtocolErrors:
             w.send_simple_op("ping", timeout_ms=1000)
         assert not w.is_alive()  # spawn=False must not start a process
 
-    def test_send_simple_op_response_id_mismatch_raises(self):
+    def test_send_simple_op_discards_mismatched_id_then_times_out(self):
+        """Same stale-reply contract as execute(): discard, don't mis-match."""
         w = WorkerProcess("s1", worker_cmd=_cmd_for(_WRONG_ID_WORKER))
         try:
-            with pytest.raises(_WorkerError, match="response id mismatch"):
-                w.send_simple_op("ping", timeout_ms=5000, spawn=True)
+            with pytest.raises(_WorkerTimeout):
+                w.send_simple_op("ping", timeout_ms=700, spawn=True)
         finally:
             w.kill()
 

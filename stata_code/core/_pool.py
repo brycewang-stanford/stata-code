@@ -38,6 +38,7 @@ this module if they want the timeout guarantee.
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import os
 import subprocess
@@ -47,6 +48,7 @@ import time
 import uuid
 from collections import deque
 from datetime import datetime, timezone
+from queue import Empty, Queue
 from typing import Any
 
 from stata_code.core import _refs
@@ -215,6 +217,19 @@ def _worker_main() -> int:
             elif op == "execute":
                 code = req["code"]
                 options = req.get("options", {})
+                # Classify a malformed request BEFORE running it: an unknown
+                # option name or bad arity is a caller error. This is done by
+                # signature binding rather than by catching TypeError around
+                # the call, because `execute()` collects results (returns,
+                # dataset, estimation contract, graphs) without a blanket
+                # guard — a TypeError from sfi handing back an unexpected type
+                # mid-collection is a worker fault, and reporting that as
+                # "invalid_request" would tell the agent its arguments were
+                # wrong when nothing was wrong with them.
+                try:
+                    inspect.signature(execute).bind(code, **options)
+                except TypeError as exc:
+                    raise ValueError(f"bad execute options: {exc}") from exc
                 # Snapshot ref keys before so we can ferry only the *new* ones.
                 # _refs._store is private but we own this codebase.
                 with _refs._lock:  # noqa: SLF001
@@ -237,9 +252,7 @@ def _worker_main() -> int:
                 }
             else:
                 response = {"id": req_id, "ok": False, "error": f"unknown op: {op}"}
-        except (ValueError, TypeError, NotImplementedError) as exc:
-            # TypeError is included: a malformed option (e.g. a string where
-            # an int is expected) is a caller error, not a worker crash.
+        except (ValueError, NotImplementedError) as exc:
             response = {
                 "id": req_id,
                 "ok": False,
@@ -299,6 +312,18 @@ class _WorkerTimeout(TimeoutError):
     """Raised when a request exceeds its deadline. Parent kills the worker."""
 
 
+class _WorkerBusy(_WorkerTimeout):
+    """A status query could not acquire the worker lock in its budget.
+
+    Distinct from a plain `_WorkerTimeout`: nothing was written to the
+    worker, so its protocol stream is clean and the subprocess is healthy —
+    it is merely mid-`execute()`. Callers must NOT kill a busy worker; doing
+    so destroys the in-flight run and the session's loaded dataset. Subclasses
+    `_WorkerTimeout` so existing `except _WorkerTimeout` handlers that only
+    want to warn keep working.
+    """
+
+
 class _StderrTail:
     """Bounded, thread-safe tail buffer for a worker's drained stderr."""
 
@@ -318,6 +343,51 @@ class _StderrTail:
     def text(self) -> str:
         with self._lock:
             return "".join(self._chunks)[-self._max :]
+
+
+class _StdoutPump:
+    """One long-lived reader thread per worker process, feeding a queue.
+
+    The previous design spawned a fresh `readline()` thread per request and
+    abandoned it on deadline overrun. An abandoned thread stays blocked on the
+    pipe and consumes the NEXT request's response — so a status query that
+    timed out while the worker was still initializing would silently eat the
+    reply to the following `execute()`, which then burned its full timeout and
+    got a healthy worker killed. A single pump per process cannot orphan:
+    a timed-out read simply leaves the line in the queue, where the stale-id
+    filter in `_read_json_response_with_deadline` discards it.
+    """
+
+    __slots__ = ("queue", "_thread")
+
+    def __init__(self, stream: Any) -> None:
+        self.queue: Queue[str | BaseException] = Queue()
+        self._thread = threading.Thread(target=self._run, args=(stream,), daemon=True)
+        self._thread.start()
+
+    def _run(self, stream: Any) -> None:
+        try:
+            for line in iter(stream.readline, ""):
+                self.queue.put(line)
+        except BaseException as exc:  # noqa: BLE001
+            self.queue.put(exc)
+        finally:
+            # Sentinel: EOF. `""` can never be a real line (iter stops on it).
+            self.queue.put("")
+
+
+def _ensure_stdout_pump(proc: subprocess.Popen[str]) -> _StdoutPump:
+    """Attach a `_StdoutPump` to `proc` on first use, then reuse it.
+
+    Lazy rather than spawn-time so that directly-injected fake processes
+    (tests, in-process harnesses) get the same non-orphaning read path.
+    """
+    pump: _StdoutPump | None = getattr(proc, "_stata_code_stdout_pump", None)
+    if pump is None:
+        assert proc.stdout is not None
+        pump = _StdoutPump(proc.stdout)
+        proc._stata_code_stdout_pump = pump  # type: ignore[attr-defined]
+    return pump
 
 
 def _drain_stderr(stream: Any, tail: _StderrTail) -> None:
@@ -435,14 +505,10 @@ class WorkerProcess:
                     None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
                 )
 
-                response = self._read_json_response_with_deadline(proc, deadline)
+                response = self._read_json_response_with_deadline(
+                    proc, deadline, expect_id=req_id
+                )
                 self.last_used = time.monotonic()
-
-                if response.get("id") != req_id:
-                    raise _WorkerError(
-                        f"worker response id mismatch: expected {req_id}, "
-                        f"got {response.get('id')}"
-                    )
                 if not response.get("ok"):
                     if response.get("error_kind") == "invalid_request":
                         raise ValueError(response.get("error", "<no error>"))
@@ -461,23 +527,14 @@ class WorkerProcess:
         """Read one line from `proc.stdout` honoring an optional wall-clock
         deadline. Raises `_WorkerTimeout` on overrun.
 
-        Implementation note: we poll `proc.poll()` plus a short readline
-        in a thread, joining with the remaining budget. This is portable
-        (no select on Windows pipes) and robust for the line-oriented
-        protocol.
+        Reads come off the worker's single long-lived `_StdoutPump` thread
+        (see that class): polling a queue is portable (no select on Windows
+        pipes) and, crucially, a timed-out read orphans nothing — the pump
+        keeps ownership of the pipe, so a late reply lands in the queue for
+        the stale-id filter to discard rather than being handed to the next
+        request as if it were that request's response.
         """
-        assert proc.stdout is not None
-        result: dict[str, str | BaseException] = {}
-
-        def _reader() -> None:
-            try:
-                line = proc.stdout.readline()  # type: ignore[union-attr]
-                result["line"] = line
-            except BaseException as exc:  # noqa: BLE001
-                result["err"] = exc
-
-        thread = threading.Thread(target=_reader, daemon=True)
-        thread.start()
+        pump = _ensure_stdout_pump(proc)
 
         while True:
             if deadline is None:
@@ -486,41 +543,51 @@ class WorkerProcess:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise _WorkerTimeout("deadline exceeded waiting for worker response")
-            thread.join(
-                timeout=min(_POLL_INTERVAL_S, remaining)
-                if remaining is not None
-                else _POLL_INTERVAL_S
-            )
-            if not thread.is_alive():
-                if "err" in result:
-                    raise _WorkerError(f"reader thread error: {result['err']!r}")
-                line = result.get("line", "")
-                assert isinstance(line, str)
-                if not line:
-                    # EOF — worker exited or pipe closed unexpectedly.
-                    rc = proc.poll()
-                    raise _WorkerError(_worker_exit_message(proc, rc))
-                return line
-            # Worker still running but no line yet. If the process died, surface that.
-            if proc.poll() is not None:
-                # Wait briefly for any final bytes the reader thread might catch.
-                thread.join(timeout=0.1)
-                if "line" in result and isinstance(result["line"], str) and result["line"]:
-                    return result["line"]
-                rc = proc.returncode
-                raise _WorkerError(_worker_exit_message(proc, rc))
+            try:
+                item = pump.queue.get(
+                    timeout=min(_POLL_INTERVAL_S, remaining)
+                    if remaining is not None
+                    else _POLL_INTERVAL_S
+                )
+            except Empty:
+                # No line yet. If the process died, surface that; otherwise
+                # keep waiting against the deadline. A dead process still
+                # gets one more loop to pick up the pump's EOF sentinel and
+                # any final buffered line ahead of it.
+                if proc.poll() is not None:
+                    try:
+                        item = pump.queue.get(timeout=0.1)
+                    except Empty:
+                        raise _WorkerError(
+                            _worker_exit_message(proc, proc.returncode)
+                        ) from None
+                else:
+                    continue
+            if isinstance(item, BaseException):
+                raise _WorkerError(f"reader thread error: {item!r}")
+            if not item:
+                # EOF sentinel — worker exited or pipe closed unexpectedly.
+                raise _WorkerError(_worker_exit_message(proc, proc.poll()))
+            return item
 
     @classmethod
     def _read_json_response_with_deadline(
         cls,
         proc: subprocess.Popen[str],
         deadline: float | None,
+        expect_id: str | None = None,
     ) -> dict[str, Any]:
         """Read the next non-blank JSON worker response.
 
         A few Stata/pystata builds emit a lone newline while initializing. That
         line is protocol noise, not a response, so tolerate blank lines only.
         Non-empty non-JSON still indicates real protocol corruption.
+
+        When `expect_id` is given, responses carrying a different id are the
+        late replies of an earlier request that already timed out. They are
+        discarded and the read continues against the same deadline — matching
+        them against the current request would either mis-attribute a stale
+        result or raise a spurious protocol error.
         """
         while True:
             line = cls._readline_with_deadline(proc, deadline)
@@ -532,6 +599,8 @@ class WorkerProcess:
                 raise _WorkerError(f"worker emitted non-JSON: {line!r}") from exc
             if not isinstance(response, dict):
                 raise _WorkerError(f"worker emitted non-object JSON: {line!r}")
+            if expect_id is not None and response.get("id") != expect_id:
+                continue
             return response
 
     def send_simple_op(
@@ -552,14 +621,25 @@ class WorkerProcess:
         The worker lock is held by an in-flight ``execute()`` for the whole
         run, so acquiring it counts against ``timeout_ms`` too — a status
         query must not hang for the duration of a long Stata run. Lock
-        acquisition failure raises :class:`_WorkerTimeout` ("worker busy").
+        acquisition failure raises :class:`_WorkerBusy`, which callers must
+        NOT treat as a dead worker: nothing was written, the stream is clean,
+        and the subprocess is healthy.
+
+        ``timeout_ms`` is the budget for the whole call. The deadline is fixed
+        up front and the lock wait is deducted from it, so the worst case is
+        ``timeout_ms`` total rather than ``timeout_ms`` for the lock plus
+        another ``timeout_ms`` for the read.
         """
+        start = time.monotonic()
+        deadline: float | None = (
+            None if timeout_ms is None else start + timeout_ms / 1000.0
+        )
         if timeout_ms is None:
             acquired = self._lock.acquire()
         else:
             acquired = self._lock.acquire(timeout=timeout_ms / 1000.0)
         if not acquired:
-            raise _WorkerTimeout(
+            raise _WorkerBusy(
                 f"worker for {self.session_id!r} is busy (request in flight)"
             )
         try:
@@ -578,16 +658,11 @@ class WorkerProcess:
             except BrokenPipeError as exc:
                 raise _WorkerError(f"worker pipe broken on write: {exc}") from exc
 
-            deadline: float | None
-            deadline = None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
-
-            response = self._read_json_response_with_deadline(proc, deadline)
+            response = self._read_json_response_with_deadline(
+                proc, deadline, expect_id=req_id
+            )
             self.last_used = time.monotonic()
 
-            if response.get("id") != req_id:
-                raise _WorkerError(
-                    f"worker response id mismatch: expected {req_id}, got {response.get('id')}"
-                )
             if not response.get("ok"):
                 if response.get("error_kind") == "invalid_request":
                     raise ValueError(response.get("error", "<no error>"))
@@ -609,7 +684,12 @@ class WorkerProcess:
         if proc is None:
             return
         if proc.poll() is not None:
-            self._proc = None
+            # Same identity guard as the slow path below: a concurrent
+            # execute() may have already respawned into self._proc while we
+            # were looking at the dead one, and clearing it would strand a
+            # live subprocess with a request in flight.
+            if self._proc is proc:
+                self._proc = None
             return
         try:
             proc.terminate()
@@ -975,10 +1055,18 @@ class SessionPool:
         worker = self._get_or_spawn(session_id)
         try:
             response = worker.send_simple_op("stata_info", timeout_ms=timeout_ms, spawn=True)
+        except _WorkerBusy:
+            # Healthy worker, mid-run. Killing it here would SIGTERM the user's
+            # in-flight Stata command and wipe the session's loaded data — for a
+            # read-only status query. Surface the busy signal instead.
+            raise
         except (_WorkerError, _WorkerTimeout):
             worker.kill()
             with self._lock:
-                self._workers.pop(session_id, None)
+                # Only drop OUR handle: a concurrent execute() may have already
+                # noticed the death, spawned a replacement and registered it.
+                if self._workers.get(session_id) is worker:
+                    self._workers.pop(session_id, None)
             raise
         stata = response["stata"]
         return stata if isinstance(stata, dict) else {}

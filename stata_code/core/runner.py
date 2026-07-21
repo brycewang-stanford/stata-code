@@ -1122,6 +1122,8 @@ def _last_estimation_cmd(rt: Any) -> str | None:
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _STATA_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _MAPPED_FRAME_PREFIX = "_sc_"
+# Stata's maximum name length ([U] 11.3 Naming conventions).
+_STATA_NAME_MAX = 32
 _session_frame_map: dict[str, str] = {}
 _frame_session_map: dict[str, str] = {}
 
@@ -1147,6 +1149,10 @@ def _frame_for_session(session_id: str) -> str:
         # "default" claim it would silently alias the two sessions onto one
         # dataset. Route it through the mapped-frame path instead.
         and session_id != "default"
+        # Stata caps name length at 32; passing a longer id straight through
+        # makes `frame create` fail with rc 198. The mapped path below yields
+        # a safe 28-char name, so fall through to it instead.
+        and len(session_id) <= _STATA_NAME_MAX
     ):
         return session_id
     mapped = _session_frame_map.get(session_id)
@@ -1282,10 +1288,16 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
         for m in pat.finditer(log):
             msg = m.group(0).strip()
             key = (kind, msg)
+            # Record the span BEFORE the de-dup check. Every occurrence of a
+            # specific pattern must claim its span, or the 2nd and later
+            # copies of an identical line (e.g. the same regression re-run
+            # inside a foreach loop) go unclaimed and get picked up again by
+            # the generic-note pass below — the exact double-count this
+            # overlap test exists to prevent.
+            matched_spans.append(m.span())
             if key in seen:
                 continue
             seen.add(key)
-            matched_spans.append(m.span())
             out.append(StataWarning(kind=kind, message=msg))
 
     # Generic notes: any `note: ...` line not already matched by a specific
