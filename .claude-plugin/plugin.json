@@ -1,6 +1,6 @@
 {
   "name": "stata-code",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Agent-native Stata bridge for Claude Code. Drive DiD/IV/RDD and publication-ready esttab tables in plain language, then cross-validate each estimate against StatsPAI. Bundles an MCP server (18 tools, 14 workflow prompts, token-economy result schema, typed errors, multi-session) and an agent skill with an on-demand Stata reference library that teaches Claude how to call it idiomatically.",
   "author": {
     "name": "Bryce Wang",

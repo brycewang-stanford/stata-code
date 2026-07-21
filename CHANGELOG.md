@@ -6,11 +6,70 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.9.1 — 2026-07-22
+
 Quality-hardening pass: correctness fixes from an adversarial code review,
 a large offline test expansion, and a documentation accuracy audit. No new
-features, no API or schema changes, no version bump.
+features, no API or schema changes.
+
+A second review round found that three of the first round's fixes were
+incomplete or had introduced a regression of their own; those are the first
+four entries below. The common failure was testing a fix in isolation while
+the real call path stayed uncovered — the new tests go through `SessionPool`
+rather than `WorkerProcess` wherever the pool is what carries the bug, and
+each was confirmed to fail against the pre-fix source.
 
 ### Fixed
+
+- **A read-only status query no longer kills a healthy mid-run worker.**
+  Once `send_simple_op` learned to bail out rather than block on the worker
+  lock, that bail-out surfaced as a `_WorkerTimeout` — and
+  `SessionPool.stata_info` treated "busy" and "dead" identically: it
+  SIGTERMed the worker and dropped it from the pool. Calling the
+  `stata_info` tool during a long `bootstrap`/`reghdfe` therefore returned
+  the user's run as `adapter_crash` and wiped the session's loaded data, and
+  because the MCP layer swallows the exception the kill was invisible in the
+  tool response. Busy is now a distinct `_WorkerBusy` signal (a
+  `_WorkerTimeout` subclass, so warn-only callers are unaffected) that never
+  kills.
+- **A timed-out read no longer steals the next request's response.** Each
+  request spawned its own `readline()` thread and abandoned it on deadline
+  overrun; the orphan stayed blocked on the pipe and consumed the *following*
+  response. The next `execute()` then burned its entire timeout (default
+  600 s) waiting for a reply that had already been eaten, after which the
+  pool killed a perfectly healthy worker. Reads now come off one long-lived
+  pump thread per worker, which cannot orphan, and responses carrying a
+  stale request id are discarded rather than mis-matched.
+- **`send_simple_op` honors its full timeout budget.** The read deadline was
+  computed *after* acquiring the worker lock, so a call that spent most of
+  its budget waiting for the lock got a second full budget for the read —
+  worst case 2x `timeout_ms`, and `list_session_info_detailed` iterates
+  workers serially, so N busy workers stalled the status tool for
+  `2 * timeout * N`. The deadline is now fixed up front.
+- **Repeated identical notes are no longer double-counted.** The previous
+  de-dup short-circuited before recording the matched span, so the second and
+  later copies of an identical `note:` line went unclaimed and were picked up
+  again by the generic-note pass — the exact double-count the fix was meant
+  to remove, reachable from any `foreach` loop re-running the same
+  regression.
+- **`stata_info`'s worker eviction is identity-checked.** It popped the
+  session's worker unconditionally, so a concurrent `execute()` that had
+  already noticed the death and registered a replacement got *its* worker
+  evicted — leaking a live pystata subprocess that `request_cancel` /
+  `kill_session` / `shutdown` could no longer reach.
+- **`kill()`'s already-dead fast path is identity-checked** too, matching its
+  own slow path: it could otherwise clear a handle a concurrent `execute()`
+  had just respawned into, stranding a live subprocess mid-request.
+- **`TypeError` is no longer blanket-classified as a caller error.** The
+  guard wrapped the whole `execute()` call, not just argument binding, so a
+  `TypeError` raised deep inside result collection told the agent its
+  arguments were wrong when nothing was — and routed the failure out of the
+  `adapter_crash` path that would have recycled the wedged worker. Malformed
+  options are now caught by signature binding before the call; deeper
+  `TypeError`s stay in the `worker_error` bucket.
+- **Session ids longer than Stata's 32-character name cap are mapped.** They
+  were passed through verbatim as a frame name, so `frame create` failed with
+  rc 198; they now route through the hashed mapped-frame path.
 
 - **Worker stderr pipe is now drained continuously.** The subprocess pool
   only read a worker's stderr after death, so a worker whose cumulative
@@ -69,6 +128,12 @@ features, no API or schema changes, no version bump.
 - **Community health files**: `CONTRIBUTING.md` (dev setup + the exact CI
   gates), `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`,
   and GitHub issue templates that ask for `stata-code doctor` output.
+- **Second-round regression tests** for the eight fixes listed above, each
+  verified to fail against the pre-fix source (823 passing locally with
+  Stata). They drive real subprocess workers through `SessionPool` — a
+  status query racing a live run, a worker that drops its first request, a
+  worker that releases the lock partway — rather than asserting on a mocked
+  seam, which is what let the first round's regressions through.
 
 ### Docs
 
