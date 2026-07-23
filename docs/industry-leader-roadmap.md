@@ -93,7 +93,7 @@ workflow needs them.
 
 ### Week 4: Release Quality
 
-- Sweep README.md, README.zh.md, vscode/README.md, CHANGELOG.md, examples,
+- Sweep README.md (Chinese default), README.en.md, vscode/README.md, CHANGELOG.md, examples,
   and skill docs for drift.
 - Run release-relevant checks: version guard, schema export, skill zip build,
   MCP tests, core tests that do not require Stata, and VS Code compile/tests if

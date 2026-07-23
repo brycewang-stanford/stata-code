@@ -3,7 +3,7 @@
 面向实证/计量研究者：让 AI agent（Claude Code、Cursor、Codex 等）直接、可靠地
 运行你的 Stata，并拿到**结构化、带类型的结果**——而不是一堆需要 agent 去猜的日志文本。
 
-本页覆盖从零到跑通的最短路径。完整文档见 [README.zh.md](../README.zh.md) 与
+本页覆盖从零到跑通的最短路径。完整文档见 [README.md](../README.md) 与
 [SCHEMA.md](../SCHEMA.md)。
 
 ---

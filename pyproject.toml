@@ -6,7 +6,9 @@ build-backend = "hatchling.build"
 name = "stata-code"
 version = "0.9.1"
 description = "Agent-native Stata bridge — one core, multiple frontends (MCP, Jupyter, VSCode)"
-readme = "README.md"
+# The repo default README (README.md) is Chinese; keep the PyPI long description
+# English by pointing at README.en.md.
+readme = "README.en.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
@@ -69,6 +71,7 @@ include = [
   "/examples",
   "/docs",
   "/README.md",
+  "/README.en.md",
   "/CHANGELOG.md",
   "/LICENSE",
   "/LICENSE-POLICY.md",

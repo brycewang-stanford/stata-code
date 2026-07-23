@@ -437,15 +437,17 @@ def test_unknown_argument_rejected_for_new_tools():
 
 
 def test_readmes_advertise_current_mcp_tool_count():
+    # The default README (README.md) is Chinese; the English README is
+    # README.en.md. Each must advertise the current tool count in its language.
     repo = Path(__file__).resolve().parents[1]
     count = len(server._tool_definitions())
-    readme = (repo / "README.md").read_text(encoding="utf-8")
-    readme_zh = (repo / "README.zh.md").read_text(encoding="utf-8")
+    readme_zh = (repo / "README.md").read_text(encoding="utf-8")
+    readme_en = (repo / "README.en.md").read_text(encoding="utf-8")
 
-    assert f"with its {count} tools" in readme
-    assert f"The MCP server registers {count} tools" in readme
-    assert f"MCP server ({count} tools)" in readme
-    assert f"MCP server: {count} tools" in readme
+    assert f"with its {count} tools" in readme_en
+    assert f"The MCP server registers {count} tools" in readme_en
+    assert f"MCP server ({count} tools)" in readme_en
+    assert f"MCP server: {count} tools" in readme_en
     assert f"带有 {count} 个工具" in readme_zh
     assert f"MCP server 注册了 {count} 个工具" in readme_zh
     assert f"MCP server ({count} tools)" in readme_zh

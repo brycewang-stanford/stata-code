@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo/horizontal@1024.png" alt="stata-code logo" width="520" />
+  <img src="branding/logo/horizontal@1024.png" alt="stata-code logo" width="520" />
 </p>
 
 <p align="center">
-  <a href="README.md"><strong>English</strong></a> | <a href="README.zh.md">中文</a>
+  <a href="README.en.md">English</a> | <a href="README.md"><strong>中文</strong></a>
 </p>
 
 # stata-code
@@ -29,48 +29,48 @@
     </td>
     <td width="48"></td>
     <td align="center">
-      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP — Center on China's Economy & Institutions" width="280" /></a>
+      <a href="https://sccei.fsi.stanford.edu/reap"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/stanford-reap-logo.png" alt="Stanford REAP — 斯坦福中国经济与制度研究中心" width="280" /></a>
     </td>
   </tr>
 </table>
 
-<sub><strong>Stanford REAP × CoPaper.AI</strong> · an academic–industrial AI toolkit for empirical research</sub>
+<sub><strong>Stanford REAP × CoPaper.AI</strong> · 面向实证研究的产学研 AI 工具箱</sub>
 
 </div>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
+  <img src="branding/github-instructions.png" alt="stata-code: agent-native Stata bridge — one Python core, multiple frontends (Jupyter kernel, MCP server, VS Code extension)" width="720" />
 </p>
 
-> Agent-native Stata bridge — **one Python core, multiple frontends**.
+> 面向 LLM 智能体的 Stata 桥接工具 —— **一个 Python 核心，多种前端入口**。
 
-`stata-code` lets you drive Stata from modern environments: an LLM agent (Claude Code, Cursor, Claude Desktop), a Jupyter notebook, or a VS Code editor session. All frontends share one Python core and return a stable, structured, **agent-friendly** result schema.
+`stata-code` 让你可以从现代开发环境中驱动 Stata：LLM 智能体（Claude Code、Cursor、Claude Desktop）、Jupyter notebook，或 VS Code 编辑器。它们共享同一个 Python 核心，并返回稳定、结构化、**适合智能体读取**的结果格式。
 
-**For empirical economists.** Drive Stata in plain language: run **DiD, IV, RDD, and publication-ready `esttab` tables in one conversation** — then cross-check each estimate across Stata and Python so you only trust results that *agree* (the Cunningham cross-package robustness check).
+**面向实证经济学家。** 用自然语言驱动 Stata：**一次对话里跑完 DiD、IV、RDD 和出版级 `esttab` 表**——再把每个估计在 Stata 与 Python 两套实现上交叉核对，只采信结果一致的那一个（Cunningham 跨包稳健性检验）。
 
-**Try it in 60 seconds** with [Claude Code](https://github.com/anthropics/claude-code) — no global install needed:
+**60 秒上手**（配合 [Claude Code](https://github.com/anthropics/claude-code)，无需全局安装）：
 
 ```bash
 claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
 ```
 
-Then just ask:
+然后直接问：
 
-> *"Using `data/cfps_panel.dta`, run a two-way fixed-effects regression of monthly wage on the treatment (controls: `age age2 edu industry`), then test heterogeneous effects with Callaway-Sant'Anna, and export an `esttab` table."*
+> *“用 `data/cfps_panel.dta` 跑一个工人月工资对处理变量的双向固定效应回归（控制变量 `age age2 edu industry`），再用 Callaway-Sant'Anna 检验异质处理效应，最后输出 `esttab` 表。”*
 
-`stata-code` writes the do-file, runs it, returns the table, and interprets the result — and can re-estimate the same ATT with [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) to confirm the two stacks agree. These workflows ship as one-call MCP prompts (`did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`) backed by an on-demand [recipe library](skills/stata-code/references/recipes/).
+`stata-code` 会自动写 do 文件、运行、把表格回传并解读结果——还能用 [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) 把同一个 ATT 再估一遍，确认两套结果一致。这些工作流以一键 MCP prompts（`did_event_study`、`iv_2sls`、`rdd`、`publication_table`、`cross_validate_did`）的形式提供，背后是一个按需调用的 [recipe 库](skills/stata-code/references/recipes/)。
 
-**Why `stata-code`:** MIT-licensed · ships as an MCP server, a bundled agent skill, a Jupyter kernel, a VS Code extension, **and** a plain-terminal CLI (`stata-code run`) · one structured, token-economy result schema (typed errors, native `r()` / `e()`) · runs on **Stata 17+ via pystata *or* Stata 13+ via a console backend that needs no pystata** · a zero-Python standalone binary · a default command-safety guard for unattended agents · cross-stack validation with StatsPAI for the Cunningham check.
+**为什么选 `stata-code`：** MIT 许可证 · 同时提供 MCP server、内置 agent skill、Jupyter kernel、VS Code 扩展 **和** 终端命令行（`stata-code run`）· 统一的结构化、省 token 的结果格式（typed errors、原生 `r()` / `e()`）· **支持 Stata 17+（pystata）或 Stata 13+（无需 pystata 的 console 后端）** · 零 Python 独立二进制 · 面向无人值守 agent 的默认命令安全护栏 · 配合 StatsPAI 做跨栈交叉验证（Cunningham 检验）。
 
 ```text
                     ┌────────────────────────────────────────┐
                     │     stata-code core (Python)           │
                     │                                        │
                     │   • pystata 17+ / console 13+ backends │
-                    │   • v1.0 unified result schema         │
-                    │   • token-economy defaults             │
-                    │   • multi-session via Stata frames     │
-                    │   • typed errors + suggestions         │
+                    │   • v1.0 统一结果 schema               │
+                    │   • 默认节省 token                     │
+                    │   • 通过 Stata frames 支持多 session   │
+                    │   • 结构化 typed errors + 建议         │
                     └────────────────────────────────────────┘
                        ↑              ↑              ↑
               ┌────────┴────┐  ┌──────┴─────┐  ┌────┴────────────┐
@@ -79,95 +79,86 @@ Then just ask:
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-A fourth frontend, a **plain-terminal CLI** (`stata-code run` / `lint` / `setup`), gives any agent that can shell out — or a bare terminal — the same typed `RunResult`. And the core runs two backends: **pystata** (Stata 17+, in-memory sessions) or a **console backend** (Stata 13+ in batch mode, no pystata) — both returning the identical schema.
+此外还有第四个前端——**终端命令行**（`stata-code run` / `lint` / `setup`），让任何能调用 shell 的 agent（或纯终端）拿到同一套带类型的 `RunResult`；core 支持两种后端：**pystata**（Stata 17+，内存会话）或 **console 后端**（Stata 13+ 批处理，无需 pystata），两者返回完全相同的 schema。
 
-**Status: v0.9 (June 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
+**当前状态：v0.9（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展和命令行都已经在 Stata 18 MP 上端到端跑通；console 后端把覆盖范围扩展到无需 pystata 的 Stata 13+。测试套件覆盖 schema、runner、console 解析器、MCP、kernel、notebook、run-index、subprocess pool、命令安全、linter 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。快速上手见 [docs/quickstart.zh.md](docs/quickstart.zh.md)。
 
-Four workflows the current tree explicitly supports for end users and agents:
+当前代码树明确支持的三类用户 / agent 工作流：
 
-- **Run Stata from a plain terminal or a zero-Python binary.** `stata-code run analysis.do` (or `-e "code"`, or stdin) prints the same structured `RunResult` — text or `--json` — so any agent that can shell out gets the typed error loop without MCP. `--backend console` runs **Stata 13+ with no pystata**, and a standalone binary needs no Python install at all. See [From the Command Line](#from-the-command-line-bash).
-- **Run Stata code from a Jupyter notebook.** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` registers a **Stata** kernel that the Jupyter Notebook UI, JupyterLab, and the VS Code Jupyter extension all pick up by name. Cells render Stata logs, graphs, and warnings inline (the kernel logo bundled since v0.5 makes it appear in VS Code's kernel picker too). See [As a Jupyter Kernel](#as-a-jupyter-kernel).
-- **Optional agent "fix and rerun" loop.** `stata_run` returns typed `error.kind/line/context` plus `suggestions` on every failure. By default Claude Code only reports diagnostics — but if you explicitly say "fix this and rerun until it passes", the agent uses the same fields to edit your `.do` file and re-call `stata_run` until the run is green. The repair loop is **opt-in**: failed runs are diagnostics first, not automatic rewrite permission. See [Error Recovery in Agent Workflows](#error-recovery-in-agent-workflows).
-- **Economist workflow guides.** The bundled skill and cookbook now cover
-  modern DiD, IV/weak-IV, RDD, table export, data-MCP handoff, and
-  cross-stack parity audits. `stata-code` runs and audits the Stata leg; R,
-  Python, and official data MCPs remain separate tools with explicit handoff
-  files and source metadata. See [`skills/stata-code/references/`](skills/stata-code/references/)
-  and [`examples/`](examples/).
+- **在 Jupyter notebook 里跑 Stata 代码。** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` 会注册一个名为 **Stata** 的 kernel，Jupyter Notebook、JupyterLab、以及 VS Code 的 Jupyter 扩展都能在 kernel 选择器里看到它。Cell 里直接写 Stata 命令，日志、图形和警告会内联渲染（自 v0.5 起 kernel logo 已一起打包进 PyPI wheel，VS Code 的 Jupyter kernel picker 也能正常显示）。详见下文 [作为 Jupyter kernel](#作为-jupyter-kernel)。
+- **可选的 agent「修复并重跑」循环。** `stata_run` 在每次失败时都会返回结构化的 `error.kind/line/context` 和 `suggestions`。默认情况下 Claude Code 只把它当作诊断信息上报；但如果你明确说「帮我修到跑通」「修复并反复运行直到成功」，agent 就会用同一组字段去改 `.do` 文件、再调 `stata_run`，直到代码通过。这个修复循环是 **opt-in** 的：默认失败 = 诊断，不是自动改写授权。详见下文 [Agent 工作流里的报错恢复](#agent-工作流里的报错恢复)。
+- **经济学实证工作流指南。** 随包 skill 和 cookbook 覆盖现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP 到 Stata 的交接、以及跨包/跨栈 parity audit。`stata-code` 负责运行和审计 Stata 这一侧；R、Python、官方数据 MCP 仍是独立工具，通过显式 handoff 文件和 source metadata 衔接。详见 [`skills/stata-code/references/`](skills/stata-code/references/) 和 [`examples/`](examples/)。
 
 ---
 
-## Why this exists
+## 为什么做这个项目
 
-The Stata AI / agent tooling landscape is fragmented; see [References-tools.md](References-tools.md):
+Stata 的 AI / agent 工具生态现在比较分散，详见 [References-tools.md](References-tools.md)：
 
-- Existing MCP servers ([SepineTam/stata-mcp](https://github.com/sepinetam/stata-mcp), [tmonk/mcp-stata](https://github.com/tmonk/mcp-stata)) are **AGPL-3.0**, which is not a fit for closed-source or commercial integration.
-- The popular VS Code AI extension ([hanlulong/stata-mcp](https://github.com/hanlulong/stata-mcp)) is MIT, but it bundles the MCP server inside the extension, making standalone reuse awkward.
-- Each tool wraps `pystata` with its own result shape, so agents have to special-case each integration.
-- Many existing tools were designed for humans first and then bolted onto MCP; they often dump long logs and base64 graph blobs into every reply, burning tokens by default.
+- 现有 MCP server（[SepineTam/stata-mcp](https://github.com/sepinetam/stata-mcp)、[tmonk/mcp-stata](https://github.com/tmonk/mcp-stata)）使用 **AGPL-3.0**，不适合闭源或商业集成。
+- 常用的 VS Code AI 插件（[hanlulong/stata-mcp](https://github.com/hanlulong/stata-mcp)）是 MIT，但 MCP server 被打包在插件内部，不方便单独复用。
+- 每个工具都用自己的方式封装 `pystata`，返回结构不统一，智能体需要为不同工具写特殊处理。
+- 很多工具一开始是为人类交互设计的，再接到 MCP 上；它们经常把 200 行日志和 base64 图片直接塞进回复，默认就大量消耗 token。
 
-`stata-code` is designed to fill that gap:
+`stata-code` 要填补的就是这个空位：
 
-1. **MIT-licensed**, with no copyleft contagion.
-2. One shared result schema for every frontend: [SCHEMA.md](SCHEMA.md).
-3. Agent-native by default: typed errors, structured `r()` / `e()`, log refs, graph refs, and suggestion seeds.
-4. One core, multiple frontends: Jupyter kernel, MCP server, and VS Code extension.
+1. **MIT 许可证**，没有 copyleft 传染问题。
+2. 所有前端共享同一个结果格式：[SCHEMA.md](SCHEMA.md)。
+3. 默认面向智能体：typed errors、结构化 `r()` / `e()`、log refs、graph refs、suggestion seeds。
+4. 一个 core，多个入口：Jupyter kernel、MCP server、VS Code 扩展。
 
-For the project's clean-room policy around AGPL/GPL Stata projects, see [LICENSE-POLICY.md](LICENSE-POLICY.md).
+如果你关心 AGPL/GPL Stata 项目的 clean-room 边界，请看 [LICENSE-POLICY.md](LICENSE-POLICY.md)。
 
 ---
 
-## Install
+## 安装
 
-Requirements: **Stata 17+** (with `pystata` shipped by Stata) and **Python 3.10+**.
+要求：**Stata 17+**（自带 `pystata`）和 **Python 3.10+**。
 
 ```bash
-# from PyPI
+# 从 PyPI 安装
 pip install stata-code
 
-# with the MCP server and Jupyter kernel extras
+# 同时安装 MCP server 和 Jupyter kernel 的额外依赖
 pip install "stata-code[mcp,kernel]"
 
-# or from source (editable install for development)
+# 或者从源码安装（开发用 editable install）
 git clone https://github.com/brycewang-stanford/stata-code.git
 cd stata-code
 pip install -e ".[mcp,kernel]"
 ```
 
-> **Naming note.** The PyPI distribution is `stata-code` (hyphen), but
-> the Python import is `stata_code` (underscore — Python identifiers
-> can't contain hyphens). Same convention as `scikit-learn` →
-> `import sklearn`. So: `pip install stata-code`,
-> `from stata_code import run`.
+> **命名说明。** PyPI 上的发行包名是 `stata-code`（带连字符），
+> 但 Python 导入名是 `stata_code`（下划线 —— Python 标识符不能包含连字符）。
+> 和 `scikit-learn` → `import sklearn` 是同样的约定。
+> 所以：`pip install stata-code`，`from stata_code import run`。
 
-Note: `pystata` is **not** on PyPI; it ships with Stata. `stata-code` auto-discovers it on macOS at `/Applications/Stata/utilities/pystata` and at equivalent Linux / Windows paths. If your install is elsewhere, add it to `PYTHONPATH` before importing.
+注意：`pystata` **不在 PyPI 上**，它随 Stata 一起安装。`stata-code` 会自动在 macOS 的 `/Applications/Stata/utilities/pystata` 以及 Linux / Windows 的对应位置寻找它。如果你的 Stata 安装在其他位置，请在导入前把 `pystata` 加到 `PYTHONPATH`。
 
-Verify the local setup with the read-only doctor:
+安装后可以用只读 doctor 检查本机环境：
 
 ```bash
 stata-code doctor
-stata-code doctor --json          # machine-readable output
-stata-code doctor --no-stata-probe # skip live Stata initialization
+stata-code doctor --json          # 机器可读输出
+stata-code doctor --no-stata-probe # 跳过实时 Stata 初始化
 stata-code doctor --workspace /path/to/project --no-user-config-scan
 ```
 
-The doctor reports the package/Python version, MCP and Jupyter extras, `pystata`
-discovery, console scripts on `PATH`, common project/user MCP client config
-files, client/VS Code configuration hints, and a best-effort Stata
-version/edition probe. It never edits shell, Stata, Claude, Cursor, or VS Code
-config.
+doctor 会报告 package/Python 版本、MCP 和 Jupyter extras、`pystata` 发现结果、
+`PATH` 上的 console scripts、常见项目级/用户级 MCP client 配置文件、
+client/VS Code 配置提示，以及 best-effort 的 Stata 版本/edition 探测。它不会
+改 shell、Stata、Claude、Cursor 或 VS Code 配置。
 
 ---
 
-## Quick Start
+## 快速开始
 
-See [`examples/`](examples/) for end-to-end cookbook entries: basic regression, DiD, graphs, multi-session, and large matrices.
+完整 cookbook 在 [`examples/`](examples/)：基础回归、DiD、图形、多 session、大矩阵。
 
-### As a Python Library
+### 作为 Python library
 
-The package-level `run()` / `execute()` API uses the same subprocess-backed
-runner as the MCP server, so long calls honor `timeout_ms` and `pystata`
-stdout redirection stays isolated from the caller process.
+包级 `run()` / `execute()` API 使用和 MCP server 相同的 subprocess-backed
+runner，因此长任务会遵守 `timeout_ms`，`pystata` 对 stdout 的重定向也会被隔离在 worker 进程中，不会污染调用方进程。
 
 ```python
 from stata_code import run
@@ -186,137 +177,75 @@ else:
         print("hint:", s.action)               # "Did you mean `mpg`?"
 ```
 
-### From the Command Line (Bash)
+### 作为 MCP server
 
-Any agent or script that can shell out gets the same structured engine — no MCP
-required. `stata-code run` executes a `.do` file, one or more `-e` snippets, or
-code piped on stdin, and prints the `RunResult`:
+`pip install "stata-code[mcp]"` 之后，`stata-code-mcp` 会出现在你的 `PATH` 中。可以接到 Claude Code、Cursor、Claude Desktop 等任何兼容 MCP 的客户端里。
 
-```bash
-stata-code run analysis.do                 # run a do-file, text summary
-stata-code run -e "sysuse auto" -e "regress mpg weight"
-stata-code run analysis.do --json          # full RunResult JSON (for agents)
-echo "summarize price" | stata-code run -   # read code from stdin
-stata-code run model.do --graphs out/       # also export graphs to out/
-stata-code run job.do --session modelA --timeout-ms 120000
-```
+#### 用 `claude mcp add` 接入 Claude Code（推荐）
 
-Exit code is `0` on success and `1` on a Stata / adapter error, so it drops into
-CI and scripted fix-and-rerun loops. `stata-code lint analysis.do` runs the
-static checker (unbalanced braces, missing `end`, dangling `///`) without
-touching Stata.
+如果你还没有安装 Claude Code，请先看 [anthropics/claude-code](https://github.com/anthropics/claude-code)。
 
-**Backends — Stata 13+ without pystata.** `--backend` selects how code runs:
-`pystata` (Stata 17+, in-memory sessions), `console` (Stata 13+ batch, no pystata,
-stateless), or `auto` (default: pystata when available, else console). The console
-backend drives the Stata command-line executable and parses the log into the same
-typed `RunResult` — typed `r()`/`e()`, the estimation table, and the error
-taxonomy — so older Stata and pystata-free environments are first-class:
+最快的方式是 `claude mcp add` 命令。根据想要的可见范围选 scope：
 
 ```bash
-stata-code run analysis.do --backend console
-export STATA_CODE_STATA_CLI=/usr/local/stata18/stata-mp   # if not auto-found
-```
-
-**Zero-Python binary.** A standalone `stata-code` executable (built by
-[`scripts/build_standalone.py`](scripts/build_standalone.py), with a ready-to-use
-CI workflow template at
-[`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml))
-bundles the runtime and needs no Python install. Paired with `--backend console`,
-it is a fully Python-free path to typed Stata results.
-
-### One-Command Client Setup
-
-`stata-code setup` writes the MCP server entry into a client's config — the
-opt-in, mutating counterpart to the read-only `doctor`. It preserves other
-servers and backs up any file it overwrites:
-
-```bash
-stata-code setup --all                 # Claude Code, Cursor, VS Code (project)
-stata-code setup --claude --dry-run    # preview without writing
-stata-code setup --vscode --python .venv/bin/python   # pin an interpreter
-stata-code setup --codex               # print a copy-paste TOML snippet
-```
-
-### Command Safety
-
-By default the runner blocks OS-escape and file-deletion commands (`shell`,
-`winexec`, `erase`, `rm`, `rmdir`, and the `!` shell escape) *before* they reach
-Stata, so an autonomous agent loop can't delete files or run arbitrary shell
-commands. A block returns a `policy_blocked` result (`rc=-4`) rather than
-running. It is a guard rail, not a sandbox; tune it with environment variables:
-
-```bash
-STATA_CODE_COMMAND_POLICY=off      # disable the guard entirely
-STATA_CODE_POLICY_ALLOW=shell      # allow specific commands (comma-separated)
-STATA_CODE_POLICY_BLOCK=python     # block additional commands
-```
-
-### As an MCP Server
-
-After `pip install "stata-code[mcp]"`, the `stata-code-mcp` binary is on your `PATH`. You can wire it into Claude Code, Cursor, Claude Desktop, or any other MCP-compatible client.
-
-#### Claude Code via `claude mcp add` (recommended)
-
-If you have not installed Claude Code yet, see [anthropics/claude-code](https://github.com/anthropics/claude-code).
-
-The fastest way is the `claude mcp add` CLI. Pick a scope based on how widely you want `stata-code` available:
-
-```bash
-# user scope — install once, available in every Claude Code workspace on this machine
+# user scope —— 一次安装，本机所有 Claude Code workspace 全局可用
 claude mcp add stata-code --scope user -- stata-code-mcp
 
-# local scope — only for the current workspace (your local Claude config, not committed)
+# local scope —— 仅当前 workspace（本地 Claude 配置，不会提交到仓库）
 claude mcp add stata-code --scope local -- stata-code-mcp
 
-# project scope — written into ./.mcp.json so collaborators on this repo share it
+# project scope —— 写入仓库内的 ./.mcp.json，和协作者共享
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 19 tools (`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 19 个工具（`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
 
-#### Error Recovery in Agent Workflows
+#### Agent 工作流里的报错恢复
 
-`stata_run` does not rewrite the source `.do` file or change code on its own. It executes the submitted Stata code, so that code may still create logs, graphs, tables, or other outputs as usual. When Stata fails, `stata_run` returns typed diagnostics (`error.kind`, `error.message`, `error.line`, `error.context`) plus best-effort `suggestions`. That supports two distinct Claude Code workflows:
+`stata_run` 不会自行改写源 `.do` 文件或替你改代码。它执行提交的 Stata 代码，所以代码本身仍可能照常生成日志、图形、表格或其他输出。Stata 报错时，`stata_run` 返回结构化诊断（`error.kind`, `error.message`, `error.line`, `error.context`）和尽力生成的 `suggestions`。这支持两种不同的 Claude Code 工作流：
 
-- For "run this do-file" or "verify this code", Claude can report the failure and suggested next steps without changing source files.
-- For "fix this and rerun until it passes", Claude can use the same structured error fields to edit the `.do` file, call `stata_run` again, and iterate.
+- 如果你说的是「运行这个 do-file」或「验证这段代码」，Claude 可以只报告失败原因和建议的下一步，不修改源文件。
+- 如果你明确说「帮我修到跑通」或「修复并反复运行直到成功」，Claude 可以基于同一组结构化错误字段修改 `.do` 文件，再调用 `stata_run` 继续迭代。
 
-If you want the repair loop, say so explicitly. Otherwise, treat failed runs as diagnostics first, not as automatic permission to rewrite code.
+如果需要自动修复循环，请明确说出来。否则，失败的运行应先被视为诊断结果，而不是自动改写代码的授权。
 
-#### `uvx` (no global pip install)
+#### 用 `uvx`（不必全局 pip install）
 
-If you prefer not to `pip install stata-code` globally, run it ephemerally through [`uv`](https://github.com/astral-sh/uv):
+如果不想全局 `pip install stata-code`，可以用 [`uv`](https://github.com/astral-sh/uv) 临时运行：
 
 ```bash
 claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-code-mcp
 ```
 
-`uvx` will resolve and cache `stata-code` on first launch. Note: `pystata` is **not** on PyPI, so it still has to be locatable on the host. The runner adds the standard Stata install path (e.g. `/Applications/Stata/utilities/pystata` on macOS) to `sys.path` automatically; if your Stata lives elsewhere, set `PYTHONPATH` in the env block.
+`uvx` 会在首次启动时下载并缓存 `stata-code`。注意：`pystata` **不在 PyPI 上**，仍需要在宿主机上能找到。runner 会自动把标准 Stata 安装路径（macOS 上的 `/Applications/Stata/utilities/pystata` 等）加到 `sys.path`；如果你的 Stata 在别处，请用 env 设置 `PYTHONPATH`。
 
-#### Claude Code via plugin marketplace
+#### 通过 plugin marketplace 接入 Claude Code
 
-This repository also ships a Claude Code plugin manifest (`.claude-plugin/`). Once you've added the marketplace to your Claude Code config, two commands wire up both the MCP server and the agent skill that teaches Claude the v1.0 result schema:
+本仓库还带有 Claude Code 插件清单（`.claude-plugin/`）。把 marketplace 加入你的 Claude Code 配置后，两条命令即可同时接好 MCP server 和教会 Claude v1.0 结果 schema 的 agent skill：
 
 ```bash
 claude plugin marketplace add brycewang-stanford/stata-code
 claude plugin install stata-code
 ```
 
-The plugin registers the `stata-code` MCP server and installs the [`stata-code` skill](skills/stata-code/SKILL.md) so Claude branches on `error.kind`, calls `get_log(ref)` lazily, and uses the notebook-edit tools without you re-explaining them every session.
+插件会注册 `stata-code` MCP server，并安装 [`stata-code` skill](skills/stata-code/SKILL.md)，让 Claude 学会按 `error.kind` 分支、惰性调用 `get_log(ref)`、并直接使用 notebook 编辑工具，无需每个会话重新解释。
 
-#### Other MCP clients (Cursor / Claude Desktop / Cline / Continue / Windsurf / Antigravity)
+#### 其它 MCP client（Cursor / Claude Desktop / Cline / Continue / Windsurf / Antigravity）
 
-Most non-Claude-Code MCP clients accept the same JSON snippet. Drop it into the client's MCP config file:
+大多数非 Claude Code 的 MCP client 都接受同一段 JSON 配置。把它放进对应 client 的 MCP 配置文件即可：
 
-| Client | Config file |
+| Client | 配置文件 |
 | --- | --- |
-| Claude Desktop | macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`; Windows: `%APPDATA%\Claude\claude_desktop_config.json` |
-| Cursor | `~/.cursor/mcp.json` (user) or `<workspace>/.cursor/mcp.json` (project) |
+| Claude Desktop | macOS：`~/Library/Application Support/Claude/claude_desktop_config.json`；Windows：`%APPDATA%\Claude\claude_desktop_config.json` |
+| Cursor | `~/.cursor/mcp.json`（用户级）或 `<workspace>/.cursor/mcp.json`（项目级） |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
-| Cline (VS Code) | settings: `cline.mcpServers` |
-| Continue | `~/.continue/config.json` under `experimental.modelContextProtocolServers` |
-| Antigravity / generic | `~/.claude/mcp.json` or whatever the client documents |
+| Cline（VS Code） | settings 中的 `cline.mcpServers` |
+| Continue | `~/.continue/config.json` 的 `experimental.modelContextProtocolServers` |
+| Antigravity / 通用 | `~/.claude/mcp.json` 或该 client 文档指定的位置 |
+
+#### 手动 JSON 配置（Cursor / Claude Desktop / 兜底方案）
+
+对于没有 `mcp add` CLI 的客户端，直接编辑配置文件即可（`~/.claude/mcp.json`、Cursor settings、Claude Desktop 的 `claude_desktop_config.json` 等）：
 
 ```json
 {
@@ -328,157 +257,141 @@ Most non-Claude-Code MCP clients accept the same JSON snippet. Drop it into the 
 }
 ```
 
-Or, when the binary is not on `PATH`, run it as a module:
+如果 `stata-code-mcp` 不在 `PATH` 上，也可以以 module 方式运行：
 
 ```bash
 python -m stata_code.mcp
 ```
 
-When `stata-code-mcp` lives inside a project virtualenv (recommended for reproducibility), point the client at the absolute path:
+如果 `stata-code-mcp` 安装在项目内 virtualenv（推荐用于可复现环境），建议在
+client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`。
 
-```json
-{
-  "mcpServers": {
-    "stata-code": {
-      "command": "/abs/path/to/.venv/bin/stata-code-mcp"
-    }
-  }
-}
-```
+#### MCP 故障排查
 
-For `uvx`-only setups, set `"command": "uvx"` and `"args": ["--from", "stata-code", "stata-code-mcp"]`.
+如果 `stata_run` 返回 `adapter_crash`，并出现 `worker emitted non-JSON: '\n'`，
+请升级到 `stata-code>=0.6.4`，然后重启 MCP client，让它启动新的 server 进程。
+同时确认 client 解析到的是预期的 `stata-code-mcp`；项目内 virtualenv 安装
+应使用 `.venv/bin/stata-code-mcp` 的绝对路径，不要依赖全局 `PATH`。
 
-#### MCP troubleshooting
+如果 OpenAI 系客户端返回 `API Error: 400 Invalid schema for function
+'mcp__stata-code__notebook_insert_cell'`，并提到顶层 `oneOf`，请升级到
+`stata-code>=0.6.5`，然后重启 MCP client。旧 server 进程在重启前仍会继续
+暴露旧 schema。
 
-If `stata_run` reports `adapter_crash` with `worker emitted non-JSON: '\n'`,
-upgrade to `stata-code>=0.6.4`, then restart the MCP client so it launches a
-fresh server process. Also check that the client is resolving the expected
-`stata-code-mcp` binary; project virtualenv installs should use the absolute
-`.venv/bin/stata-code-mcp` path instead of relying on a global `PATH` entry.
+MCP server 注册了 19 个工具：
 
-If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
-'mcp__stata-code__notebook_insert_cell'` and mentions a top-level `oneOf`,
-upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
-processes keep advertising the stale schema until they are restarted.
-
-The MCP server registers 19 tools:
-
-| Tool | Purpose |
+| 工具 | 用途 |
 | --- | --- |
-| `stata_run` | Execute Stata code and return a v1.0 RunResult JSON |
-| `stata_info` | Report Stata edition, version, and capabilities |
-| `get_log` | Fetch the full log behind a `log://` ref |
-| `search_log` | Search matching lines inside a stored `log://` payload |
-| `get_graph` | Fetch graph bytes behind a `graph://` ref (`ImageContent`) |
-| `get_matrix` | Fetch matrix payloads behind a `matrix://` ref |
-| `inspect_data` | Run `describe` + `codebook` and return compact dataset metadata |
-| `lint_do` | Statically check do-file source (unbalanced braces, missing `end`, dangling `///`) before spending a run |
-| `install_package` | Install an SSC or explicit `net install` package and verify it resolves |
-| `list_sessions` | Enumerate live sessions |
-| `cancel_session` | Cancel a session; the subprocess-backed path terminates in-flight runs and short-circuits pending ones |
-| `reset_session` | Drop a session's data |
-| `notebook_outline` | Compact per-cell index of a `.ipynb` (cell_id, type, preview) |
-| `notebook_get_cell` | One cell's full source plus a token-economic outputs summary |
-| `notebook_locate` | Find cells by snippet / regex / pasted error text |
-| `notebook_edit_cell` | Atomically replace one cell's source (preserves id, clears outputs) |
-| `notebook_insert_cell` | Insert a new cell with a fresh nbformat 4.5+ UUID |
-| `notebook_delete_cell` | Remove a cell by id |
-| `list_runs` | Query run-bundle manifests (filter by notebook / cell_id / session / since / ok, page with limit / offset) |
+| `stata_run` | 执行 Stata code，返回 v1.0 RunResult JSON |
+| `stata_info` | 返回 Stata edition、version 和 capabilities |
+| `get_log` | 通过 `log://` ref 获取完整日志 |
+| `search_log` | 在已存储的 `log://` payload 内搜索匹配行 |
+| `get_graph` | 通过 `graph://` ref 获取图形 bytes（`ImageContent`） |
+| `get_matrix` | 通过 `matrix://` ref 获取矩阵 `{rows, cols, values}` |
+| `inspect_data` | 运行 `describe` + `codebook`，返回紧凑的数据集元数据 |
+| `lint_do` | 在执行前静态检查 do 文件源代码（花括号不匹配、缺少 `end`、悬空 `///`） |
+| `install_package` | 安装 SSC 或显式 `net install` 包，并验证命令可解析 |
+| `list_sessions` | 列出 live sessions |
+| `cancel_session` | 取消某个 session；subprocess-backed 路径会终止运行中的 worker，也会短路尚未开始的运行 |
+| `reset_session` | 清空某个 session 的数据 |
+| `notebook_outline` | `.ipynb` 的 cell 索引（cell_id、类型、源代码预览） |
+| `notebook_get_cell` | 单个 cell 的完整源代码 + 节流版输出摘要 |
+| `notebook_locate` | 用 snippet / regex / 报错文本定位 cell |
+| `notebook_edit_cell` | 原子替换 cell 源代码（保留 id，清空 outputs） |
+| `notebook_insert_cell` | 插入新 cell，分配新的 nbformat 4.5+ UUID |
+| `notebook_delete_cell` | 按 id 删除 cell |
+| `list_runs` | 查询 run-bundle manifest（按 notebook / cell_id / session / since / ok 过滤，用 limit / offset 翻页） |
 
-For modern MCP clients, these tools now return structured results through
-`structuredContent` with `outputSchema` metadata, while still keeping the
-serialized JSON text block for older clients. The server also exposes MCP
-resources:
+对于新版 MCP 客户端，这些工具会返回 `structuredContent`，并在 tool
+metadata 里声明 `outputSchema`；同时仍保留序列化 JSON text block，兼容旧客户端。
+server 还暴露 MCP resources：
 
-| Resource | Purpose |
+| Resource | 用途 |
 | --- | --- |
-| `stata://schema/run-result` | JSON Schema for `stata_run` structured output |
-| `stata://server/capabilities` | Server instructions, tools, and resource templates |
-| `stata://sessions` | Current subprocess-backed Stata sessions |
-| `log://...` | Full log text from a truncated `stata_run` result |
-| `graph://...` | Captured graph image bytes |
-| `matrix://...` | Deferred large matrix payloads |
+| `stata://schema/run-result` | `stata_run` 结构化输出的 JSON Schema |
+| `stata://server/capabilities` | server instructions、tools、resource templates |
+| `stata://sessions` | 当前 subprocess-backed Stata sessions |
+| `log://...` | 被截断运行结果背后的完整日志 |
+| `graph://...` | 捕获到的 graph image bytes |
+| `matrix://...` | 延迟获取的大矩阵 payload |
 
-MCP prompts are available for common agent workflows:
-`run_do_file_and_report`, `debug_stata_error`,
-`fix_and_rerun_until_passes`, `replication_audit`,
-`plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`,
-`summarize_estimation_results`, `run_notebook_cell_and_report`,
-`fix_and_rerun_notebook_cell`, `did_event_study`, `iv_2sls`, `rdd`,
-`publication_table`, and `cross_validate_did`.
+同时提供 MCP prompts：`run_do_file_and_report`、`debug_stata_error`、
+`fix_and_rerun_until_passes`、`replication_audit`、
+`plan_cross_stack_parity_audit`、`data_mcp_to_stata_handoff`、
+`summarize_estimation_results`、`run_notebook_cell_and_report`、
+`fix_and_rerun_notebook_cell`、`did_event_study`、`iv_2sls`、`rdd`、
+`publication_table` 和 `cross_validate_did`，用于常见 agent 工作流。
 
-### As a Jupyter Kernel
+### 作为 Jupyter kernel
 
-`stata-code` ships a Jupyter kernel as part of the Python package — there is no separate "Jupyter plugin" in the JupyterLab extension marketplace. Installation is two steps: `pip install` the package with the `kernel` extra, then register the kernelspec with Jupyter.
+`stata-code` 的 Jupyter 支持是以 **kernel** 形式打包在 Python 包里的 —— JupyterLab 插件市场里**没有**独立的 "stata-code 插件"。安装分两步：先 `pip install` 安装带 `kernel` extra 的包，再把 kernelspec 注册到 Jupyter。
 
-**Prerequisites**: Stata 17+ installed locally with a valid license (the kernel calls Stata via `pystata`), and Python 3.10+ with `jupyter`/`jupyterlab` already on the same environment.
+**前置条件**：本机已经安装 Stata 17+ 且持有合法许可证（kernel 通过 `pystata` 调用本地 Stata），同一个 Python 环境里已经装好 `jupyter`/`jupyterlab`，Python 版本 ≥ 3.10。
 
 ```bash
-# 1. Install stata-code with the kernel extra (pulls in ipykernel)
+# 1. 安装带 kernel extra 的 stata-code（会同时装上 ipykernel）
 pip install "stata-code[kernel]"
 
-# 2. Register the kernelspec into Jupyter's user data dir
+# 2. 把 kernelspec 注册到当前用户的 Jupyter data dir
 stata-code-kernel install --user
-# Or, equivalently:
+# 等价命令：
 # python -m stata_code.kernel install --user
 ```
 
-Verify the kernel is registered:
+检查 kernel 是否注册成功：
 
 ```bash
 jupyter kernelspec list
-# should include an entry named `stata`
+# 输出里应该能看到名为 `stata` 的条目
 ```
 
-Then open Jupyter Notebook / JupyterLab (or a `.ipynb` in VS Code), pick **Stata** in the kernel selector, and run Stata commands in cells. Logs, graphs, and warnings render inline.
+然后打开 Jupyter Notebook / JupyterLab（或 VS Code 中的 `.ipynb`），在 kernel 选择器里挑 **Stata**，cell 里直接写 Stata 命令即可，日志、graphs 和 warnings 会以内联方式显示。
 
-> JupyterLab's Extension Manager only installs front-end JS extensions, so it cannot install a kernel — `pip install` plus the `install --user` step above is the only supported path.
+> JupyterLab 的 Extension Manager 只能安装前端 JS 扩展，**装不了 kernel**。所以上面的 `pip install` + `install --user` 是唯一支持的安装路径。
 
-### As a VS Code Extension
+### 作为 VS Code 扩展
 
-The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a **seven-view sidebar** (sessions / last result / **data variables** / run history / logs / graphs / **outputs**) — including an agent-native equivalent of Stata's **Variables window** and an **Outputs** panel that surfaces the `esttab` tables and `export` files each run writes to disk — status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors.
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
 
 ```bash
-# from the VS Code CLI
+# 从 VS Code 命令行
 code --install-extension brycewang-stanford.stata-code-vscode
 ```
 
-Or open the **Extensions** sidebar in VS Code and search `stata-code`. The extension is also available from [Open VSX](https://open-vsx.org/) so Cursor, Windsurf, and other VS Code-compatible editors can install it without going through the Microsoft Marketplace.
+或者打开 VS Code 的 **Extensions** 侧栏，搜索 `stata-code`。扩展同时发布在 [Open VSX](https://open-vsx.org/)，因此 Cursor、Windsurf 等 VS Code 兼容编辑器不必经过微软 Marketplace 也能安装。
 
-On first activation the extension probes for `stata-code-mcp` on `PATH` (and in any workspace `.venv` / `venv`). If nothing resolves, it shows a one-time install hint with the exact `pip install "stata-code[mcp]"` command — choose **Don't show again** to silence it for the installed extension version.
+首次激活时，扩展会在 `PATH`（以及 workspace 下的 `.venv` / `venv`）里探测 `stata-code-mcp`。如果找不到，会弹出一次性的安装提示，附上准确的 `pip install "stata-code[mcp]"` 命令——选择 **Don't show again** 可对当前扩展版本永久静默。
 
-If the extension or an MCP client cannot find the server, run
-`stata-code doctor --no-stata-probe` in the same Python environment. It reports
-whether `stata-code-mcp` is on `PATH` and suggests absolute-path or
-`python -m stata_code.mcp` fallbacks for GUI clients whose `PATH` differs from
-your shell. It also reads common MCP config files in the current workspace and
-user config directories so you can see whether a client is already wired to
-`stata-code`.
+扩展仍然依赖系统 Python 上安装了 MCP extra（`pip install "stata-code[mcp]"`），从而保证 `stata-code-mcp` 在 `PATH` 上可用，并且能导入 MCP SDK。和其它前端一样，需要 Stata 17+ 和有效的 Stata 许可证。
 
-#### Cell and section conventions
+#### Cell 与 section 约定
 
-The extension recognizes two complementary structural markers inside `.do` files. Either can be mixed in the same file; they do not conflict.
+扩展识别 `.do` 文件里两类互补的结构标记。二者可以混用在同一个文件里，互不冲突：
 
-| Marker | Purpose | Example |
+| 标记 | 用途 | 示例 |
 | --- | --- | --- |
-| `* %% [title]` | Cell boundary. Each marker gets a **▶ Run Cell** code-lens; "Run Cell" submits the lines between this marker and the next one. Compatible with the Jupyter-style cell convention used by `kylebutts/vscode-stata`. | `* %% 02 model fit` |
-| `**# title` … `**###### title` | Section heading, 1–6 levels deep. Each heading gets a **▶ Run Section** code-lens and contributes to the Outline view. "Run Section" submits the heading through the next equal- or higher-level heading, matching the hierarchical execution model from `ZihaoVistonWang.stata-all-in-one`. | `**## DiD specification` |
+| `* %% [标题]` | Cell 边界。每个标记有一个 **▶ Run Cell** code-lens；"Run Cell" 提交该标记到下一个标记之间的内容。与 `kylebutts/vscode-stata` 的 Jupyter 风格 cell 约定兼容。 | `* %% 02 model fit` |
+| `**# 标题` … `**###### 标题` | Section 标题，1–6 级。每个标题有一个 **▶ Run Section** code-lens，并进入 Outline 视图。"Run Section" 提交该标题到下一个同级或更高级标题之间的内容，与 `ZihaoVistonWang.stata-all-in-one` 的层级执行模型一致。 | `**## DiD specification` |
 
-`program define … end` blocks are also surfaced in the Outline, nested under whichever section contains them.
+`program define … end` 代码块也会出现在 Outline 里，嵌套在所属 section 之下。
 
-The extension still requires the MCP extra on your system Python (`pip install "stata-code[mcp]"`), so that `stata-code-mcp` resolves on `PATH` and can import the MCP SDK. Stata 17+ and a valid Stata license are required as for any other frontend.
+如果扩展或 MCP client 找不到 server，请在同一个 Python 环境里运行
+`stata-code doctor --no-stata-probe`。它会报告 `stata-code-mcp` 是否在
+`PATH` 上，并提示 GUI client 常见的绝对路径或 `python -m stata_code.mcp`
+兜底配置。它也会读取当前 workspace 和用户目录里常见的 MCP 配置文件，告诉你
+client 是否已经指向 `stata-code`。
 
 ---
 
-## Token-Economy Defaults
+## 默认节省 token
 
-A typical `stata_run` response is about **10x smaller** than servers that dump logs and images directly. Three design choices drive this:
+典型的 `stata_run` 响应比现有 MCP server 直接返回日志和图片的方式小约 **10 倍**。核心设计有三点：
 
-1. **Logs return `head` + `tail` + `ref`** by default. Full logs are fetched on demand via `get_log(ref)`. A Stata regression log can be about 6,000 tokens; `stata-code` returns about 600 by default.
-2. **Graphs return refs, not inline base64**. A 30 KB PNG can become about 50,000 base64 tokens; returning a ref avoids that unless the agent actually needs the bytes.
-3. **Errors are typed**. Agents can check `err.kind == "varname_not_found"` instead of regex-parsing English logs.
+1. **日志默认只返回 `head` + `tail` + `ref`**。完整日志可以按需用 `get_log(ref)` 获取。Stata 回归日志可能有约 6,000 tokens，`stata-code` 默认约 600 tokens。
+2. **图形默认返回 refs，不内联 base64**。一个 30 KB PNG 转成 base64 约 50,000 tokens；返回 ref 可以让智能体只在真正需要渲染时再取 bytes。
+3. **错误是结构化 typed errors**。智能体可以判断 `err.kind == "varname_not_found"`，而不是正则解析英文日志。
 
-For example, a misspelled variable returns a structured error:
+例如，变量名写错时返回的是结构化错误：
 
 ```json
 {
@@ -500,11 +413,11 @@ For example, a misspelled variable returns a structured error:
 }
 ```
 
-The full schema is in [SCHEMA.md](SCHEMA.md).
+完整 schema 见 [SCHEMA.md](SCHEMA.md)。
 
 ---
 
-## Architecture
+## 架构
 
 ```text
 stata_code/
@@ -516,136 +429,107 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   ├── server.py      # MCP server (19 tools)
-│   └── ...
-├── core/console.py    # console (batch) backend — Stata 13+, no pystata
+│   └── server.py      # MCP server (19 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
 
-`runner.py` is the only place that directly talks to `pystata`. The public Python API and MCP server route calls through `_pool.py`, whose workers call `runner.execute()` in an isolated subprocess; the Jupyter kernel uses the in-process runner for notebook interactivity.
+`runner.py` 是唯一直接接触 `pystata` 的地方。包级 Python API 和 MCP server 会先走 `_pool.py`，由隔离的 worker subprocess 调用 `runner.execute()`；Jupyter kernel 为了 notebook 交互性仍使用 in-process runner。
 
 ---
 
-## Comparison
+## 对比
 
-| | stata-code | SepineTam/stata-mcp | hanlulong/stata-mcp | stata-all-in-one | nbstata |
-| --- | --- | --- | --- | --- | --- |
-| License | **MIT** | AGPL-3.0 | MIT | MIT | GPL-3.0 |
-| Standalone MCP | ✓ | ✓ | bundled with VS Code | — (bespoke HTTP + copy-paste) | — |
-| Jupyter kernel | ✓ | — | — | — | ✓ |
-| Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | raw log to the agent | per-tool |
-| Typed errors + suggestions | ✓ (32 kinds) | — | — | — | — |
-| Token-economy defaults | ✓ (log refs, graph refs) | — | — | — | — |
-| Command-safety guard | ✓ (`shell`/`erase`/`rmdir`/`!`) | ✓ (27-rule) | — | — | — |
-| Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — | — |
-| One-command client setup | ✓ (`stata-code setup`) | ✓ (`install --all`) | bundled | — | — |
-| Static pre-run lint | ✓ (`lint_do`) | — | — | — | — |
-| Stata 13–16 (no pystata) | ✓ (console backend) | ✓ | — | ✓ (COM/dylib) | — |
-| Zero-Python install | ✓ (standalone binary) | — | — | ✓ (VS Code-native) | — |
-| Human IDE polish (data viewer, inline graphs) | growing | — | ✓ | ✓ (strongest) | ✓ |
-| Multi-session | ✓ (Stata frames) | partial | — | — | — |
-| Mature ecosystem | early | ✓ (statamcp.com) | ✓ (11k installs) | ✓ (distributor-backed) | ✓ |
+| | stata-code | SepineTam/stata-mcp | hanlulong/stata-mcp | nbstata |
+| --- | --- | --- | --- | --- |
+| 许可证 | **MIT** | AGPL-3.0 | MIT | GPL-3.0 |
+| 独立 MCP | ✓ | ✓ | 与 VS Code 捆绑 | — |
+| Jupyter kernel | ✓ | — | — | ✓ |
+| 统一结果格式 | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
+| 默认节省 token | ✓ (log refs, graph refs) | — | — | — |
+| 结构化错误和建议 | ✓ (32 kinds) | — | — | — |
+| 多 session | ✓ (Stata frames) | partial | — | — |
+| 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
-`stata-code` owns the **agent-native, typed-contract** lane: one structured
-`RunResult` schema across MCP, Jupyter, VS Code, and a plain-terminal CLI; a
-32-kind error taxonomy with recovery contracts; token-economy refs; and now a
-console backend (Stata 13+) plus a zero-Python binary. Editor-first tools like
-`stata-all-in-one` lead on human IDE polish and hand the agent raw log text;
-`stata-code` matches their onboarding/version reach while keeping the typed
-execution contract they don't have. See
-[docs/competitive-landscape.md](docs/competitive-landscape.md) for the full
-teardown.
+`stata-code` 是这个问题空间里更年轻的、MIT 许可证的、agent-native 的替代方案。AGPL 方案里，SepineTam 的 `stata-mcp` 目前更成熟；`stata-code` 的目标是服务那些不能接受 copyleft 传染、又需要结构化智能体接口的场景。
 
 ---
 
-## Roadmap
+## 路线图
 
-### Done (current tree)
+### 已完成（当前代码树）
 
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
-- `pystata`-based runner with native-typed `r()`, `e()`, and matrices
-- Multi-session via Stata frames (`session_id` accepts `[A-Za-z0-9_-]+`; ids such as `model-a` are mapped to private legal frame names internally while the public id is echoed back)
-- Per-line error attribution: line number, context, commands_executed
-- Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
-- Log truncation with ref store
-- Warning extraction: 5 categories + generic notes
-- 32-kind error taxonomy with canonical suggestions
-- MCP server: 19 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
-- Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
-- Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
-- Console (batch) backend (`core/console.py`, `--backend console`, `run_console()`): drives the Stata command-line executable, parses the log into the same typed `RunResult`, and supports **Stata 13+ with no pystata**
-- Zero-Python standalone binary ([`scripts/build_standalone.py`](scripts/build_standalone.py) + CI workflow template [`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml)); with `--backend console` it is a fully Python-free path to typed results
-- One-click VS Code onboarding: the extension offers to create a workspace `.venv` and install the server (command palette: “Stata: Set Up MCP Server”)
-- Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
-- Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
-- Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
-- Per-cell repair loop on `.ipynb` via `notebook_outline` / `notebook_get_cell` / `notebook_edit_cell` with optimistic-concurrency `expected_source` guards and `origin_cell_id` echo on `RunResult`
-- Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok; page with limit / offset)
-- Read-only `stata-code doctor` / `verify` diagnostics for package version,
-  extras, `pystata` discovery, console scripts, client hints, and optional live
-  Stata version probing
-- Economist workflow layer: skill references and examples for modern DiD,
-  IV/weak-IV, RDD, table export, data-MCP handoff, and cross-stack parity
-  audits
-- JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
-- VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, seven-view sidebar (sessions / last result / data variables / run history / logs / graphs / outputs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
-- Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
+- 基于 `pystata` 的 runner，原生类型化的 `r()`、`e()` 和矩阵
+- 通过 Stata frames 支持多 session（`session_id` 接受 `[A-Za-z0-9_-]+`；例如 `model-a` 这类 id 会在内部映射到合法的私有 frame 名，但返回结果仍回显公开 id）
+- 行级错误归属：line number、context、commands_executed
+- 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
+- 日志截断 + ref store
+- 警告抽取：5 类 + 通用 notes
+- 31 类错误分类法 + 标准化建议
+- MCP server：19 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）和包安装（`install_package`）
+- 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
+- Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置
+- Console（批处理）后端（`core/console.py`、`--backend console`、`run_console()`）：驱动 Stata 命令行、把日志解析成同一套带类型的 `RunResult`，支持 **Stata 13+ 且无需 pystata**
+- 零 Python 独立二进制（`scripts/build_standalone.py` + CI 工作流模板 `packaging/standalone.github-workflow.yml`）；配合 `--backend console` 是完全不依赖 Python 的一条龙
+- VS Code 一键上手：扩展可自动在工作区创建 `.venv` 并安装 server（命令面板：“Stata: Set Up MCP Server”）
+- 中文快速上手指南：[docs/quickstart.zh.md](docs/quickstart.zh.md)
+- Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
+- 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
+- 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`
+- `.ipynb` 单 cell 修复闭环：`notebook_outline` / `notebook_get_cell` / `notebook_edit_cell`，并通过 `expected_source` 做乐观并发控制；`stata_run` 回显 `origin_cell_id`
+- 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`，并用 limit / offset 翻页
+- 只读 `stata-code doctor` / `verify` 诊断：检查 package 版本、extras、
+  `pystata` 发现、console scripts、client 配置提示，以及可选的实时 Stata
+  版本探测
+- 经济学实证工作流层：现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP handoff、跨包/跨栈 parity audit 的 skill references 和 cookbook examples
+- 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
+- VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、七视图侧边栏（sessions / last result / data 变量浏览器 / run history / logs / graphs / outputs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
+- Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
-### Next Up
+### 下一步
 
-- Streaming / progress for long runs (`log.complete:false`, incremental log lines) so 20-minute `boottest` / `csdid` jobs report before they finish
-- Hard timeout / cancellation for the Jupyter kernel (move it from the direct in-process runner to the subprocess pool, or an equivalent)
-- Console backend: graph capture and richer matrix coverage (values currently materialized for the estimation matrices; state is per-call)
-- Human IDE polish to match editor-first tools: inline graph rendering + DPI export, a scalable data viewer, and an optional "attach to a running Stata" backend
-- Publish the reliability/token [benchmark](benchmarks/) results (typed contract vs. raw-log tools) as evidence, not a claim
-- **v1.0** — Stable schema, broader Stata edition coverage
+- Stata 11–16 的 console fallback，按 v1.0 schema 重新实现
+- 决定 Jupyter kernel 是否也迁到 subprocess pool，或者继续清楚记录当前为了交互性保留 in-process runner 的取舍
+- VS Code 体验打磨：Extension Host 端到端测试、首次启动诊断、命令面板 UX
+- **v1.0** —— 稳定 schema，覆盖更广的 Stata edition
 
-See [docs/competitive-landscape.md](docs/competitive-landscape.md) for how these
-priorities line up against comparable tools, and [SCHEMA.md §7](SCHEMA.md) for
-explicitly out-of-scope items.
+明确不做的范围见 [SCHEMA.md §7](SCHEMA.md)。
 
 ---
 
-## Testing
+## 测试
 
 ```bash
 pip install -e ".[dev,mcp,kernel]"
-pytest                              # full suite, including Stata tests when Stata is available
-pytest -m "not stata_required"      # CI subset; no Stata needed
-pytest -m "stata_required" -v       # real-Stata integration tests only
+pytest                              # 完整测试集；本机有 Stata 时包含真实 Stata 集成测试
+pytest -m "not stata_required"      # CI 子集，不需要 Stata
+pytest -m "stata_required" -v       # 仅 Stata 集成测试
 ```
 
-The `stata_required` marker tags the real-Stata integration tests. CI uses `pytest -m "not stata_required"` so it does not collect them. Locally without Stata, those tests skip cleanly with the `"pystata / Stata 17+ not available"` message.
+`stata_required` marker 标记真实 Stata 集成测试。CI 使用 `pytest -m "not stata_required"`，因此不会收集这些测试。本地没有 Stata 时，这些测试也会用 `"pystata / Stata 17+ not available"` 信息 cleanly skip。
 
 ---
 
-## Contributing
+## 贡献
 
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
-development setup, the checks CI runs, and PR guidelines. In short:
-
-- Read [LICENSE-POLICY.md](LICENSE-POLICY.md) before opening a PR.
-- Add a one-line acknowledgement to your first PR description; the template is in the policy file.
-- Tests are required for any new schema field or runner behavior.
-
-Bug reports and support questions go through
-[GitHub issues](https://github.com/brycewang-stanford/stata-code/issues);
-security reports go through [SECURITY.md](SECURITY.md).
+- 提 PR 前请先读 [LICENSE-POLICY.md](LICENSE-POLICY.md)。
+- 第一个 PR description 里请加一行 acknowledgement，模板在 policy 文件里。
+- 新增 schema field 或 runner 行为时必须补测试。
 
 ---
 
-## License
+## 许可证
 
-The code is licensed under [MIT](./LICENSE). [LICENSE-POLICY.md](LICENSE-POLICY.md) explains how this project relates to other Stata projects.
+代码使用 [MIT](./LICENSE)。[LICENSE-POLICY.md](LICENSE-POLICY.md) 说明本项目如何处理和其他 Stata 项目的关系。
 
-## Trademark Notice
+## 商标声明
 
-Stata is a registered trademark of StataCorp LLC. This project is independent and not affiliated with or endorsed by StataCorp.
+Stata 是 StataCorp LLC 的注册商标。本项目是独立项目，不隶属于 StataCorp，也未获得 StataCorp 背书。
 
-## Acknowledgements
+## 致谢
 
-The Stata tooling landscape that this project builds on and learns from is surveyed in [References-tools.md](References-tools.md). All listed projects retain their own licenses and authorship; please consult each repository before reuse.
+本项目参考和学习的 Stata 工具生态整理在 [References-tools.md](References-tools.md)。其中列出的项目保留各自的许可证和作者归属；复用前请查看对应仓库。
 
 ---
 
@@ -666,16 +550,16 @@ The Stata tooling landscape that this project builds on and learns from is surve
 <table>
   <tr>
     <td align="center">
-      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-qrcode.png" alt="Visit copaper.ai" width="160" /></a><br/>
-      <strong>Visit <a href="https://copaper.ai">copaper.ai</a></strong>
+      <a href="https://copaper.ai"><img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-qrcode.png" alt="访问 copaper.ai" width="160" /></a><br/>
+      <strong>访问 <a href="https://copaper.ai">copaper.ai</a></strong>
     </td>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-wechat.jpg" alt="CoPaper.AI WeChat" width="160" /><br/>
-      <strong>WeChat: CoPaper.AI</strong>
+      <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/partners/copaper-wechat.jpg" alt="CoPaper.AI 微信" width="160" /><br/>
+      <strong>微信公众号：CoPaper.AI</strong>
     </td>
   </tr>
 </table>
 
-<sub>Maintained by <a href="https://copaper.ai"><strong>CoPaper.AI</strong></a>, incubated at <a href="https://sccei.fsi.stanford.edu/reap"><strong>Stanford REAP / SCCEI</strong></a> · AI Assistant for Empirical Research</sub>
+<sub>由 <a href="https://copaper.ai"><strong>CoPaper.AI</strong></a> 维护，孵化于 <a href="https://sccei.fsi.stanford.edu/reap"><strong>Stanford REAP / SCCEI</strong></a> · 实证研究 AI 助手</sub>
 
 </div>
