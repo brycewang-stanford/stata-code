@@ -203,6 +203,25 @@ CI and scripted fix-and-rerun loops. `stata-code lint analysis.do` runs the
 static checker (unbalanced braces, missing `end`, dangling `///`) without
 touching Stata.
 
+**Backends — Stata 13+ without pystata.** `--backend` selects how code runs:
+`pystata` (Stata 17+, in-memory sessions), `console` (Stata 13+ batch, no pystata,
+stateless), or `auto` (default: pystata when available, else console). The console
+backend drives the Stata command-line executable and parses the log into the same
+typed `RunResult` — typed `r()`/`e()`, the estimation table, and the error
+taxonomy — so older Stata and pystata-free environments are first-class:
+
+```bash
+stata-code run analysis.do --backend console
+export STATA_CODE_STATA_CLI=/usr/local/stata18/stata-mp   # if not auto-found
+```
+
+**Zero-Python binary.** A standalone `stata-code` executable (built by
+[`scripts/build_standalone.py`](scripts/build_standalone.py), with a ready-to-use
+CI workflow template at
+[`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml))
+bundles the runtime and needs no Python install. Paired with `--backend console`,
+it is a fully Python-free path to typed Stata results.
+
 ### One-Command Client Setup
 
 `stata-code setup` writes the MCP server entry into a client's config — the
@@ -494,7 +513,9 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (19 tools)
+│   ├── server.py      # MCP server (19 tools)
+│   └── ...
+├── core/console.py    # console (batch) backend — Stata 13+, no pystata
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -505,22 +526,33 @@ stata_code/
 
 ## Comparison
 
-| | stata-code | SepineTam/stata-mcp | hanlulong/stata-mcp | nbstata |
-| --- | --- | --- | --- | --- |
-| License | **MIT** | AGPL-3.0 | MIT | GPL-3.0 |
-| Standalone MCP | ✓ | ✓ | bundled with VS Code | — |
-| Jupyter kernel | ✓ | — | — | ✓ |
-| Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
-| Token-economy defaults | ✓ (log refs, graph refs) | — | — | — |
-| Typed errors + suggestions | ✓ (32 kinds) | — | — | — |
-| Command-safety guard | ✓ (blocks `shell`/`erase`/`rmdir`/`!` by default) | ✓ (27-rule guard) | — | — |
-| Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — |
-| One-command client setup | ✓ (`stata-code setup`) | ✓ (`install --all`) | bundled | — |
-| Static pre-run lint | ✓ (`lint_do` / `stata-code lint`) | — | — | — |
-| Multi-session | ✓ (Stata frames) | partial | — | — |
-| Mature ecosystem | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
+| | stata-code | SepineTam/stata-mcp | hanlulong/stata-mcp | stata-all-in-one | nbstata |
+| --- | --- | --- | --- | --- | --- |
+| License | **MIT** | AGPL-3.0 | MIT | MIT | GPL-3.0 |
+| Standalone MCP | ✓ | ✓ | bundled with VS Code | — (bespoke HTTP + copy-paste) | — |
+| Jupyter kernel | ✓ | — | — | — | ✓ |
+| Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | raw log to the agent | per-tool |
+| Typed errors + suggestions | ✓ (32 kinds) | — | — | — | — |
+| Token-economy defaults | ✓ (log refs, graph refs) | — | — | — | — |
+| Command-safety guard | ✓ (`shell`/`erase`/`rmdir`/`!`) | ✓ (27-rule) | — | — | — |
+| Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — | — |
+| One-command client setup | ✓ (`stata-code setup`) | ✓ (`install --all`) | bundled | — | — |
+| Static pre-run lint | ✓ (`lint_do`) | — | — | — | — |
+| Stata 13–16 (no pystata) | ✓ (console backend) | ✓ | — | ✓ (COM/dylib) | — |
+| Zero-Python install | ✓ (standalone binary) | — | — | ✓ (VS Code-native) | — |
+| Human IDE polish (data viewer, inline graphs) | growing | — | ✓ | ✓ (strongest) | ✓ |
+| Multi-session | ✓ (Stata frames) | partial | — | — | — |
+| Mature ecosystem | early | ✓ (statamcp.com) | ✓ (11k installs) | ✓ (distributor-backed) | ✓ |
 
-`stata-code` is the younger, MIT-licensed, agent-native alternative in this problem space. Among the AGPL options, SepineTam's `stata-mcp` is currently more mature; `stata-code` is aimed at cases where copyleft contagion is unacceptable and agents need structured results.
+`stata-code` owns the **agent-native, typed-contract** lane: one structured
+`RunResult` schema across MCP, Jupyter, VS Code, and a plain-terminal CLI; a
+32-kind error taxonomy with recovery contracts; token-economy refs; and now a
+console backend (Stata 13+) plus a zero-Python binary. Editor-first tools like
+`stata-all-in-one` lead on human IDE polish and hand the agent raw log text;
+`stata-code` matches their onboarding/version reach while keeping the typed
+execution contract they don't have. See
+[docs/competitive-landscape.md](docs/competitive-landscape.md) for the full
+teardown.
 
 ---
 
@@ -539,6 +571,9 @@ stata_code/
 - MCP server: 19 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
 - Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
 - Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
+- Console (batch) backend (`core/console.py`, `--backend console`, `run_console()`): drives the Stata command-line executable, parses the log into the same typed `RunResult`, and supports **Stata 13+ with no pystata**
+- Zero-Python standalone binary ([`scripts/build_standalone.py`](scripts/build_standalone.py) + CI workflow template [`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml)); with `--backend console` it is a fully Python-free path to typed results
+- One-click VS Code onboarding: the extension offers to create a workspace `.venv` and install the server (command palette: “Stata: Set Up MCP Server”)
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
@@ -558,8 +593,9 @@ stata_code/
 
 - Streaming / progress for long runs (`log.complete:false`, incremental log lines) so 20-minute `boottest` / `csdid` jobs report before they finish
 - Hard timeout / cancellation for the Jupyter kernel (move it from the direct in-process runner to the subprocess pool, or an equivalent)
-- Console fallback for Stata 11–16, re-implemented against the v1.0 schema
-- Extra VS Code polish: extension-host end-to-end tests, first-run diagnostics, and command palette UX
+- Console backend: graph capture and richer matrix coverage (values currently materialized for the estimation matrices; state is per-call)
+- Human IDE polish to match editor-first tools: inline graph rendering + DPI export, a scalable data viewer, and an optional "attach to a running Stata" backend
+- Publish the reliability/token [benchmark](benchmarks/) results (typed contract vs. raw-log tools) as evidence, not a claim
 - **v1.0** — Stable schema, broader Stata edition coverage
 
 See [docs/competitive-landscape.md](docs/competitive-landscape.md) for how these

@@ -752,16 +752,27 @@ This section tracks how much of the schema is wired up in code. Not normative
   writes the MCP server entry into Claude Code / Cursor / VS Code
   configs (opt-in, merges, backs up).
 
+- **Console (batch) backend** (`core.console`, `Backend.CONSOLE`,
+  `stata_code.run_console()`, `stata-code run --backend console`). Drives
+  the Stata **command-line executable** in batch mode and parses the log
+  plus a marker-delimited results dump into the *same* `RunResult` — typed
+  `r()` / `e()` scalars/macros, the estimation matrices (`e(b)`/`e(V)`/
+  `r(table)`), the error taxonomy, warnings, and dataset metadata. Works
+  with **Stata 13+** and needs **no pystata**, so a standalone binary plus
+  the Stata CLI is a Python-free path to typed results. Trade-offs:
+  stateless per call (no in-memory session), no in-process cancel, graphs
+  not captured yet.
+
 ### Still deferred
 
 - **In-process hard timeout.** `stata_code.core.runner.execute()` still
   runs inside the caller process and cannot preempt code already inside
   `pystata`. Use the package-level `stata_code.run()` / `execute()` or
   MCP server for subprocess-backed timeouts and cancellation.
-- **Console fallback for Stata 11–16.** Earlier scaffold's
-  `ConsoleFallback` was deleted in v0.2 (it produced legacy
-  `StataResult` and didn't fit the new pipeline). v0.3 will reintroduce
-  it built against `RunResult` directly.
+- **Console backend: graphs, sessions, streaming.** The console backend
+  does not yet capture graphs or persist state across calls (each run is a
+  fresh batch process); wide/exotic matrices beyond the estimation set are
+  reported by name only.
 - **Streaming logs** (`log.complete: false`) — v2 of the schema.
 - **Per-stream log split** (`log.streams.{stata, python, mata}`) — v2.
 

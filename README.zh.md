@@ -468,6 +468,10 @@ stata_code/
 - MCP server：19 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）和包安装（`install_package`）
 - 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
 - Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置
+- Console（批处理）后端（`core/console.py`、`--backend console`、`run_console()`）：驱动 Stata 命令行、把日志解析成同一套带类型的 `RunResult`，支持 **Stata 13+ 且无需 pystata**
+- 零 Python 独立二进制（`scripts/build_standalone.py` + CI 工作流模板 `packaging/standalone.github-workflow.yml`）；配合 `--backend console` 是完全不依赖 Python 的一条龙
+- VS Code 一键上手：扩展可自动在工作区创建 `.venv` 并安装 server（命令面板：“Stata: Set Up MCP Server”）
+- 中文快速上手指南：[docs/quickstart.zh.md](docs/quickstart.zh.md)
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`

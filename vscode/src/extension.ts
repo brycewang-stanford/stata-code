@@ -21,6 +21,7 @@ import {
 } from "./formatters";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
+import { buildProvisionPlan } from "./provision";
 import { buildServerLaunchCandidates, DEFAULT_SERVER_COMMAND } from "./serverLaunch";
 import { probeServerLaunch } from "./serverProbe";
 import { nextSessionName, SESSION_ID_RE, validateSessionId } from "./sessionIds";
@@ -211,7 +212,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.refreshSessions", () =>
       sessionsProvider?.refresh(),
     ),
+    vscode.commands.registerCommand("stataCode.setupServer", setupServerCommand),
   );
+}
+
+/** Command-palette entry point for one-click server provisioning. */
+function setupServerCommand(): void {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    vscode.window.showWarningMessage(
+      "stata-code: open a workspace folder first — the server is installed into a workspace .venv.",
+    );
+    return;
+  }
+  provisionServerInTerminal(workspaceRoot);
 }
 
 export function deactivate(): void {
@@ -269,17 +283,26 @@ async function maybePromptForServerInstall(
     "[stata-code] MCP server not found on PATH or workspace venv; prompting user.",
   );
 
+  const INSTALL = "Install automatically";
   const COPY = "Copy install command";
   const DOCS = "Open docs";
   const DONT_ASK = "Don't show again";
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const buttons = workspaceRoot
+    ? [INSTALL, COPY, DOCS, DONT_ASK]
+    : [COPY, DOCS, DONT_ASK];
   const choice = await vscode.window.showWarningMessage(
-    `stata-code: the MCP server "stata-code-mcp" was not found. Install with: ${INSTALL_COMMAND}`,
-    COPY,
-    DOCS,
-    DONT_ASK,
+    `stata-code: the MCP server "stata-code-mcp" was not found. ` +
+      (workspaceRoot
+        ? "Install it automatically into a workspace .venv, or "
+        : "") +
+      `install manually with: ${INSTALL_COMMAND}`,
+    ...buttons,
   );
 
-  if (choice === COPY) {
+  if (choice === INSTALL && workspaceRoot) {
+    provisionServerInTerminal(workspaceRoot);
+  } else if (choice === COPY) {
     await vscode.env.clipboard.writeText(INSTALL_COMMAND);
     vscode.window.showInformationMessage("stata-code: install command copied to clipboard.");
   } else if (choice === DOCS) {
@@ -287,6 +310,23 @@ async function maybePromptForServerInstall(
   } else if (choice === DONT_ASK) {
     await context.globalState.update(INSTALL_HINT_DISMISSED_KEY, extensionVersion);
   }
+}
+
+/**
+ * Run the one-click provisioning plan in an integrated terminal. We use a
+ * terminal (rather than a hidden child process) so the user sees pip's output
+ * and can retry on failure. Once the `.venv` exists, `serverLaunch.ts` discovers
+ * it automatically on the next MCP client reset.
+ */
+function provisionServerInTerminal(workspaceRoot: string): void {
+  const plan = buildProvisionPlan({ workspaceRoot });
+  const terminal = vscode.window.createTerminal("stata-code setup");
+  terminal.show();
+  terminal.sendText(plan.terminalCommand);
+  vscode.window.showInformationMessage(
+    "stata-code: creating a workspace .venv and installing the server. " +
+      "When pip finishes, reload the window (or it will be picked up on the next run).",
+  );
 }
 
 async function runSelection(wholeFile: boolean): Promise<void> {

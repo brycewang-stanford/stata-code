@@ -253,6 +253,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "stataCode.setupServer",
+        "title": "Stata: Set Up MCP Server (create .venv)",
+        "category": "stata-code"
+      },
+      {
         "command": "stataCode.openLog",
         "title": "Stata: Open Last Log",
         "category": "stata-code",

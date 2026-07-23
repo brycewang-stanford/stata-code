@@ -153,6 +153,25 @@ Stata usage scenario" is literally true, not aspirational.
   missing `end`, dangling `///` — caught Stata-free before a run is spent. A
   token-economy play no competitor ships.
 
+## Closing the gaps vs. editor-first tools (shipped 2026-07-23)
+
+Against `stata-all-in-one` (a polished, distributor-backed VS Code extension whose
+"AI Skill" hands agents raw log text), this cycle neutralized its two adoption
+advantages while keeping the typed-contract lane it cannot enter:
+
+- ✅ **Console (batch) backend** (`core.console`, `Backend.CONSOLE`). Drives the
+  Stata CLI in batch mode and parses the log into the same typed `RunResult`
+  (typed `r()`/`e()`, estimation matrices, the error taxonomy). Covers **Stata
+  13+ with no pystata** — removing their "we support 13+, you're pystata-only"
+  edge, and unlike their AI Skill the output stays *structured*.
+- ✅ **Zero-Python standalone binary** (`scripts/build_standalone.py` +
+  `packaging/standalone.github-workflow.yml`). With `--backend console`, a Python-free path to typed
+  results — answering their "ready out of the box, no Python" pitch.
+- ✅ **One-click VS Code onboarding.** The extension provisions a workspace
+  `.venv` + server on a single click / command, matching their frictionless install.
+- ✅ **Reliability/token benchmark scaffold** (`benchmarks/`) — the apparatus to
+  turn "typed beats raw-log" into a published number.
+
 **Still open (next up), in priority order:**
 
 1. ⬜ **Streaming / progress for long runs.** Real `boottest` / `csdid` jobs run
@@ -161,9 +180,11 @@ Stata usage scenario" is literally true, not aspirational.
 2. ⬜ **Hard timeout / cancel for the Jupyter kernel.** The kernel still uses the
    in-process runner (no preemption). Move it onto the subprocess pool or an
    equivalent, resolving the documented interactivity-vs-safety tradeoff.
-3. ⬜ **Console fallback for Stata 11–16.** A breadth play (large installed base,
-   esp. in China); would make us the only *structured* tool covering pre-pystata
-   Stata. Lower priority than the two above.
+3. ⬜ **Human IDE polish** to match `stata-all-in-one` where it also serves the
+   agent loop: inline graph rendering + DPI export, a scalable data viewer, and an
+   optional "attach to a running Stata" backend (shared live session).
+4. ⬜ **Console backend depth** — graph capture and persistent sessions; run the
+   benchmark for real and publish the numbers.
 
 ## Risks & threats
 

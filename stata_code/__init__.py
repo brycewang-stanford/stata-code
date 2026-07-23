@@ -29,6 +29,8 @@ from stata_code.core._pool import (
     shutdown_default_pool,
 )
 from stata_code.core._runtime import PystataNotAvailable
+from stata_code.core.console import ConsoleNotAvailable, console_available, find_stata_cli
+from stata_code.core.console import execute as _console_execute
 from stata_code.core.errors import (
     classify_rc,
     label_for_rc,
@@ -138,6 +140,47 @@ def run(
 execute = run
 
 
+def run_console(
+    code: str,
+    *,
+    session_id: str = "main",
+    log_lines_head: int = 20,
+    log_lines_tail: int = 20,
+    include_full_log: bool = False,
+    timeout_ms: int | None = 600_000,
+    working_dir: str | None = None,
+    origin_path: str | None = None,
+    origin_kind: str | None = None,
+    origin_label: str | None = None,
+    origin_cell_id: str | None = None,
+    use_origin_workdir: bool = True,
+) -> RunResult:
+    """Run Stata code through the **console (batch) backend** — no pystata.
+
+    Drives the Stata command-line executable in batch mode and parses the log
+    into the same v1.0 ``RunResult`` the pystata path returns. Works with Stata
+    13+ and environments without pystata, at the cost of being **stateless per
+    call** (no in-memory session persistence) and not capturing graphs.
+
+    Raises :class:`ConsoleNotAvailable` when no Stata CLI executable is found;
+    set ``STATA_CODE_STATA_CLI`` to point at it.
+    """
+    return _console_execute(
+        code,
+        session_id=session_id,
+        log_lines_head=log_lines_head,
+        log_lines_tail=log_lines_tail,
+        include_full_log=include_full_log,
+        timeout_ms=timeout_ms,
+        working_dir=working_dir,
+        origin_path=origin_path,
+        origin_kind=origin_kind,
+        origin_label=origin_label,
+        origin_cell_id=origin_cell_id,
+        use_origin_workdir=use_origin_workdir,
+    )
+
+
 def list_sessions() -> list[dict[str, object]]:
     """Enumerate subprocess-backed public API sessions."""
     return get_default_pool().list_session_info()
@@ -207,6 +250,10 @@ __all__ = [
     # Primary entry points
     "run",
     "execute",
+    "run_console",
+    "console_available",
+    "find_stata_cli",
+    "ConsoleNotAvailable",
     "RunResult",
     # Auxiliary tools
     "get_log",

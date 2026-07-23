@@ -39,6 +39,26 @@ engine, and so an autonomous agent loop cannot escape to the OS.
   spending a run. Advisory: a clean result is not a correctness guarantee.
 - Public API: `lint_code`, `LintFinding`, `CommandPolicy`, `Violation`,
   `policy_from_env`.
+- **Console (batch) backend** (`stata_code.core.console`, `Backend.CONSOLE`).
+  Drives the Stata command-line executable in batch mode and parses the log plus
+  a marker-delimited results dump into the same v1.0 `RunResult` — typed
+  `r()`/`e()` scalars and macros, the estimation matrices (`e(b)`/`e(V)`/
+  `r(table)`), the error taxonomy, warnings, and dataset metadata. Works with
+  **Stata 13+** and **no pystata**. Exposed as `stata_code.run_console()`,
+  `stata-code run --backend {auto,pystata,console}`, and a `doctor` check. Stateless
+  per call; graphs not captured yet. Public API adds `run_console`,
+  `console_available`, `find_stata_cli`, `ConsoleNotAvailable`.
+- **Zero-Python standalone binary** — `scripts/build_standalone.py` (PyInstaller)
+  and a CI workflow template (`packaging/standalone.github-workflow.yml`, copy to
+  `.github/workflows/`) build a self-contained `stata-code` executable per OS.
+  Paired with `--backend console` it needs no Python on the target machine.
+- **One-click VS Code onboarding** — when the MCP server is missing, the extension
+  offers to create a workspace `.venv` and install the package; also available as
+  the command-palette entry "Stata: Set Up MCP Server (create .venv)".
+- **Benchmark harness** (`benchmarks/`) — a tool-agnostic scaffold measuring
+  iterations-to-correct and tokens for typed vs. raw-log execution, with an offline
+  mock runner wired end-to-end and CI-covered.
+- Chinese quickstart ([docs/quickstart.zh.md](docs/quickstart.zh.md)).
 
 ## 0.9.1 — 2026-07-22
 

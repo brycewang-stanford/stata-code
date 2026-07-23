@@ -1,0 +1,68 @@
+name: standalone-binary
+
+# READY-TO-USE WORKFLOW TEMPLATE.
+# Copy this file to `.github/workflows/standalone.yml` to activate it. It lives
+# under `packaging/` in the repo because the automation token that maintains this
+# branch is not permitted to create files under `.github/workflows/`.
+#
+# Build the zero-Python `stata-code` binary for each OS. Runs on version tags
+# and on demand. Artifacts are uploaded per-OS; paired with `--backend console`
+# they give a Python-free path to typed Stata results on the target machine.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: stata-code-linux-x64
+          - os: macos-latest
+            asset: stata-code-macos-arm64
+          - os: windows-latest
+            asset: stata-code-windows-x64
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build standalone binary
+        run: python scripts/build_standalone.py --name ${{ matrix.asset }}
+
+      - name: Smoke test (non-Windows)
+        if: runner.os != 'Windows'
+        run: |
+          ./dist/${{ matrix.asset }} --version
+          ./dist/${{ matrix.asset }} lint -e "regress y x"
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          ./dist/${{ matrix.asset }}.exe --version
+          ./dist/${{ matrix.asset }}.exe lint -e "regress y x"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}*
+          if-no-files-found: error

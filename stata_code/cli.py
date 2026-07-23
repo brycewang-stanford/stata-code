@@ -145,6 +145,16 @@ def _add_run_parser(
         help="Inline Stata code. Repeatable; snippets are joined with newlines.",
     )
     parser.add_argument(
+        "--backend",
+        choices=["auto", "pystata", "console"],
+        default="auto",
+        help=(
+            "Execution backend. 'pystata' (Stata 17+, in-memory sessions), "
+            "'console' (Stata 13+ batch, no pystata, stateless), or 'auto' "
+            "(default: pystata when available, else console)."
+        ),
+    )
+    parser.add_argument(
         "--session",
         default="main",
         help="Session id (isolated Stata frame/worker). Defaults to 'main'.",
@@ -200,8 +210,21 @@ def _read_run_code(args: argparse.Namespace) -> tuple[str, str | None, str | Non
     return data, None, None
 
 
+def _resolve_backend(choice: str) -> str:
+    if choice != "auto":
+        return choice
+    from stata_code import is_available
+
+    if is_available():
+        return "pystata"
+    from stata_code.core.console import console_available
+
+    return "console" if console_available() else "pystata"
+
+
 def _run_command(args: argparse.Namespace) -> int:
-    from stata_code import RefNotFound, get_graph, run
+    from stata_code import RefNotFound, get_graph, run, run_console
+    from stata_code.core.console import ConsoleNotAvailable
 
     code, origin_path, err = _read_run_code(args)
     if err is not None:
@@ -209,18 +232,34 @@ def _run_command(args: argparse.Namespace) -> int:
         return 2
 
     timeout_ms = args.timeout_ms if args.timeout_ms and args.timeout_ms > 0 else None
-    result = run(
-        code,
-        session_id=args.session,
-        timeout_ms=timeout_ms,
-        include_full_log=args.full_log,
-        include_graphs="ref",
-        origin_path=origin_path,
-        origin_kind="do_file" if origin_path else None,
-    )
+    backend = _resolve_backend(args.backend)
+
+    if backend == "console":
+        try:
+            result = run_console(
+                code,
+                session_id=args.session,
+                timeout_ms=timeout_ms,
+                include_full_log=args.full_log,
+                origin_path=origin_path,
+                origin_kind="do_file" if origin_path else None,
+            )
+        except ConsoleNotAvailable as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    else:
+        result = run(
+            code,
+            session_id=args.session,
+            timeout_ms=timeout_ms,
+            include_full_log=args.full_log,
+            include_graphs="ref",
+            origin_path=origin_path,
+            origin_kind="do_file" if origin_path else None,
+        )
 
     graph_notes: list[str] = []
-    if args.graphs:
+    if args.graphs and backend != "console":
         graph_notes = _export_graphs(result, args.graphs, get_graph, RefNotFound)
 
     if args.json:

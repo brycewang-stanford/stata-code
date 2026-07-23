@@ -77,6 +77,7 @@ def run_doctor(
             'ipykernel missing; install with `python -m pip install "stata-code[kernel]"`.',
         ),
         _pystata_discovery_check(),
+        _stata_cli_check(),
         _console_scripts_check(),
         _client_config_check(
             workspace=workspace,
@@ -191,6 +192,27 @@ def _pystata_discovery_check() -> DiagnosticCheck:
         summary="pystata was not found on sys.path or standard Stata utilities paths.",
         detail=f"checked: {checked}",
         hint="Install Stata 17+ or set STATA_CODE_PYSTATA_PATH/PYSTATA_PATH to Stata's utilities directory.",
+    )
+
+
+def _stata_cli_check() -> DiagnosticCheck:
+    """Report whether a Stata command-line executable (console backend) is found."""
+    from stata_code.core.console import find_stata_cli
+
+    exe = find_stata_cli()
+    if exe is not None:
+        return DiagnosticCheck(
+            id="stata_cli",
+            status="ok",
+            summary="Stata command-line executable found; the console backend is available.",
+            detail=f"executable={exe}",
+        )
+    return DiagnosticCheck(
+        id="stata_cli",
+        status="warn",
+        summary="No Stata command-line executable found for the console backend.",
+        detail="The console backend (Stata 13+, no pystata) needs the Stata CLI binary.",
+        hint="Set STATA_CODE_STATA_CLI to the Stata console binary, e.g. /usr/local/stata18/stata-mp.",
     )
 
 
