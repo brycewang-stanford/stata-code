@@ -60,13 +60,13 @@ Then just ask:
 
 `stata-code` writes the do-file, runs it, returns the table, and interprets the result — and can re-estimate the same ATT with [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) to confirm the two stacks agree. These workflows ship as one-call MCP prompts (`did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`) backed by an on-demand [recipe library](skills/stata-code/references/recipes/).
 
-**Why `stata-code`:** MIT-licensed · ships as an MCP server, a bundled agent skill, a Jupyter kernel, **and** a VS Code extension · one structured, token-economy result schema (typed errors, native `r()` / `e()`) · cross-stack validation with StatsPAI for the Cunningham check.
+**Why `stata-code`:** MIT-licensed · ships as an MCP server, a bundled agent skill, a Jupyter kernel, a VS Code extension, **and** a plain-terminal CLI (`stata-code run`) · one structured, token-economy result schema (typed errors, native `r()` / `e()`) · runs on **Stata 17+ via pystata *or* Stata 13+ via a console backend that needs no pystata** · a zero-Python standalone binary · a default command-safety guard for unattended agents · cross-stack validation with StatsPAI for the Cunningham check.
 
 ```text
                     ┌────────────────────────────────────────┐
                     │     stata-code core (Python)           │
                     │                                        │
-                    │   • pystata adapter (Stata 17+)        │
+                    │   • pystata 17+ / console 13+ backends │
                     │   • v1.0 unified result schema         │
                     │   • token-economy defaults             │
                     │   • multi-session via Stata frames     │
@@ -79,10 +79,13 @@ Then just ask:
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**Status: v0.9 (June 2026)** — the core, MCP server, Jupyter kernel, and VS Code extension work end-to-end against Stata 18 MP. The test suite covers schema, runner, MCP, kernel, notebook, run-index, subprocess-pool, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
+A fourth frontend, a **plain-terminal CLI** (`stata-code run` / `lint` / `setup`), gives any agent that can shell out — or a bare terminal — the same typed `RunResult`. And the core runs two backends: **pystata** (Stata 17+, in-memory sessions) or a **console backend** (Stata 13+ in batch mode, no pystata) — both returning the identical schema.
 
-Three workflows the current tree explicitly supports for end users and agents:
+**Status: v0.9 (June 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
+Four workflows the current tree explicitly supports for end users and agents:
+
+- **Run Stata from a plain terminal or a zero-Python binary.** `stata-code run analysis.do` (or `-e "code"`, or stdin) prints the same structured `RunResult` — text or `--json` — so any agent that can shell out gets the typed error loop without MCP. `--backend console` runs **Stata 13+ with no pystata**, and a standalone binary needs no Python install at all. See [From the Command Line](#from-the-command-line-bash).
 - **Run Stata code from a Jupyter notebook.** `pip install "stata-code[kernel]"` + `stata-code-kernel install --user` registers a **Stata** kernel that the Jupyter Notebook UI, JupyterLab, and the VS Code Jupyter extension all pick up by name. Cells render Stata logs, graphs, and warnings inline (the kernel logo bundled since v0.5 makes it appear in VS Code's kernel picker too). See [As a Jupyter Kernel](#as-a-jupyter-kernel).
 - **Optional agent "fix and rerun" loop.** `stata_run` returns typed `error.kind/line/context` plus `suggestions` on every failure. By default Claude Code only reports diagnostics — but if you explicitly say "fix this and rerun until it passes", the agent uses the same fields to edit your `.do` file and re-call `stata_run` until the run is green. The repair loop is **opt-in**: failed runs are diagnostics first, not automatic rewrite permission. See [Error Recovery in Agent Workflows](#error-recovery-in-agent-workflows).
 - **Economist workflow guides.** The bundled skill and cookbook now cover

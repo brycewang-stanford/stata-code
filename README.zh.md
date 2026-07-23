@@ -60,13 +60,13 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
 
 `stata-code` 会自动写 do 文件、运行、把表格回传并解读结果——还能用 [StatsPAI](https://github.com/brycewang-stanford/StatsPAI) 把同一个 ATT 再估一遍，确认两套结果一致。这些工作流以一键 MCP prompts（`did_event_study`、`iv_2sls`、`rdd`、`publication_table`、`cross_validate_did`）的形式提供，背后是一个按需调用的 [recipe 库](skills/stata-code/references/recipes/)。
 
-**为什么选 `stata-code`：** MIT 许可证 · 同时提供 MCP server、内置 agent skill、Jupyter kernel **和** VS Code 扩展 · 统一的结构化、省 token 的结果格式（typed errors、原生 `r()` / `e()`）· 配合 StatsPAI 做跨栈交叉验证（Cunningham 检验）。
+**为什么选 `stata-code`：** MIT 许可证 · 同时提供 MCP server、内置 agent skill、Jupyter kernel、VS Code 扩展 **和** 终端命令行（`stata-code run`）· 统一的结构化、省 token 的结果格式（typed errors、原生 `r()` / `e()`）· **支持 Stata 17+（pystata）或 Stata 13+（无需 pystata 的 console 后端）** · 零 Python 独立二进制 · 面向无人值守 agent 的默认命令安全护栏 · 配合 StatsPAI 做跨栈交叉验证（Cunningham 检验）。
 
 ```text
                     ┌────────────────────────────────────────┐
                     │     stata-code core (Python)           │
                     │                                        │
-                    │   • pystata adapter (Stata 17+)        │
+                    │   • pystata 17+ / console 13+ backends │
                     │   • v1.0 统一结果 schema               │
                     │   • 默认节省 token                     │
                     │   • 通过 Stata frames 支持多 session   │
@@ -79,7 +79,9 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
               └─────────────┘  └────────────┘  └─────────────────┘
 ```
 
-**当前状态：v0.9（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展都已经在 Stata 18 MP 上端到端跑通。测试套件覆盖 schema、runner、MCP、kernel、notebook、run-index、subprocess pool 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。
+此外还有第四个前端——**终端命令行**（`stata-code run` / `lint` / `setup`），让任何能调用 shell 的 agent（或纯终端）拿到同一套带类型的 `RunResult`；core 支持两种后端：**pystata**（Stata 17+，内存会话）或 **console 后端**（Stata 13+ 批处理，无需 pystata），两者返回完全相同的 schema。
+
+**当前状态：v0.9（2026 年 6 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展和命令行都已经在 Stata 18 MP 上端到端跑通；console 后端把覆盖范围扩展到无需 pystata 的 Stata 13+。测试套件覆盖 schema、runner、console 解析器、MCP、kernel、notebook、run-index、subprocess pool、命令安全、linter 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。快速上手见 [docs/quickstart.zh.md](docs/quickstart.zh.md)。
 
 当前代码树明确支持的三类用户 / agent 工作流：
 
