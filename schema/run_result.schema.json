@@ -328,6 +328,7 @@
         "cancelled",
         "timeout",
         "adapter_crash",
+        "policy_blocked",
         "unknown"
       ],
       "title": "ErrorKind",

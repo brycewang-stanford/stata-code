@@ -44,6 +44,7 @@ class ErrorKind(str, Enum):
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
     ADAPTER_CRASH = "adapter_crash"
+    POLICY_BLOCKED = "policy_blocked"
     UNKNOWN = "unknown"
 
 

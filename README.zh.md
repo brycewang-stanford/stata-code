@@ -196,7 +196,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 18 个工具（`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 19 个工具（`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
 
 #### Agent 工作流里的报错恢复
 
@@ -276,7 +276,7 @@ client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`
 `stata-code>=0.6.5`，然后重启 MCP client。旧 server 进程在重启前仍会继续
 暴露旧 schema。
 
-MCP server 注册了 18 个工具：
+MCP server 注册了 19 个工具：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -287,6 +287,7 @@ MCP server 注册了 18 个工具：
 | `get_graph` | 通过 `graph://` ref 获取图形 bytes（`ImageContent`） |
 | `get_matrix` | 通过 `matrix://` ref 获取矩阵 `{rows, cols, values}` |
 | `inspect_data` | 运行 `describe` + `codebook`，返回紧凑的数据集元数据 |
+| `lint_do` | 在执行前静态检查 do 文件源代码（花括号不匹配、缺少 `end`、悬空 `///`） |
 | `install_package` | 安装 SSC 或显式 `net install` 包，并验证命令可解析 |
 | `list_sessions` | 列出 live sessions |
 | `cancel_session` | 取消某个 session；subprocess-backed 路径会终止运行中的 worker，也会短路尚未开始的运行 |
@@ -426,7 +427,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (18 tools)
+│   └── server.py      # MCP server (19 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -444,7 +445,7 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | 统一结果格式 | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | 默认节省 token | ✓ (log refs, graph refs) | — | — | — |
-| 结构化错误和建议 | ✓ (31 kinds) | — | — | — |
+| 结构化错误和建议 | ✓ (32 kinds) | — | — | — |
 | 多 session | ✓ (Stata frames) | partial | — | — |
 | 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
@@ -464,7 +465,9 @@ stata_code/
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 31 类错误分类法 + 标准化建议
-- MCP server：18 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）和包安装（`install_package`）
+- MCP server：19 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）和包安装（`install_package`）
+- 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
+- Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
 - 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
 - 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`

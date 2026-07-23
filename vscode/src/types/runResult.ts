@@ -39,6 +39,7 @@ export type ErrorKind =
   | "cancelled"
   | "timeout"
   | "adapter_crash"
+  | "policy_blocked"
   | "unknown";
 
 export type GraphFormat = "png" | "svg" | "pdf";

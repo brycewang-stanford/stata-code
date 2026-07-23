@@ -118,6 +118,7 @@ SYNTHETIC_RC_TO_KIND: dict[int, ErrorKind] = {
     -1: ErrorKind.ADAPTER_CRASH,
     -2: ErrorKind.TIMEOUT,
     -3: ErrorKind.CANCELLED,
+    -4: ErrorKind.POLICY_BLOCKED,
 }
 
 
@@ -202,6 +203,7 @@ SYNTHETIC_RC_LABEL: dict[int, str] = {
     -1: "adapter_crash",
     -2: "timeout",
     -3: "cancelled",
+    -4: "policy_blocked",
 }
 
 
@@ -267,6 +269,9 @@ _RECOVERY: dict[ErrorKind, tuple[str, bool, bool, bool]] = {
     ErrorKind.CANCELLED: ("internal", False, False, False),
     ErrorKind.TIMEOUT: ("internal", True, False, False),
     ErrorKind.ADAPTER_CRASH: ("internal", True, False, False),
+    # Command policy blocked the code before Stata ran: the submitted code must
+    # change (drop the OS-escape command), or a human must relax the policy.
+    ErrorKind.POLICY_BLOCKED: ("user_code", False, True, True),
     ErrorKind.UNKNOWN: ("unknown", False, False, False),
 }
 

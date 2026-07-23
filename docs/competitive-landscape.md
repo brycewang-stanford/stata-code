@@ -128,6 +128,43 @@ remaining · ⬜ not started.
    audit/robustness/QA recipe set in the skills lane
    (`skills/stata-code/references/recipes/**`). → Roadmap pillar 2.
 
+## Surface coverage & safety (shipped 2026-07-23)
+
+The typed-contract lane (above) is the defensible identity; this cycle closed the
+most-cited *surface* and *safety* gaps against SepineTam/hanlulong so "covers every
+Stata usage scenario" is literally true, not aspirational.
+
+- ✅ **Bash / plain-terminal surface.** `stata-code run` (a `.do` file, `-e`
+  snippets, or stdin → `RunResult`, text or `--json`, exit-coded) puts the full
+  structured loop behind any agent that can shell out — Codex CLI, CI, a bare
+  terminal — without requiring MCP. Routes through the same subprocess pool, so
+  timeout/cancel/policy all apply. `stata-code lint` exposes the linter too.
+- ✅ **One-command onboarding.** `stata-code setup --claude|--cursor|--vscode|--all`
+  writes the MCP server entry (merging, backing up, `--dry-run`), matching
+  SepineTam's `install --all`. `doctor` stays read-only; `setup` is the opt-in
+  mutating counterpart. Codex (TOML) / Claude Desktop are emitted as copy-paste
+  snippets rather than edited in place.
+- ✅ **Command-safety guard** (`core.policy`, `error.kind="policy_blocked"`).
+  Blocks `shell` / `winexec` / `erase` / `rm` / `rmdir` / `!` before Stata runs,
+  at both the pool boundary and the in-process runner; configurable via
+  `STATA_CODE_COMMAND_POLICY` / `_ALLOW` / `_BLOCK`. Parity with SepineTam's
+  27-rule guard for the autonomous-overnight use case. A guard rail, not a sandbox.
+- ✅ **Static pre-run lint** (`core.lint`, MCP `lint_do`). Unbalanced braces,
+  missing `end`, dangling `///` — caught Stata-free before a run is spent. A
+  token-economy play no competitor ships.
+
+**Still open (next up), in priority order:**
+
+1. ⬜ **Streaming / progress for long runs.** Real `boottest` / `csdid` jobs run
+   for minutes; hanlulong streams, we batch. The schema already reserves
+   `log.complete:false`. Highest-leverage remaining surface gap.
+2. ⬜ **Hard timeout / cancel for the Jupyter kernel.** The kernel still uses the
+   in-process runner (no preemption). Move it onto the subprocess pool or an
+   equivalent, resolving the documented interactivity-vs-safety tradeoff.
+3. ⬜ **Console fallback for Stata 11–16.** A breadth play (large installed base,
+   esp. in China); would make us the only *structured* tool covering pre-pystata
+   Stata. Lower priority than the two above.
+
 ## Risks & threats
 
 - **StataCorp native AI — LOW near-term, monitor.** Stata 19 shipped classical

@@ -20,6 +20,7 @@ import base64
 import json
 import re
 import sys
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
 
@@ -62,6 +63,7 @@ except ImportError:  # pragma: no cover - environment without mcp installed
 from stata_code.core import _refs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable
+from stata_code.core.lint import lint_code
 from stata_code.core.notebook import (
     NotebookError,
 )
@@ -1278,6 +1280,45 @@ def _tool_definitions() -> list[Tool]:
                 openWorldHint=True,
             ),
         ),
+        Tool(
+            name="lint_do",
+            title="Lint Stata Source",
+            description=(
+                "Static, Stata-free check of do-file source BEFORE spending a "
+                "run to discover a structural mistake. Catches unbalanced "
+                "braces, a `program` / `mata` / `python` block with no `end`, a "
+                "stray `end`, and a dangling `///` continuation. Pass `code` "
+                "(inline source) or `path` (a .do file to read). Returns "
+                "{ok, counts:{error,warning}, findings:[{rule,severity,line,"
+                "message}]}, where ok=true means no error-severity findings. "
+                "Advisory and conservative — a clean result is not a guarantee "
+                "the code runs, and it never executes anything."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Inline Stata source to lint. Provide this or `path`.",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": (
+                            "Path to a .do file to read and lint. Ignored when "
+                            "`code` is given."
+                        ),
+                    },
+                },
+            },
+            annotations=ToolAnnotations(
+                title="Lint Stata Source",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
     ]
 
 
@@ -2431,6 +2472,8 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _search_log_tool(arguments)
         if name == "inspect_data":
             return await asyncio.to_thread(_inspect_data_tool, arguments)
+        if name == "lint_do":
+            return _lint_do_tool(arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
         return _error_result(str(exc), kind=exc.kind)
@@ -2626,6 +2669,38 @@ def _search_log_tool(arguments: dict[str, Any]) -> Any:
         context=context,
         max_matches=max_matches,
     )
+    return _json_result(payload)
+
+
+def _lint_do_tool(arguments: dict[str, Any]) -> Any:
+    code = arguments.get("code")
+    path = arguments.get("path")
+    if code is not None and not isinstance(code, str):
+        return _error_result("code must be a string", kind="invalid_request")
+    if path is not None and not isinstance(path, str):
+        return _error_result("path must be a string", kind="invalid_request")
+    resolved_path: str | None = None
+    if code is None:
+        if not path:
+            return _error_result(
+                "provide either code or path", kind="missing_argument"
+            )
+        try:
+            code = Path(path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return _error_result(f"file not found: {path}", kind="file_not_found")
+        except OSError as exc:
+            return _error_result(f"could not read {path}: {exc}", kind="file_io")
+        resolved_path = path
+    findings = lint_code(code)
+    error_count = sum(1 for f in findings if f.severity == "error")
+    warning_count = sum(1 for f in findings if f.severity == "warning")
+    payload = {
+        "ok": error_count == 0,
+        "path": resolved_path,
+        "counts": {"error": error_count, "warning": warning_count},
+        "findings": [f.to_dict() for f in findings],
+    }
     return _json_result(payload)
 
 

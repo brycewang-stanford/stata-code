@@ -40,6 +40,12 @@ from stata_code.core.estimation import (
     build_estimation_result,
 )
 from stata_code.core.handoff import DatasetCheck, verify_dataset
+from stata_code.core.lint import LintFinding, lint_code
+from stata_code.core.policy import (
+    CommandPolicy,
+    Violation,
+    policy_from_env,
+)
 from stata_code.core.provenance import (
     build_provenance,
     build_reproducible_do,
@@ -257,4 +263,11 @@ __all__ = [
     # Data-MCP handoff helpers
     "DatasetCheck",
     "verify_dataset",
+    # Static linting
+    "lint_code",
+    "LintFinding",
+    # Command-safety policy
+    "CommandPolicy",
+    "Violation",
+    "policy_from_env",
 ]

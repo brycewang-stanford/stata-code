@@ -67,6 +67,7 @@ Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+
 | `get_graph(ref, format?)` | The user wants graph bytes (export, display, embed). |
 | `get_matrix(ref)` | A matrix in `results.r.matrices` / `results.e.matrices` came back with `values: null` (over 10k cells). |
 | `inspect_data(varlist?, detail?, session_id?)` | "What's in this dataset?" Runs `describe` + `codebook`; returns the structured `dataset` block plus the codebook log. |
+| `lint_do(code? / path?)` | Before running a long or generated do-file, statically check it (unbalanced braces, missing `end`, dangling `///`). Cheap, Stata-free; catches structural mistakes without spending a run. Advisory — a clean result is not a guarantee. |
 | `install_package(name, source?, url?, replace?, session_id?)` | A run failed with `command_not_found` (rc 199) for a community package, or the user asks to install one. Builds `ssc`/`net install`, then verifies with `which`. |
 | `list_sessions()` | The user mentions multiple parallel Stata "tabs", or you need to find a session by id. |
 | `cancel_session(session_id)` | A run is hung or the user said "stop". Subprocess workers terminate; in-flight code is killed. |
@@ -201,6 +202,8 @@ loop (cap ~5 iterations):
     file_not_found       → fix error.path or generate the missing file
     convergence/infeasible/estimation_failure → MODEL issue: respecify, do NOT loop
     adapter_crash/timeout/cancelled → STOP and surface to the user
+    policy_blocked       → the code used a blocked OS-escape command (shell/erase/rmdir/!);
+                           do the task with a native Stata command instead, do NOT retry as-is
   rewrite the .do file or notebook cell; re-run
   if the same kind+line repeats unchanged twice → STOP with a summary
 ```
@@ -227,6 +230,7 @@ The runner echoes these into `result.origin` and writes them to the run-bundle m
 ## 11. Things to NOT do
 
 - Do not shell out to `stata` / `do-file editor` / `pystata` directly. Use `stata_run`.
+- Do not use OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) inside `stata_run`. They are blocked by the command-safety policy and return `policy_blocked`. Stay within native Stata data commands (`save` / `use` / `copy`); if a file genuinely must be deleted, ask the user to do it or to relax the policy.
 - Do not parse English from `log.head` to detect success — use `ok` / `rc` / `error.kind`.
 - Do not retry a failing command unchanged. The taxonomy tells you why it failed; act on it or report it.
 - Do not loop the fix-and-rerun routine on a model problem (`convergence`, `infeasible`).

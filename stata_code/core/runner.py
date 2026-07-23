@@ -47,6 +47,7 @@ from stata_code.core.log_artifacts import (
     snapshot_working_dir_files,
     update_run_artifact_manifest,
 )
+from stata_code.core.policy import check as policy_check
 from stata_code.core.schema import (
     Backend,
     DatasetInfo,
@@ -905,6 +906,14 @@ def execute(
         raise ValueError(
             f"graph_format must be 'png' | 'svg' | 'pdf'; got {graph_format!r}"
         ) from exc
+
+    # Command-safety gate. Runs before Stata is even initialized so a blocked
+    # command is rejected identically whether or not Stata is installed, and so
+    # the in-process paths (Jupyter kernel, direct callers) get the same guard
+    # the subprocess pool applies parent-side.
+    policy_block = policy_check(code, session_id=session_id)
+    if policy_block is not None:
+        return policy_block
 
     rt = get_runtime()  # may raise PystataNotAvailable
     _ensure_session(rt, session_id)

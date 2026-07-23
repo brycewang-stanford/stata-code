@@ -183,6 +183,53 @@ else:
         print("hint:", s.action)               # "Did you mean `mpg`?"
 ```
 
+### From the Command Line (Bash)
+
+Any agent or script that can shell out gets the same structured engine — no MCP
+required. `stata-code run` executes a `.do` file, one or more `-e` snippets, or
+code piped on stdin, and prints the `RunResult`:
+
+```bash
+stata-code run analysis.do                 # run a do-file, text summary
+stata-code run -e "sysuse auto" -e "regress mpg weight"
+stata-code run analysis.do --json          # full RunResult JSON (for agents)
+echo "summarize price" | stata-code run -   # read code from stdin
+stata-code run model.do --graphs out/       # also export graphs to out/
+stata-code run job.do --session modelA --timeout-ms 120000
+```
+
+Exit code is `0` on success and `1` on a Stata / adapter error, so it drops into
+CI and scripted fix-and-rerun loops. `stata-code lint analysis.do` runs the
+static checker (unbalanced braces, missing `end`, dangling `///`) without
+touching Stata.
+
+### One-Command Client Setup
+
+`stata-code setup` writes the MCP server entry into a client's config — the
+opt-in, mutating counterpart to the read-only `doctor`. It preserves other
+servers and backs up any file it overwrites:
+
+```bash
+stata-code setup --all                 # Claude Code, Cursor, VS Code (project)
+stata-code setup --claude --dry-run    # preview without writing
+stata-code setup --vscode --python .venv/bin/python   # pin an interpreter
+stata-code setup --codex               # print a copy-paste TOML snippet
+```
+
+### Command Safety
+
+By default the runner blocks OS-escape and file-deletion commands (`shell`,
+`winexec`, `erase`, `rm`, `rmdir`, and the `!` shell escape) *before* they reach
+Stata, so an autonomous agent loop can't delete files or run arbitrary shell
+commands. A block returns a `policy_blocked` result (`rc=-4`) rather than
+running. It is a guard rail, not a sandbox; tune it with environment variables:
+
+```bash
+STATA_CODE_COMMAND_POLICY=off      # disable the guard entirely
+STATA_CODE_POLICY_ALLOW=shell      # allow specific commands (comma-separated)
+STATA_CODE_POLICY_BLOCK=python     # block additional commands
+```
+
 ### As an MCP Server
 
 After `pip install "stata-code[mcp]"`, the `stata-code-mcp` binary is on your `PATH`. You can wire it into Claude Code, Cursor, Claude Desktop, or any other MCP-compatible client.
@@ -204,7 +251,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 18 tools (`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 19 tools (`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
 
 #### Error Recovery in Agent Workflows
 
@@ -292,7 +339,7 @@ If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
 upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
 processes keep advertising the stale schema until they are restarted.
 
-The MCP server registers 18 tools:
+The MCP server registers 19 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -303,6 +350,7 @@ The MCP server registers 18 tools:
 | `get_graph` | Fetch graph bytes behind a `graph://` ref (`ImageContent`) |
 | `get_matrix` | Fetch matrix payloads behind a `matrix://` ref |
 | `inspect_data` | Run `describe` + `codebook` and return compact dataset metadata |
+| `lint_do` | Statically check do-file source (unbalanced braces, missing `end`, dangling `///`) before spending a run |
 | `install_package` | Install an SSC or explicit `net install` package and verify it resolves |
 | `list_sessions` | Enumerate live sessions |
 | `cancel_session` | Cancel a session; the subprocess-backed path terminates in-flight runs and short-circuits pending ones |
@@ -446,7 +494,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (18 tools)
+│   └── server.py      # MCP server (19 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -464,7 +512,11 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | Token-economy defaults | ✓ (log refs, graph refs) | — | — | — |
-| Typed errors + suggestions | ✓ (31 kinds) | — | — | — |
+| Typed errors + suggestions | ✓ (32 kinds) | — | — | — |
+| Command-safety guard | ✓ (blocks `shell`/`erase`/`rmdir`/`!` by default) | ✓ (27-rule guard) | — | — |
+| Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — |
+| One-command client setup | ✓ (`stata-code setup`) | ✓ (`install --all`) | bundled | — |
+| Static pre-run lint | ✓ (`lint_do` / `stata-code lint`) | — | — | — |
 | Multi-session | ✓ (Stata frames) | partial | — | — |
 | Mature ecosystem | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
@@ -483,8 +535,10 @@ stata_code/
 - Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
-- 31-kind error taxonomy with canonical suggestions
-- MCP server: 18 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), and package installation (`install_package`)
+- 32-kind error taxonomy with canonical suggestions
+- MCP server: 19 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
+- Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
+- Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
 - Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
 - Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
@@ -502,12 +556,15 @@ stata_code/
 
 ### Next Up
 
+- Streaming / progress for long runs (`log.complete:false`, incremental log lines) so 20-minute `boottest` / `csdid` jobs report before they finish
+- Hard timeout / cancellation for the Jupyter kernel (move it from the direct in-process runner to the subprocess pool, or an equivalent)
 - Console fallback for Stata 11–16, re-implemented against the v1.0 schema
-- Decide whether to move the Jupyter kernel from the direct in-process runner to the subprocess pool, or keep documenting the current interactivity-first tradeoff
 - Extra VS Code polish: extension-host end-to-end tests, first-run diagnostics, and command palette UX
 - **v1.0** — Stable schema, broader Stata edition coverage
 
-See [SCHEMA.md §7](SCHEMA.md) for explicitly out-of-scope items.
+See [docs/competitive-landscape.md](docs/competitive-landscape.md) for how these
+priorities line up against comparable tools, and [SCHEMA.md §7](SCHEMA.md) for
+explicitly out-of-scope items.
 
 ---
 

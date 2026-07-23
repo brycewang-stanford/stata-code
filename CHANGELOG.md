@@ -6,6 +6,40 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+Surface-coverage and safety additions so every Stata usage scenario — MCP,
+Jupyter, VS Code, and now a plain Bash/terminal — routes through the same typed
+engine, and so an autonomous agent loop cannot escape to the OS.
+
+### Added
+
+- **Command-safety guard** (`stata_code.core.policy`). OS-escape / file-deletion
+  commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, and the `!` shell escape)
+  are screened out of submitted code *before* Stata runs, at both the
+  subprocess-pool boundary and the in-process runner. A blocked run returns
+  `ok=false`, `rc=-4`, `error.kind="policy_blocked"` (a new 32nd `ErrorKind`)
+  without touching Stata. Configurable from the environment so it crosses the
+  worker boundary: `STATA_CODE_COMMAND_POLICY` (`enforce` default / `warn` /
+  `off`), `STATA_CODE_POLICY_ALLOW`, `STATA_CODE_POLICY_BLOCK`. It is a guard
+  rail, not a sandbox.
+- **`stata-code run`** — execute a `.do` file, one or more `-e` snippets, or
+  stdin through the subprocess pool and print the `RunResult` (text summary or
+  `--json`), with `--session`, `--timeout-ms`, `--full-log`, and `--graphs DIR`.
+  Exit code is `0` on success, `1` on a Stata/adapter error. This is the
+  Bash / plain-terminal surface: any agent that can shell out gets the full
+  structured error loop without MCP.
+- **`stata-code setup`** — opt-in, config-mutating counterpart to `doctor`.
+  Writes the `stata-code` MCP server entry into Claude Code (`.mcp.json`),
+  Cursor (`.cursor/mcp.json`), and VS Code (`.vscode/mcp.json`), preserving other
+  servers and backing up any file it overwrites (`--dry-run`, `--python`,
+  `--json`). Codex (TOML) and Claude Desktop are emitted as copy-paste snippets.
+- **Static do-file linting** (`stata_code.core.lint`), exposed as the `lint_do`
+  MCP tool (19th tool) and `stata-code lint`. A Stata-free syntactic check —
+  unbalanced braces, a `program` / `mata` / `python` block with no `end`, a stray
+  `end`, and a dangling `///` — so an agent can catch a class of mistakes before
+  spending a run. Advisory: a clean result is not a correctness guarantee.
+- Public API: `lint_code`, `LintFinding`, `CommandPolicy`, `Violation`,
+  `policy_from_env`.
+
 ## 0.9.1 — 2026-07-22
 
 Quality-hardening pass: correctness fixes from an adversarial code review,

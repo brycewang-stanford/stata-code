@@ -53,6 +53,7 @@ from typing import Any
 
 from stata_code.core import _refs
 from stata_code.core.errors import recovery_for
+from stata_code.core.policy import check as policy_check
 from stata_code.core.schema import (
     Backend,
     DatasetInfo,
@@ -836,6 +837,13 @@ class SessionPool:
         # to the right Stata frame. timeout_ms is enforced HERE — the
         # worker doesn't see it.
         started = time.monotonic()
+        # Command-safety gate: reject OS-escape / file-deletion commands before
+        # a worker is spawned or any Stata state is touched. Parent-side so the
+        # blocked run costs nothing; the worker enforces the same policy as
+        # defense-in-depth for direct `runner.execute` callers.
+        policy_block = policy_check(code, session_id=session_id)
+        if policy_block is not None:
+            return policy_block
         if self._consume_cancel(session_id):
             return _build_cancelled_result(
                 session_id=session_id,
