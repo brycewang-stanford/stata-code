@@ -6,9 +6,14 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.10.0 — 2026-07-24
+
 Surface-coverage and safety additions so every Stata usage scenario — MCP,
 Jupyter, VS Code, and now a plain Bash/terminal — routes through the same typed
-engine, and so an autonomous agent loop cannot escape to the OS.
+engine, and so an autonomous agent loop cannot escape to the OS. Also broadens
+execution to **Stata 13+ without pystata** (console backend) and adds a
+zero-Python standalone binary and one-click VS Code onboarding. The default
+README is now Chinese (`README.md`); the English README moves to `README.en.md`.
 
 ### Added
 

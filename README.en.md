@@ -81,7 +81,7 @@ Then just ask:
 
 A fourth frontend, a **plain-terminal CLI** (`stata-code run` / `lint` / `setup`), gives any agent that can shell out — or a bare terminal — the same typed `RunResult`. And the core runs two backends: **pystata** (Stata 17+, in-memory sessions) or a **console backend** (Stata 13+ in batch mode, no pystata) — both returning the identical schema.
 
-**Status: v0.9 (June 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
+**Status: v0.10 (July 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
 Four workflows the current tree explicitly supports for end users and agents:
 
