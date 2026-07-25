@@ -301,6 +301,12 @@
         "when": "editorTextFocus && editorLangId == stata"
       },
       {
+        "command": "stataCode.runSelection",
+        "key": "ctrl+d",
+        "mac": "cmd+d",
+        "when": "editorTextFocus && editorLangId == stata"
+      },
+      {
         "command": "stataCode.runSection",
         "key": "ctrl+shift+enter",
         "mac": "cmd+shift+enter",

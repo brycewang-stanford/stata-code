@@ -27,7 +27,7 @@ everything goes through MCP `stata_run`, `get_log`, `get_graph`,
 | Run button in editor title bar | Run all / active file |
 | Right-click menu → *Stata: Run Selection / Run Active File / View Data Preview* | Same, from the editor |
 | Right-click menu → *Stata: Working Directory...* | Show or change Stata's current directory |
-| `Cmd/Ctrl+Enter` | Run selection (or current line if no selection) |
+| `Cmd/Ctrl+Enter` or `Cmd/Ctrl+D` | Run selection (or current line if no selection) |
 | `Cmd/Ctrl+Shift+Enter` | Run the current hierarchical section |
 | Inline `▶ Run Cell` code-lens above any `* %%` line | Run that cell |
 | Inline `▶ Run Section` code-lens above `**#` headings | Run from that heading to the next equal/higher heading |
@@ -36,6 +36,14 @@ everything goes through MCP `stata_run`, `get_log`, `get_graph`,
 | F2 rename on recognized variables | Rename variables across the current document while skipping comments and Stata commands |
 | Red squiggle on the failing line | After a failed run; hover to see the typed-error message and suggestions |
 | *Stata: View Data Preview* | Opens the first 100 observations from the active session as a side text document, plus dataset metadata and variables |
+
+**Custom keyboard shortcuts.** All shortcuts can be changed with VS Code's
+*Preferences: Open Keyboard Shortcuts* command. Search for
+`Stata: Run Selection / Current Line`, click the pencil icon, and enter the
+preferred key combination. The command ID for editing `keybindings.json`
+directly is `stataCode.runSelection`. The built-in `Cmd/Ctrl+D` binding only
+applies while a Stata editor has focus; a user-defined shortcut takes
+precedence if another extension or VS Code command conflicts with it.
 
 **Cell convention.** A line whose trimmed text is `* %%` (optionally
 followed by a title, e.g. `* %% setup`) marks the start of a cell. The

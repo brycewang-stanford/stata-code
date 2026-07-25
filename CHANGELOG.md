@@ -6,6 +6,13 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Added
+
+- The VS Code extension now accepts Stata's familiar `Ctrl+D` shortcut
+  (`Cmd+D` on macOS) for running the selection or current line, while retaining
+  `Cmd/Ctrl+Enter`. The extension README also documents how to customize the
+  `stataCode.runSelection` keybinding and resolve conflicts.
+
 ## 0.10.0 — 2026-07-24
 
 Surface-coverage and safety additions so every Stata usage scenario — MCP,
