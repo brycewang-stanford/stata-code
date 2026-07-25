@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 
 import pytest
@@ -677,6 +678,106 @@ class TestDispatch:
         out = asyncio.run(probe())
         assert _json_body(out) == json.loads(payload)
         assert out.structuredContent == json.loads(payload)
+
+    def test_blocking_runner_uses_a_worker_thread(self):
+        from stata_code.mcp import server
+
+        async def exercise() -> tuple[int, int]:
+            event_loop_thread = threading.get_ident()
+            worker_thread = await server._run_blocking(threading.get_ident)
+            return event_loop_thread, worker_thread
+
+        event_loop_thread, worker_thread = asyncio.run(exercise())
+        assert worker_thread != event_loop_thread
+
+    @pytest.mark.parametrize(
+        ("tool_name", "arguments", "patched_name", "replacement", "expected"),
+        [
+            (
+                "stata_run",
+                {"code": "display 1"},
+                "_run_tool",
+                lambda arguments: {"submitted": arguments["code"]},
+                {"submitted": "display 1"},
+            ),
+            (
+                "list_sessions",
+                {},
+                "_list_sessions_payload",
+                lambda _pool: {"sessions": []},
+                {"sessions": []},
+            ),
+        ],
+    )
+    def test_dispatch_routes_blocking_functions_through_runner(
+        self,
+        monkeypatch,
+        tool_name,
+        arguments,
+        patched_name,
+        replacement,
+        expected,
+    ):
+        from stata_code.mcp import server
+
+        calls = []
+
+        async def recording_runner(operation, /, *args, **kwargs):
+            calls.append((operation, args, kwargs))
+            return operation(*args, **kwargs)
+
+        monkeypatch.setattr(server, patched_name, replacement)
+        monkeypatch.setattr(server, "_run_blocking", recording_runner)
+        if tool_name == "list_sessions":
+            monkeypatch.setattr(server, "get_default_pool", object)
+
+        result = asyncio.run(server._dispatch(tool_name, arguments))
+
+        assert len(calls) == 1
+        assert result == expected or result.structuredContent == expected
+
+    @pytest.mark.parametrize(
+        ("tool_name", "method_name", "method_result", "expected"),
+        [
+            (
+                "cancel_session",
+                "request_cancel",
+                (True, True),
+                {"was_pending": False, "is_pending": True, "killed_worker": True},
+            ),
+            (
+                "reset_session",
+                "reset_session",
+                True,
+                {"dropped_frame": True},
+            ),
+        ],
+    )
+    def test_session_mutations_cross_blocking_runner(
+        self, monkeypatch, tool_name, method_name, method_result, expected
+    ):
+        from stata_code.mcp import server
+
+        class Pool:
+            pass
+
+        pool = Pool()
+        setattr(pool, method_name, lambda session_id: method_result)
+        observed = []
+
+        async def recording_runner(operation, /, *args, **kwargs):
+            observed.append((operation, args))
+            return operation(*args, **kwargs)
+
+        monkeypatch.setattr(server, "get_default_pool", lambda: pool)
+        monkeypatch.setattr(server, "_run_blocking", recording_runner)
+
+        result = asyncio.run(server._dispatch(tool_name, {"session_id": "main"}))
+
+        assert len(observed) == 1
+        assert observed[0][1] == ("main",)
+        for key, value in expected.items():
+            assert result.structuredContent[key] == value
 
     def test_info_payload_from_pool_happy_path(self, monkeypatch):
         """The production path returns the merged shape from a worker dict."""

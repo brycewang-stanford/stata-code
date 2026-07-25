@@ -20,8 +20,10 @@ import base64
 import json
 import re
 import sys
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
 try:
@@ -2287,6 +2289,17 @@ _GRAPH_MIME = {
     "pdf": "application/pdf",
 }
 
+_T = TypeVar("_T")
+
+
+async def _run_blocking(
+    operation: Callable[..., _T], /, *args: Any, **kwargs: Any
+) -> _T:
+    """Run synchronous worker/IPC code outside the MCP event-loop thread."""
+    loop = asyncio.get_running_loop()
+    bound = partial(operation, *args, **kwargs)
+    return await loop.run_in_executor(None, bound)
+
 
 def _list_sessions_payload(pool: Any) -> dict[str, Any]:
     """Build the ``list_sessions`` MCP response from a pool.
@@ -2366,7 +2379,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
 
     try:
         if name == "stata_run":
-            return _run_tool(arguments)
+            return await _run_blocking(_run_tool, arguments)
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
@@ -2410,11 +2423,13 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # distinguish "no other sessions" from "some workers timed
             # out". The plain `list_session_info()` method is still
             # advertised for older callers.
-            result = _list_sessions_payload(get_default_pool())
+            result = await _run_blocking(_list_sessions_payload, get_default_pool())
             return _json_result(result, text_payload=result["sessions"])
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
-            registered, killed_worker = get_default_pool().request_cancel(sid)
+            registered, killed_worker = await _run_blocking(
+                get_default_pool().request_cancel, sid
+            )
             was_pending = not registered
             # `is_pending` is reported as the post-registration state, which
             # is True by definition: `request_cancel` always adds the session
@@ -2439,7 +2454,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # `clear all` (both wipe data + r()/e()), with the wrinkle
             # that ref-store entries this session produced stay valid in
             # the parent's `_refs` LRU until naturally evicted.
-            dropped = get_default_pool().reset_session(sid)
+            dropped = await _run_blocking(get_default_pool().reset_session, sid)
             return _json_result(
                 {
                     "session_id": sid,
