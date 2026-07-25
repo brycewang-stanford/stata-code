@@ -2366,7 +2366,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
 
     try:
         if name == "stata_run":
-            return await asyncio.to_thread(_run_tool, arguments)
+            return _run_tool(arguments)
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
@@ -2410,15 +2410,11 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # distinguish "no other sessions" from "some workers timed
             # out". The plain `list_session_info()` method is still
             # advertised for older callers.
-            result = await asyncio.to_thread(
-                lambda: _list_sessions_payload(get_default_pool())
-            )
+            result = _list_sessions_payload(get_default_pool())
             return _json_result(result, text_payload=result["sessions"])
         if name == "cancel_session":
             sid = arguments.get("session_id", "main")
-            registered, killed_worker = await asyncio.to_thread(
-                lambda: get_default_pool().request_cancel(sid)
-            )
+            registered, killed_worker = get_default_pool().request_cancel(sid)
             was_pending = not registered
             # `is_pending` is reported as the post-registration state, which
             # is True by definition: `request_cancel` always adds the session
@@ -2443,9 +2439,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             # `clear all` (both wipe data + r()/e()), with the wrinkle
             # that ref-store entries this session produced stay valid in
             # the parent's `_refs` LRU until naturally evicted.
-            dropped = await asyncio.to_thread(
-                lambda: get_default_pool().reset_session(sid)
-            )
+            dropped = get_default_pool().reset_session(sid)
             return _json_result(
                 {
                     "session_id": sid,
