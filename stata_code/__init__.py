@@ -98,9 +98,14 @@ def run(
     include_graphs: Literal["ref", "inline", "none"] = "ref",
     graph_format: Literal["png", "svg", "pdf"] = "png",
     include_dataset_variables: bool = True,
+    include_results: Literal["none", "scalars", "full"] = "scalars",
+    include_estimation: Literal["none", "summary", "full"] = "full",
+    max_coefficients: int | None = None,
     timeout_ms: int | None = 600_000,
     persist_log_files: bool = False,
     persist_generated_files: bool = True,
+    track_output_files: bool = True,
+    auto_close_logs: bool = True,
     origin_path: str | None = None,
     origin_kind: str | None = None,
     origin_label: str | None = None,
@@ -113,6 +118,12 @@ def run(
     The package-level API uses the same hard-timeout, stdout-isolated backend
     as the MCP server. The lower-level in-process runner remains available as
     ``stata_code.core.runner.execute`` for callers that explicitly need it.
+
+    ``include_results`` defaults to ``"scalars"``: ``r()`` / ``e()`` scalars and
+    macros are inlined, while matrices come back as ``matrix://`` stubs whose
+    values are fetched with :func:`stata_code.get_matrix`. Pass
+    ``include_results="full"`` for the pre-0.11 shape. ``results.estimation``
+    is unaffected — it carries the typed coefficient table either way.
     """
     return pool_execute(
         code,
@@ -123,9 +134,14 @@ def run(
         include_graphs=include_graphs,
         graph_format=graph_format,
         include_dataset_variables=include_dataset_variables,
+        include_results=include_results,
+        include_estimation=include_estimation,
+        max_coefficients=max_coefficients,
         timeout_ms=timeout_ms,
         persist_log_files=persist_log_files,
         persist_generated_files=persist_generated_files,
+        track_output_files=track_output_files,
+        auto_close_logs=auto_close_logs,
         origin_path=origin_path,
         origin_kind=origin_kind,
         origin_label=origin_label,

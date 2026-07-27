@@ -35,6 +35,7 @@ class ErrorKind(str, Enum):
     FILE_EXISTS = "file_exists"
     FILE_CORRUPT = "file_corrupt"
     FILE_IO = "file_io"
+    LOG_STATE = "log_state"
     NETWORK = "network"
     PERMISSION = "permission"
     ENCODING = "encoding"
@@ -43,6 +44,7 @@ class ErrorKind(str, Enum):
     INTERRUPT = "interrupt"
     CANCELLED = "cancelled"
     TIMEOUT = "timeout"
+    SESSION_BUSY = "session_busy"
     ADAPTER_CRASH = "adapter_crash"
     POLICY_BLOCKED = "policy_blocked"
     UNKNOWN = "unknown"
@@ -66,6 +68,33 @@ class IncludeGraphs(str, Enum):
     REF = "ref"
     INLINE = "inline"
     NONE = "none"
+
+
+class IncludeResults(str, Enum):
+    """How much of ``results.r`` / ``results.e`` to put on the wire.
+
+    ``scalars`` (the default) is the token-economy setting: named scalars and
+    macros stay inline — they are what agents actually branch on — while every
+    matrix collapses to a ``matrix://`` stub carrying only its shape. The
+    numbers remain retrievable via ``get_matrix(ref)``.
+    """
+
+    NONE = "none"
+    SCALARS = "scalars"
+    FULL = "full"
+
+
+class IncludeEstimation(str, Enum):
+    """How much of ``results.estimation`` to put on the wire.
+
+    ``summary`` keeps the model-level block (command, N, model stats,
+    identification diagnostics) but drops the per-term coefficient rows, which
+    dominate the payload for fixed-effect-heavy specifications.
+    """
+
+    NONE = "none"
+    SUMMARY = "summary"
+    FULL = "full"
 
 
 class Backend(str, Enum):
@@ -141,6 +170,11 @@ class Matrix(_Base):
     cols: list[str]
     values: list[list[float | None]] | None = None
     ref: str | None = None
+    # True shape, always populated even when `rows` / `cols` are elided because
+    # the matrix was returned as a stub. Lets an agent decide whether fetching
+    # the values is worth a round-trip without guessing from the label lists.
+    n_rows: int | None = None
+    n_cols: int | None = None
 
     @model_validator(mode="after")
     def _check_shape(self) -> Matrix:
@@ -198,6 +232,12 @@ class EstimationResult(_Base):
     coefficients: list[Coefficient] = Field(default_factory=list)
     model_stats: dict[str, float | None] = Field(default_factory=dict)
     diagnostics: dict[str, float | None] = Field(default_factory=dict)
+    # Number of terms the model actually estimated. Equals len(coefficients)
+    # unless the caller capped the table (`max_coefficients`) or dropped it
+    # (`include_estimation="summary"`), so an agent can always tell whether it
+    # is looking at the whole model.
+    n_coefficients: int = 0
+    coefficients_truncated: bool = False
 
 
 class ResultsInfo(_Base):
@@ -319,6 +359,10 @@ class ErrorInfo(_Base):
     message: str = ""
     command: str | None = None
     line: int | None = None
+    # Absolute path of the file `line` indexes into, when the failure happened
+    # inside a `do` / `run` script rather than in the submitted code. `null`
+    # means `line` refers to the submitted `code` itself.
+    source_file: str | None = None
     context: ErrorContext = Field(default_factory=ErrorContext)
     commands_executed: int | None = None
     path: str | None = None
@@ -348,6 +392,21 @@ class StataWarning(_Base):
     @classmethod
     def _truncate(cls, v: str) -> str:
         return _truncate(v, _WARNING_MAX)
+
+
+class OutputFile(_Base):
+    """A file the run created or modified in its working directory.
+
+    Detected by diffing a size/mtime snapshot of the working directory taken
+    around the run, filtered to the extensions econometric scripts actually
+    export (``.tex``, ``.csv``, ``.docx``, ``.png``, ``.dta``, …). This is
+    reported for every run — unlike ``log.files.output_paths``, which only
+    exists when the caller also asked for a persisted run bundle.
+    """
+
+    path: str
+    bytes: int | None = None
+    created: bool = False
 
 
 class OriginInfo(_Base):
@@ -390,6 +449,7 @@ class RunResult(_Base):
     results: ResultsInfo = Field(default_factory=ResultsInfo)
     dataset: DatasetInfo = Field(default_factory=DatasetInfo)
     graphs: list[GraphInfo] = Field(default_factory=list)
+    outputs: list[OutputFile] = Field(default_factory=list)
     warnings: list[StataWarning] = Field(default_factory=list)
     error: ErrorInfo | None = None
     origin: OriginInfo | None = None

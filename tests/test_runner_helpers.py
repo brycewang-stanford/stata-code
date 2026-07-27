@@ -871,7 +871,7 @@ class TestCollectReturns:
             macros={"r(varlist)": "mpg"},
             matrices={"r(small)": {"values": [[1, 2], [3, 4]], "rows": ["r1", "r2"], "cols": ["c1", "c2"]}},
         )
-        out = runner._collect_returns(rt, "r", "req-cr")
+        out = runner._collect_returns(rt, "r")
         assert out.scalars == {"N": 74.0, "mean": 21.5}
         assert isinstance(out.scalars["N"], float)
         assert out.macros == {"varlist": "mpg"}
@@ -898,7 +898,7 @@ class TestCollectReturns:
             macros={"r(mbad)": RAISE},
             matrices={"r(boom)": RAISE},
         )
-        out = runner._collect_returns(rt, "r", "req-fail")
+        out = runner._collect_returns(rt, "r")
         assert out.scalars == {"good": 1.0, "bad": None}
         assert out.macros == {"mbad": ""}
         assert out.matrices == {}

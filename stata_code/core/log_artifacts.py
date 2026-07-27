@@ -89,6 +89,17 @@ _OUTPUT_EXTENSIONS = {
 }
 FileSnapshot = dict[str, tuple[int, int]]
 
+# Upper bound on files a working-directory snapshot will track. Output
+# detection runs on every execute(), so a caller who points the working
+# directory at a huge tree (a home directory, a data lake) must not pay an
+# unbounded walk. Past the cap the snapshot reports itself as incomplete and
+# output detection is skipped rather than reported wrong.
+MAX_SNAPSHOT_ENTRIES = 5000
+
+# Sentinel key marking a snapshot that stopped early. Not a legal file path
+# (paths are absolute), so it can never collide with a tracked file.
+SNAPSHOT_TRUNCATED_KEY = ""
+
 
 def persist_run_log_files(
     *,
@@ -206,8 +217,15 @@ def snapshot_working_dir_files(
     *,
     origin_path: str | Path | None = None,
     max_depth: int = 3,
+    max_entries: int = MAX_SNAPSHOT_ENTRIES,
 ) -> FileSnapshot:
-    """Capture file size/mtime for generated-output detection."""
+    """Capture file size/mtime for generated-output detection.
+
+    Walking stops once ``max_entries`` files have been recorded. A truncated
+    snapshot is marked by the sentinel key ``""`` so callers can tell it apart
+    from a genuinely small directory and decline to report output diffs they
+    cannot compute correctly.
+    """
     root = Path(working_dir).expanduser().resolve()
     origin = Path(origin_path).expanduser().resolve() if origin_path else None
     snapshot: FileSnapshot = {}
@@ -243,8 +261,48 @@ def snapshot_working_dir_files(
                 continue
             if origin is not None and resolved == origin:
                 continue
+            if len(snapshot) >= max_entries:
+                snapshot[SNAPSHOT_TRUNCATED_KEY] = (0, 0)
+                return snapshot
             snapshot[str(resolved)] = (stat.st_size, stat.st_mtime_ns)
     return snapshot
+
+
+def snapshot_is_truncated(snapshot: FileSnapshot | None) -> bool:
+    """Whether ``snapshot`` hit :data:`MAX_SNAPSHOT_ENTRIES` and is incomplete."""
+    return snapshot is not None and SNAPSHOT_TRUNCATED_KEY in snapshot
+
+
+def describe_output_files(
+    before: FileSnapshot,
+    working_dir: str | Path,
+    *,
+    origin_path: str | Path | None = None,
+    max_depth: int = 3,
+) -> list[dict[str, Any]]:
+    """Describe files the run created or modified, for the result envelope.
+
+    Same detection as :func:`changed_output_files`, but returns wire-shaped
+    dicts (``path`` / ``bytes`` / ``created``) instead of paths, so a caller
+    can report generated tables and exports without also opting into a
+    persisted run bundle.
+    """
+    out: list[dict[str, Any]] = []
+    for path in changed_output_files(
+        before, working_dir, origin_path=origin_path, max_depth=max_depth
+    ):
+        try:
+            size: int | None = path.stat().st_size
+        except OSError:
+            size = None
+        out.append(
+            {
+                "path": str(path),
+                "bytes": size,
+                "created": str(path) not in before,
+            }
+        )
+    return out
 
 
 def changed_output_files(

@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import math
 import re
 import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
@@ -38,12 +39,15 @@ from stata_code.core.errors import (
     recovery_for,
     suggestions_for,
 )
-from stata_code.core.estimation import build_estimation_result
+from stata_code.core.estimation import build_estimation_result, trim_estimation
 from stata_code.core.log_artifacts import (
+    MAX_SNAPSHOT_ENTRIES,
     FileSnapshot,
     changed_output_files,
     copy_output_artifacts,
+    describe_output_files,
     persist_run_log_files,
+    snapshot_is_truncated,
     snapshot_working_dir_files,
     update_run_artifact_manifest,
 )
@@ -56,10 +60,13 @@ from stata_code.core.schema import (
     ErrorKind,
     GraphFormat,
     GraphInfo,
+    IncludeEstimation,
+    IncludeResults,
     LogFileInfo,
     LogInfo,
     Matrix,
     OriginInfo,
+    OutputFile,
     ResultsInfo,
     RunResult,
     StataEdition,
@@ -131,6 +138,50 @@ _DATASET_VAR_CAP = 200
 # via `get_matrix(ref)`. Per SCHEMA.md §3.4: "Producers SHOULD do this when
 # a matrix would inline more than ~10,000 cells."
 MATRIX_INLINE_CELL_CAP = 10_000
+
+# Stata's system missing `.` is exactly maxdouble (2**1023); the 26 extended
+# missings `.a`–`.z` occupy the next representable doubles above it. `sfi`
+# hands all of them back as ordinary Python floats, so any value at or above
+# this threshold is a missing marker rather than a number. Without the guard,
+# an omitted base level's standard error arrives on the wire as
+# 8.98846567431158e+307 — a number an agent will happily format into a table.
+_STATA_MISSING_MIN = 2.0**1023
+
+# Matrices the estimation contract is built from. When the caller suppresses
+# `results` but still wants `estimation`, these are the only matrices worth
+# reading out of Stata.
+_ESTIMATION_MATRICES: dict[str, frozenset[str]] = {
+    "e": frozenset({"b", "V"}),
+    "r": frozenset({"table"}),
+}
+
+
+def _norm_stata_number(value: Any) -> float | None:
+    """Coerce an sfi numeric to a float, mapping Stata missings to ``None``.
+
+    Applies to every number that crosses the wire — r()/e() scalars and every
+    matrix cell — so SCHEMA.md §3.4's "system missing (`.`) → JSON `null`"
+    holds uniformly instead of only for scalars that sfi happened to return as
+    ``None``.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f) or f >= _STATA_MISSING_MIN:
+        return None
+    return f
+
+
+def _refs_matrix_values(ref: str) -> list[list[float | None]] | None:
+    """Resolve a ``matrix://`` ref back to its values for the estimation builder."""
+    payload = _refs.get(ref)
+    if not isinstance(payload, dict):
+        return None
+    values = payload.get("values")
+    return values if isinstance(values, list) else None
 
 
 def _utc_iso_ms() -> str:
@@ -479,12 +530,24 @@ def _list_returns(rt: Any, prefix: str) -> dict[str, list[str]]:
     return _parse_return_list(stdout)
 
 
-def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
-    """Build a StataReturns for r() or e() using sfi for typed access.
+def _collect_returns(
+    rt: Any,
+    prefix: str,
+    *,
+    want_named: bool = True,
+    matrix_names: Iterable[str] | None = None,
+) -> StataReturns:
+    """Read r() or e() out of Stata using sfi for typed access.
 
-    Matrices larger than ``MATRIX_INLINE_CELL_CAP`` cells are emitted with
-    ``values=None`` and a ``matrix://<request_id>/<prefix>/<name>`` ref;
-    callers fetch the values via :func:`get_matrix`.
+    Matrices come back fully inline; deciding what actually goes on the wire
+    (inline / ref / stub) is :func:`_project_returns`' job, so that the
+    estimation contract can always be built from complete values regardless of
+    the caller's payload budget.
+
+    ``want_named`` false suppresses scalars and macros — used when the caller
+    asked for ``include_results="none"`` but still wants ``estimation``.
+    ``matrix_names`` restricts which matrices are read at all; ``None`` reads
+    every matrix Stata reports.
 
     Failure semantics: a per-name collection failure (sfi raises) is
     silently coerced — scalars become ``None``, macros become ``""``,
@@ -498,30 +561,33 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
     sfi = rt.sfi
 
     scalars: dict[str, float | None] = {}
-    for name in names["scalars"]:
-        try:
-            v = sfi.Scalar.getValue(f"{prefix}({name})")
-            scalars[name] = float(v) if v is not None else None
-        except Exception:  # noqa: BLE001
-            scalars[name] = None
-
     macros: dict[str, str] = {}
-    for name in names["macros"]:
-        try:
-            v = sfi.Macro.getGlobal(f"{prefix}({name})")
-            macros[name] = v if v is not None else ""
-        except Exception:  # noqa: BLE001
-            macros[name] = ""
+    if want_named:
+        for name in names["scalars"]:
+            try:
+                scalars[name] = _norm_stata_number(sfi.Scalar.getValue(f"{prefix}({name})"))
+            except Exception:  # noqa: BLE001
+                scalars[name] = None
 
+        for name in names["macros"]:
+            try:
+                v = sfi.Macro.getGlobal(f"{prefix}({name})")
+                macros[name] = v if v is not None else ""
+            except Exception:  # noqa: BLE001
+                macros[name] = ""
+
+    wanted = None if matrix_names is None else frozenset(matrix_names)
     matrices: dict[str, Matrix] = {}
     for name in names["matrices"]:
+        if wanted is not None and name not in wanted:
+            continue
         key = f"{prefix}({name})"
         try:
             values = sfi.Matrix.get(key)
             rows = list(sfi.Matrix.getRowNames(key) or [])
             cols = list(sfi.Matrix.getColNames(key) or [])
             norm_values: list[list[float | None]] = [
-                [None if v is None else float(v) for v in row] for row in values
+                [_norm_stata_number(v) for v in row] for row in values
             ]
             n_rows = len(norm_values)
             n_cols = len(norm_values[0]) if n_rows else 0
@@ -532,19 +598,67 @@ def _collect_returns(rt: Any, prefix: str, request_id: str) -> StataReturns:
                 rows = [f"r{i + 1}" for i in range(n_rows)]
             if len(cols) != n_cols:
                 cols = [f"c{j + 1}" for j in range(n_cols)]
-            if n_rows * n_cols > MATRIX_INLINE_CELL_CAP:
-                ref = f"matrix://{request_id}/{prefix}/{name}"
-                _refs.put(
-                    ref,
-                    {"rows": rows, "cols": cols, "values": norm_values},
-                )
-                matrices[name] = Matrix(rows=rows, cols=cols, values=None, ref=ref)
-            else:
-                matrices[name] = Matrix(rows=rows, cols=cols, values=norm_values, ref=None)
+            matrices[name] = Matrix(
+                rows=rows,
+                cols=cols,
+                values=norm_values,
+                ref=None,
+                n_rows=n_rows,
+                n_cols=n_cols,
+            )
         except Exception:  # noqa: BLE001
             continue
 
     return StataReturns(scalars=scalars, macros=macros, matrices=matrices)
+
+
+def _project_returns(
+    rv: StataReturns,
+    *,
+    prefix: str,
+    request_id: str,
+    mode: IncludeResults,
+) -> StataReturns:
+    """Reduce collected returns to the representation the caller asked for.
+
+    * ``full`` — matrices inline, except those past ``MATRIX_INLINE_CELL_CAP``
+      cells, which become ``matrix://`` refs (the pre-existing behaviour).
+    * ``scalars`` — scalars and macros inline; *every* matrix becomes a ref
+      stub carrying only its shape. This is the default because a single
+      estimation typically encodes the same numbers four times over
+      (``e(b)``, ``e(V)``, ``e(beta)``, ``r(table)``) while
+      ``results.estimation`` already carries the typed, deduplicated view.
+    * ``none`` — nothing; the caller wants only the log / dataset / estimation.
+
+    In ``scalars`` mode the row and column labels are dropped along with the
+    values: for a 141-term model those two label lists alone run to several
+    kilobytes. ``full`` mode keeps them next to the ref, as SCHEMA.md §3.4
+    describes. Either way ``get_matrix(ref)`` returns labels and values.
+    """
+    if mode == IncludeResults.NONE:
+        return StataReturns(scalars={}, macros={}, matrices={})
+
+    matrices: dict[str, Matrix] = {}
+    for name, m in rv.matrices.items():
+        values = m.values
+        n_rows = m.n_rows if m.n_rows is not None else len(values or [])
+        n_cols = m.n_cols if m.n_cols is not None else (len(values[0]) if values else 0)
+        elide_labels = mode == IncludeResults.SCALARS
+        stub = elide_labels or (n_rows * n_cols) > MATRIX_INLINE_CELL_CAP
+        if not stub or values is None:
+            matrices[name] = m
+            continue
+        ref = f"matrix://{request_id}/{prefix}/{name}"
+        _refs.put(ref, {"rows": m.rows, "cols": m.cols, "values": values})
+        matrices[name] = Matrix(
+            rows=[] if elide_labels else m.rows,
+            cols=[] if elide_labels else m.cols,
+            values=None,
+            ref=ref,
+            n_rows=n_rows,
+            n_cols=n_cols,
+        )
+    return StataReturns(scalars=rv.scalars, macros=rv.macros, matrices=matrices)
 
 
 def _collect_dataset(rt: Any, include_variables: bool) -> DatasetInfo:
@@ -645,7 +759,12 @@ def _extract_typed_fields(kind: ErrorKind, message: str) -> dict[str, str | None
     return fields
 
 
-def _parse_failure_transcript(error_text: str, user_code: str) -> dict[str, Any]:
+def _parse_failure_transcript(
+    error_text: str,
+    user_code: str,
+    *,
+    working_dir: Path | None = None,
+) -> dict[str, Any]:
     """Pinpoint the failing command in multi-line user code.
 
     pystata's SystemError for multi-line input contains the full Stata
@@ -653,13 +772,16 @@ def _parse_failure_transcript(error_text: str, user_code: str) -> dict[str, Any]
 
     - `failing`: the failing command's text (or "" if not isolatable)
     - `line`: 1-indexed line in the original user code (or None)
+    - `source_file`: the `do`/`run` script `line` indexes into, when the
+      failure happened inside one rather than in the submitted code
     - `commands_executed`: count of *non-comment* commands that completed
       successfully before the failure (or None)
-    - `before` / `after`: surrounding lines in the user code (up to 3 / 1)
+    - `before` / `after`: surrounding lines (up to 3 / 1)
     """
     out: dict[str, Any] = {
         "failing": "",
         "line": None,
+        "source_file": None,
         "commands_executed": None,
         "before": [],
         "after": [],
@@ -682,43 +804,154 @@ def _parse_failure_transcript(error_text: str, user_code: str) -> dict[str, Any]
             out["commands_executed"] = 0
         return out
 
-    # Multi-line case — parse `. <cmd>` lines.
-    transcript_lines = error_text.split("\n")
-    cmd_echoes: list[str] = []
-    for ln in transcript_lines:
-        if not ln.startswith(". "):
-            continue
-        body = ln[2:].strip()
-        if not body:
-            continue  # empty `. ` is just a prompt
-        if body.startswith("*") or body.startswith("//"):
-            continue  # comment-only line — Stata echoes but doesn't "run"
-        cmd_echoes.append(body)
+    # Multi-line case — parse `. <cmd>` lines. `head_echoes` keeps the first
+    # PHYSICAL line of each command; `cmd_echoes` keeps the logical command
+    # with Stata's `> ` continuation fragments folded back in, so a command
+    # broken across lines with `///` is reported whole.
+    head_echoes, cmd_echoes = _transcript_command_echoes(error_text)
 
     if not cmd_echoes:
         return out
 
     failing = cmd_echoes[-1]
+    failing_head = head_echoes[-1]
     out["failing"] = failing
     out["command"] = failing
     out["commands_executed"] = len(cmd_echoes) - 1
 
     # Match against original user code lines (with blanks) for line number.
-    for i, ln in enumerate(user_lines, 1):
-        if ln.strip() == failing:
-            out["line"] = i
-            out["before"] = [
-                user_lines[j] for j in range(max(0, i - 4), i - 1) if user_lines[j].strip()
-            ][-3:]
-            if i < len(user_lines):
-                next_lines = [
-                    user_lines[j]
-                    for j in range(i, min(len(user_lines), i + 1))
-                    if user_lines[j].strip()
-                ]
-                out["after"] = next_lines[:1]
-            break
+    located = _locate_in_lines(user_lines, failing, failing_head)
+    if located is not None:
+        out.update(located)
+        return out
 
+    # Not in the submitted code — the failure happened inside a script the
+    # submitted code invoked (`do "analysis.do"`). This is the common shape for
+    # agent workflows, and it used to yield `line: null` with empty context.
+    for candidate in _do_file_candidates(user_code, working_dir):
+        try:
+            source_lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        located = _locate_in_lines(source_lines, failing, failing_head)
+        if located is not None:
+            out.update(located)
+            out["source_file"] = str(candidate)
+            return out
+
+    return out
+
+
+# Stata renders a command that wraps (or was continued with `///`) by prefixing
+# the continuation fragments with "> ".
+_CONTINUATION_PREFIX = "> "
+
+
+def _transcript_command_echoes(error_text: str) -> tuple[list[str], list[str]]:
+    """Split a Stata transcript into (first-physical-line, logical) commands."""
+    heads: list[str] = []
+    logical: list[str] = []
+    in_echo = False
+    for ln in error_text.split("\n"):
+        if ln.startswith(". "):
+            body = ln[2:].strip()
+            in_echo = False
+            if not body:
+                continue  # empty `. ` is just a prompt
+            if body.startswith("*") or body.startswith("//"):
+                continue  # comment-only line — Stata echoes but doesn't "run"
+            heads.append(body)
+            logical.append(body)
+            in_echo = True
+            continue
+        if in_echo and ln.startswith(_CONTINUATION_PREFIX):
+            logical[-1] = _join_continuation(logical[-1], ln[len(_CONTINUATION_PREFIX) :].strip())
+            continue
+        in_echo = False
+    return heads, logical
+
+
+def _join_continuation(head: str, tail: str) -> str:
+    """Splice a `> ` continuation fragment onto the command it continues.
+
+    A `///` comment marker ends the physical line, so drop it before joining;
+    otherwise Stata simply wrapped a long line and the pieces abut directly.
+    """
+    base = head[: -len("///")].rstrip() if head.rstrip().endswith("///") else head
+    if head.rstrip().endswith("///"):
+        return f"{base} {tail}".strip()
+    return f"{base}{tail}"
+
+
+def _locate_in_lines(
+    lines: list[str],
+    failing: str,
+    failing_head: str,
+) -> dict[str, Any] | None:
+    """Find `failing` among `lines`; return line number and surrounding context.
+
+    Tries the logical command first, then the first physical line (the form a
+    `///`-continued command actually has on disk), then a whitespace-normalized
+    comparison. Returns ``None`` when the command is not in these lines at all.
+    """
+    needles = [n for n in (failing, failing_head) if n]
+    normalized = {_squeeze_ws(n) for n in needles}
+    for i, raw in enumerate(lines, 1):
+        stripped = raw.strip()
+        if stripped not in needles and _squeeze_ws(stripped) not in normalized:
+            continue
+        before = [lines[j] for j in range(max(0, i - 4), i - 1) if lines[j].strip()][-3:]
+        after: list[str] = []
+        if i < len(lines):
+            after = [lines[j] for j in range(i, min(len(lines), i + 1)) if lines[j].strip()][:1]
+        return {"line": i, "before": before, "after": after}
+    return None
+
+
+def _squeeze_ws(text: str) -> str:
+    return " ".join(text.split())
+
+
+# `[qui|cap|noi] do|run "path"` — the prefixes Stata allows in front of a
+# script invocation. Unquoted paths stop at whitespace or a comma (the option
+# separator), matching Stata's own parsing.
+_DO_INVOCATION_RE = re.compile(
+    r"""^\s*
+        (?:(?:qui(?:etly)?|cap(?:ture)?|noi(?:sily)?)\s+)*
+        (?:do|run)\s+
+        (?:"(?P<quoted>[^"]+)"|(?P<bare>[^\s,]+))
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _do_file_candidates(user_code: str, working_dir: Path | None) -> list[Path]:
+    """Resolve every `do`/`run` script the submitted code invokes.
+
+    Relative paths resolve against the run's working directory — the same
+    directory Stata itself resolved them against. Stata appends a default
+    `.do` extension, so a bare `do analysis` is checked as `analysis.do` too.
+    """
+    out: list[Path] = []
+    seen: set[str] = set()
+    for raw in user_code.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith(("*", "//")):
+            continue
+        m = _DO_INVOCATION_RE.match(stripped)
+        if m is None:
+            continue
+        target = m.group("quoted") or m.group("bare")
+        base = Path(target).expanduser()
+        variants = [base] if base.suffix else [base, base.with_suffix(".do")]
+        for variant in variants:
+            path = variant if variant.is_absolute() else ((working_dir or Path.cwd()) / variant)
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            if path.is_file():
+                out.append(path)
     return out
 
 
@@ -727,19 +960,25 @@ def _build_error(
     error_message: str,
     user_code: str,
     available_varnames: list[str] | None,
+    *,
+    working_dir: Path | None = None,
 ) -> ErrorInfo:
     kind = classify_rc(rc)
     short_msg = _last_error_line(error_message) if error_message else ""
+    # Classification reads the raw transcript, but the typed-field regexes
+    # should see the diagnosis sentence we just isolated as well, so a message
+    # buried above Stata's `end of do-file` boilerplate still yields a varname.
     typed = _extract_typed_fields(kind, error_message)
     suggs = suggestions_for(
         kind,
+        rc=rc,
         varname=typed["varname"],
         name=typed["name"],
         command=typed["command"],
         path=typed["path"],
         available_varnames=available_varnames,
     )
-    pinpoint = _parse_failure_transcript(error_message, user_code)
+    pinpoint = _parse_failure_transcript(error_message, user_code, working_dir=working_dir)
     return ErrorInfo(
         kind=kind,
         rc=rc,
@@ -747,6 +986,7 @@ def _build_error(
         message=short_msg,
         command=pinpoint["command"],
         line=pinpoint["line"],
+        source_file=pinpoint["source_file"],
         context=ErrorContext(
             before=pinpoint["before"],
             failing=pinpoint["failing"],
@@ -761,6 +1001,15 @@ def _build_error(
     )
 
 
+# Structural lines Stata prints around a failure that carry no diagnosis.
+# `end of do-file` in particular is what a `do "script.do"` failure ends with,
+# and taking it as the error message told agents nothing about what broke.
+_TRANSCRIPT_BOILERPLATE_RE = re.compile(
+    r"^(?:end of (?:do-file|file)(?:\s*\(.*\))?|--\s*break\s*--)$",
+    re.IGNORECASE,
+)
+
+
 def _last_error_line(error_text: str) -> str:
     """Extract the most informative line from a Stata error transcript.
 
@@ -768,21 +1017,24 @@ def _last_error_line(error_text: str) -> str:
     For multi-line transcripts the actual error sentence ("variable X not
     found") sits AFTER the last `. <cmd>` echo and BEFORE the `r(NN);` rc
     line. Return that sentence so agents see the diagnosis, not the echoed
-    command.
+    command and not Stata's `end of do-file` epilogue.
     """
     lines = [ln for ln in error_text.splitlines() if ln]
     if not lines:
         return ""
     if not any(ln.startswith(". ") for ln in lines):
         return lines[0].strip()
-    # Walk from bottom: skip rc lines, take next non-rc, non-`.` line.
+    # Walk from bottom: skip rc lines, echoes, continuation fragments and
+    # structural boilerplate; take the first real sentence below them.
     for ln in reversed(lines):
         s = ln.strip()
         if not s:
             continue
         if s.startswith("r(") and s.endswith(");"):
             continue
-        if ln.startswith(". "):
+        if ln.startswith((". ", _CONTINUATION_PREFIX)):
+            continue
+        if _TRANSCRIPT_BOILERPLATE_RE.match(s):
             continue
         return s
     return lines[0].strip()
@@ -856,6 +1108,56 @@ def _safe_file_stem(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._-")[:64]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Log-handle hygiene
+#
+# A do-file that aborts between `log using` and `log close` leaves its handle
+# open in the session. Every subsequent run then dies with r(604) "log file
+# already open" — an error about the *previous* run that agents have no way to
+# attribute. We snapshot open handles around each run and close the ones this
+# run opened when it fails, so a failure cannot poison the session.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LOG_NAME_RE = re.compile(r"^\s*name:\s*(\S+)\s*$")
+# Stata's placeholder for the log opened without `name(...)`; `log close`
+# with no argument is what closes it.
+_UNNAMED_LOG = "<unnamed>"
+
+
+def _open_log_names(rt: Any) -> list[str]:
+    """Names of every log handle currently open (`log query _all`).
+
+    Returns ``[]`` when nothing is open (Stata prints `(closed)`) or when the
+    query itself fails — this is best-effort hygiene, never a hard dependency.
+    """
+    try:
+        stdout, rc, _err = rt.run_capture("log query _all")
+    except Exception:  # noqa: BLE001
+        return []
+    if rc != 0:
+        return []
+    out: list[str] = []
+    for line in stdout.splitlines():
+        m = _LOG_NAME_RE.match(line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def _close_log_handles(rt: Any, names: Iterable[str]) -> list[str]:
+    """Close the given log handles; return the ones actually closed."""
+    closed: list[str] = []
+    for name in names:
+        cmd = "log close" if name == _UNNAMED_LOG else f"log close {name}"
+        try:
+            _stdout, rc, _err = rt.run_capture(f"capture {cmd}")
+        except Exception:  # noqa: BLE001
+            continue
+        if rc == 0:
+            closed.append(name)
+    return closed
+
+
 @_serialize_stata_state
 def execute(
     code: str,
@@ -867,9 +1169,14 @@ def execute(
     include_graphs: str = "ref",  # "ref" | "inline" | "none"
     graph_format: str = "png",
     include_dataset_variables: bool = True,
+    include_results: str = "scalars",  # "none" | "scalars" | "full"
+    include_estimation: str = "full",  # "none" | "summary" | "full"
+    max_coefficients: int | None = None,
     timeout_ms: int | None = 600_000,  # metadata only here; enforced by _pool
     persist_log_files: bool = False,
     persist_generated_files: bool = True,
+    track_output_files: bool = True,
+    auto_close_logs: bool = True,
     origin_path: str | None = None,
     origin_kind: str | None = None,
     origin_label: str | None = None,
@@ -895,6 +1202,13 @@ def execute(
     manifest also records these fields, but **only when** ``persist_log_files``
     is true *and* ``origin_path`` is provided — supplying ``origin_cell_id``
     alone (no path) yields an echo on the result but no manifest entry.
+
+    Payload budget. ``include_results`` (default ``"scalars"``) controls how
+    much of ``results.r`` / ``results.e`` is inlined; ``include_estimation``
+    and ``max_coefficients`` control ``results.estimation``. The defaults are
+    chosen so a single estimation is described once — as the typed coefficient
+    table — rather than four times over in ``e(b)``, ``e(V)``, ``e(beta)`` and
+    ``r(table)``. Raw matrix values stay retrievable via ``get_matrix(ref)``.
     """
     if include_graphs not in ("ref", "inline", "none"):
         raise ValueError(
@@ -906,6 +1220,21 @@ def execute(
         raise ValueError(
             f"graph_format must be 'png' | 'svg' | 'pdf'; got {graph_format!r}"
         ) from exc
+    try:
+        results_mode = IncludeResults(include_results)
+    except ValueError as exc:
+        raise ValueError(
+            f"include_results must be 'none' | 'scalars' | 'full'; got {include_results!r}"
+        ) from exc
+    try:
+        estimation_mode = IncludeEstimation(include_estimation)
+    except ValueError as exc:
+        raise ValueError(
+            "include_estimation must be 'none' | 'summary' | 'full'; "
+            f"got {include_estimation!r}"
+        ) from exc
+    if max_coefficients is not None and max_coefficients < 0:
+        raise ValueError(f"max_coefficients must be ≥ 0 or null; got {max_coefficients}")
 
     # Command-safety gate. Runs before Stata is even initialized so a blocked
     # command is rejected identically whether or not Stata is installed, and so
@@ -937,11 +1266,22 @@ def execute(
         working_dir=working_dir,
         use_origin_workdir=use_origin_workdir,
     )
-    output_snapshot: FileSnapshot | None = None
-    if persist_log_files and persist_generated_files and run_working_dir:
-        output_snapshot = snapshot_working_dir_files(run_working_dir, origin_path=origin_path)
     if run_working_dir:
         _change_stata_working_dir(rt, run_working_dir)
+    # Everything downstream — output detection, relative `do` path resolution,
+    # run-bundle placement — needs the directory Stata will actually resolve
+    # relative paths against, which is `c(pwd)` when the caller named neither
+    # an origin nor an explicit working dir.
+    effective_dir = run_working_dir or _current_stata_dir(rt)
+
+    want_snapshot = track_output_files or (persist_log_files and persist_generated_files)
+    output_snapshot: FileSnapshot | None = None
+    if want_snapshot and effective_dir:
+        output_snapshot = snapshot_working_dir_files(effective_dir, origin_path=origin_path)
+
+    # Snapshot open log handles so a run that aborts mid-script cannot leave a
+    # dangling handle that fails every subsequent run with r(604).
+    pre_log_names = _open_log_names(rt) if auto_close_logs else []
 
     # Snapshot existing graph names before user code so we can take a delta
     # afterward. This itself calls `graph dir`, which clobbers r(); user code
@@ -959,8 +1299,15 @@ def execute(
     # consistently across in-process and subprocess-backed paths.
     stata_elapsed_ms = elapsed_total_ms
 
+    # pystata raises the whole Stata transcript as the exception message and
+    # leaves the redirected stdout empty, so a failing run used to come back
+    # with no log at all — no `log.head`, no `log://` ref, nothing for
+    # `search_log` to search, exactly when the agent needs the transcript most.
+    # Adopt the transcript as the log text when stdout has nothing.
+    log_text = stdout_text if stdout_text.strip() or not err_msg else err_msg
+
     log = _split_log(
-        stdout_text,
+        log_text,
         log_lines_head,
         log_lines_tail,
         include_full_log,
@@ -970,22 +1317,30 @@ def execute(
     # On Stata error, we still surface results/dataset state — they reflect
     # whatever state existed before the failing command (per SCHEMA §3.7
     # commands_executed semantics).
-    results = ResultsInfo(
-        r=_collect_returns(rt, "r", request_id),
-        e=_collect_returns(rt, "e", request_id),
-        last_estimation_cmd=_last_estimation_cmd(rt),
+    results, estimation = _collect_results(
+        rt,
+        request_id=request_id,
+        results_mode=results_mode,
+        estimation_mode=estimation_mode,
+        max_coefficients=max_coefficients,
     )
-    results.estimation = build_estimation_result(results)
+    results.estimation = estimation
     dataset = _collect_dataset(rt, include_dataset_variables)
 
     available_varnames = [v.name for v in dataset.variables] if dataset.variables else None
 
     if err_msg is not None:
-        error = _build_error(rc, err_msg, code, available_varnames)
+        error = _build_error(
+            rc,
+            err_msg,
+            code,
+            available_varnames,
+            working_dir=effective_dir,
+        )
         # Build an error_window: prefer log tail; fall back to the error message
         # itself when the log is empty (pystata can raise before any stdout
         # gets flushed for short failures).
-        log_lines = [ln for ln in stdout_text.replace("\r\n", "\n").split("\n") if ln]
+        log_lines = [ln for ln in log_text.replace("\r\n", "\n").split("\n") if ln]
         if log_lines:
             tail_n = min(len(log_lines), 10)
             error_window = "\n".join(log_lines[-tail_n:])
@@ -1021,7 +1376,13 @@ def execute(
     else:
         graphs = []
 
-    capabilities = ["log_truncation", "matrix_ref", "multi_session"]
+    capabilities = [
+        "log_truncation",
+        "matrix_ref",
+        "multi_session",
+        "result_budget",
+        "log_hygiene",
+    ]
     if include_graphs != "none":
         capabilities.append("graph_ref")
     if include_graphs == "inline":
@@ -1029,21 +1390,74 @@ def execute(
 
     top_rc = rc if error is not None else 0
     ok = error is None and rc == 0
-    warnings = _extract_warnings(stdout_text)
+    warnings = _extract_warnings(log_text)
+
+    # A failed run may have left `log using` handles open. Close only the ones
+    # this run opened: a log the caller opened in an earlier successful run is
+    # theirs to manage and must survive.
+    if auto_close_logs and not ok:
+        leaked = [n for n in _open_log_names(rt) if n not in pre_log_names]
+        closed = _close_log_handles(rt, leaked)
+        if closed:
+            names = ", ".join(closed)
+            warnings.append(
+                StataWarning(
+                    kind="log_closed",
+                    message=(
+                        f"Closed {len(closed)} log handle(s) left open by this failed "
+                        f"run ({names}). Without this, the next run in this session "
+                        "would fail with r(604) 'log file already open'."
+                    ),
+                )
+            )
+
+    outputs: list[OutputFile] = []
+    if track_output_files and output_snapshot is not None and effective_dir:
+        if snapshot_is_truncated(output_snapshot):
+            warnings.append(
+                StataWarning(
+                    kind="output_tracking_skipped",
+                    message=(
+                        f"Working directory {effective_dir} holds more than "
+                        f"{MAX_SNAPSHOT_ENTRIES} files; generated-file detection was "
+                        "skipped. Pass track_output_files=false to silence this, or "
+                        "point working_dir at a narrower directory."
+                    ),
+                )
+            )
+        else:
+            try:
+                outputs = [
+                    OutputFile(**entry)
+                    for entry in describe_output_files(
+                        output_snapshot,
+                        effective_dir,
+                        origin_path=origin_path,
+                    )
+                ]
+            except OSError:
+                outputs = []
+        if outputs:
+            capabilities.append("output_tracking")
 
     if persist_log_files and origin_path:
         try:
             generated_files = (
                 changed_output_files(
                     output_snapshot,
-                    run_working_dir,
+                    effective_dir,
                     origin_path=origin_path,
                 )
-                if persist_generated_files and output_snapshot is not None and run_working_dir
+                if (
+                    persist_generated_files
+                    and output_snapshot is not None
+                    and not snapshot_is_truncated(output_snapshot)
+                    and effective_dir
+                )
                 else []
             )
             files = persist_run_log_files(
-                log_text=stdout_text,
+                log_text=log_text,
                 code=code,
                 origin_path=origin_path,
                 origin_kind=origin_kind,
@@ -1056,7 +1470,7 @@ def execute(
                 rc=top_rc,
                 ok=ok,
                 stata=stata_info,
-                working_dir=str(run_working_dir) if run_working_dir else None,
+                working_dir=str(effective_dir) if effective_dir else None,
             )
             graphs, graph_paths = _persist_graph_artifacts(files, graphs)
             files = files.model_copy(update={"graph_paths": graph_paths})
@@ -1064,11 +1478,11 @@ def execute(
                 files = files.model_copy(
                     update={"graphs_dir": str(Path(files.directory) / "graphs")}
                 )
-            if generated_files and run_working_dir:
+            if generated_files and effective_dir:
                 files = copy_output_artifacts(
                     files,
                     generated_files,
-                    working_dir=run_working_dir,
+                    working_dir=effective_dir,
                 )
             update_run_artifact_manifest(files)
             log = log.model_copy(update={"files": files})
@@ -1107,11 +1521,81 @@ def execute(
         results=results,
         dataset=dataset,
         graphs=graphs,
+        outputs=outputs,
         warnings=warnings,
         error=error,
         origin=origin_echo,
         capabilities=capabilities,
     )
+
+
+def _collect_results(
+    rt: Any,
+    *,
+    request_id: str,
+    results_mode: IncludeResults,
+    estimation_mode: IncludeEstimation,
+    max_coefficients: int | None,
+) -> tuple[ResultsInfo, Any]:
+    """Read r()/e(), derive the estimation contract, then project to the wire.
+
+    The estimation contract is always built from the *complete* values, so a
+    caller who suppressed ``results`` still gets correct standard errors; only
+    the wire representation is reduced afterwards.
+    """
+    want_estimation = estimation_mode != IncludeEstimation.NONE
+    if results_mode == IncludeResults.NONE and not want_estimation:
+        # Nothing downstream reads r()/e() — skip the Stata round-trips.
+        return ResultsInfo(last_estimation_cmd=_last_estimation_cmd(rt)), None
+
+    # With results suppressed but estimation wanted, read only the matrices the
+    # contract is derived from rather than every matrix in scope.
+    named = results_mode != IncludeResults.NONE
+    raw = ResultsInfo(
+        r=_collect_returns(
+            rt,
+            "r",
+            want_named=named,
+            matrix_names=None if named else _ESTIMATION_MATRICES["r"],
+        ),
+        e=_collect_returns(
+            rt,
+            "e",
+            want_named=named,
+            matrix_names=None if named else _ESTIMATION_MATRICES["e"],
+        ),
+        last_estimation_cmd=_last_estimation_cmd(rt),
+    )
+    estimation = (
+        trim_estimation(
+            build_estimation_result(raw, resolve_matrix=_refs_matrix_values),
+            mode=estimation_mode,
+            max_coefficients=max_coefficients,
+        )
+        if want_estimation
+        else None
+    )
+    projected = ResultsInfo(
+        r=_project_returns(raw.r, prefix="r", request_id=request_id, mode=results_mode),
+        e=_project_returns(raw.e, prefix="e", request_id=request_id, mode=results_mode),
+        last_estimation_cmd=raw.last_estimation_cmd,
+    )
+    return projected, estimation
+
+
+def _current_stata_dir(rt: Any) -> Path | None:
+    """Stata's current working directory (`c(pwd)`), or None if unreadable."""
+    try:
+        raw = rt.sfi.SFIToolkit.macroExpand("`c(pwd)'")
+    except Exception:  # noqa: BLE001
+        return None
+    if not raw:
+        return None
+    try:
+        path = Path(raw).expanduser()
+        return path if path.is_dir() else None
+    except OSError:
+        return None
 
 
 def _last_estimation_cmd(rt: Any) -> str | None:

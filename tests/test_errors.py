@@ -287,9 +287,13 @@ class TestClassifyRcAgainstManual:
     def test_removed_mismappings_fall_through_to_unknown(self):
         # Previously these were (incorrectly) mapped; they have no good kind.
         assert classify_rc(9) == ErrorKind.UNKNOWN  # assertion is false
-        assert classify_rc(604) == ErrorKind.UNKNOWN  # log file already open
         assert classify_rc(615) == ErrorKind.UNKNOWN  # (not in manual table)
         assert classify_rc(616) == ErrorKind.UNKNOWN  # checksum file error
+
+    def test_log_state_codes(self):
+        # Both verified against a live Stata runtime, not just the manual.
+        assert classify_rc(604) == ErrorKind.LOG_STATE  # log file already open
+        assert classify_rc(606) == ErrorKind.LOG_STATE  # no log file open
 
     def test_stable_known_mappings_unchanged(self):
         assert classify_rc(111) == ErrorKind.VARNAME_NOT_FOUND

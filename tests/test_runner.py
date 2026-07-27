@@ -67,7 +67,7 @@ class TestSuccessfulRun:
     def test_regress_returns_e_with_cmd_macro(self, loaded_auto):
         from stata_code.core.runner import execute
 
-        r = execute("regress mpg weight")
+        r = execute("regress mpg weight", include_results="full")
         assert r.ok is True
         assert r.results.e.macros.get("cmd") == "regress"
         assert r.results.last_estimation_cmd == "regress"
@@ -518,12 +518,16 @@ class TestWarnings:
 
 
 class TestMatrices:
-    """Matrix collection: small ones inline; large ones go through `_refs`."""
+    """Matrix collection: small ones inline; large ones go through `_refs`.
+
+    These pin the ``include_results="full"`` contract. The default
+    (``"scalars"``) stubs every matrix — see :class:`TestResultBudget`.
+    """
 
     def test_small_matrix_inlined_with_no_ref(self, loaded_auto):
         from stata_code.core.runner import execute
 
-        r = execute("regress mpg weight")
+        r = execute("regress mpg weight", include_results="full")
         assert r.ok
         # e(b) is 1×2 for `regress mpg weight` (intercept + 1 slope).
         b = r.results.e.matrices.get("b")
@@ -545,7 +549,7 @@ class TestMatrices:
         # (1×3 = 3 cells) inline.
         monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 4)
 
-        r = runner.execute("regress mpg weight length")
+        r = runner.execute("regress mpg weight length", include_results="full")
         assert r.ok
 
         v = r.results.e.matrices.get("V")
@@ -556,6 +560,7 @@ class TestMatrices:
         # Row/col labels remain visible inline (cheap, useful for the agent).
         assert v.rows
         assert v.cols
+        assert v.n_rows == 3 and v.n_cols == 3
 
         # Small matrix in the same result is still inlined (smoke test).
         b = r.results.e.matrices.get("b")
@@ -567,7 +572,7 @@ class TestMatrices:
         from stata_code.core import runner
 
         monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 4)
-        r = runner.execute("regress mpg weight length")
+        r = runner.execute("regress mpg weight length", include_results="full")
         assert r.ok
         v = r.results.e.matrices["V"]
         assert v.ref is not None
@@ -587,6 +592,137 @@ class TestMatrices:
 
         with pytest.raises(KeyError):
             get_matrix("matrix://does-not-exist/r/M")
+
+
+class TestResultBudget:
+    """`include_results` / `include_estimation` / `max_coefficients`.
+
+    The default exists because a single estimation otherwise encodes the same
+    numbers four times over — e(b), e(V), e(beta) and r(table) — while
+    `results.estimation` already carries the typed, deduplicated view.
+    """
+
+    def test_default_stubs_every_matrix_but_keeps_scalars(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        r = execute("regress mpg weight length")
+        assert r.ok
+        assert r.results.e.scalars["r2"] > 0  # scalars survive
+        assert r.results.e.macros["cmd"] == "regress"
+        for name, m in r.results.e.matrices.items():
+            assert m.values is None, f"e({name}) should be stubbed by default"
+            assert m.ref is not None, f"e({name}) needs a ref to stay retrievable"
+            assert m.rows == [] and m.cols == []
+            assert m.n_rows and m.n_cols
+
+    def test_stubbed_matrix_is_still_retrievable(self, loaded_auto):
+        from stata_code.core.runner import execute, get_matrix
+
+        r = execute("regress mpg weight length")
+        v = r.results.e.matrices["V"]
+        payload = get_matrix(v.ref)
+        # Labels elided from the wire come back with the values.
+        assert payload["rows"] and payload["cols"]
+        assert len(payload["values"]) == v.n_rows
+        assert len(payload["values"][0]) == v.n_cols
+
+    def test_estimation_survives_stubbing_with_real_standard_errors(self, loaded_auto):
+        """The whole point: trimming the wire must not blank inference."""
+        from stata_code.core.runner import execute
+
+        r = execute("regress mpg weight length")
+        est = r.results.estimation
+        assert est is not None
+        assert est.n_coefficients == len(est.coefficients) == 3
+        assert all(c.se is not None and c.se > 0 for c in est.coefficients)
+        assert all(c.p_value is not None for c in est.coefficients)
+
+    def test_standard_errors_survive_a_deferred_e_v(self, loaded_auto, monkeypatch):
+        """A ref'd e(V) used to blank se/statistic/p_value for every term."""
+        from stata_code.core import runner
+
+        monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 4)
+        r = runner.execute(
+            "regress mpg weight length",
+            include_results="full",
+            # Force the e(b)/e(V) path rather than r(table).
+        )
+        assert r.results.e.matrices["V"].values is None  # deferred
+        est = r.results.estimation
+        assert est is not None
+        assert all(c.se is not None and c.se > 0 for c in est.coefficients)
+
+    def test_include_results_none_drops_returns_but_keeps_estimation(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        r = execute("regress mpg weight", include_results="none")
+        assert r.results.e.scalars == {} and r.results.e.matrices == {}
+        assert r.results.r.scalars == {} and r.results.r.matrices == {}
+        assert r.results.estimation is not None
+        assert len(r.results.estimation.coefficients) == 2
+
+    def test_include_estimation_none_and_summary(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        assert execute("regress mpg weight", include_estimation="none").results.estimation is None
+
+        est = execute("regress mpg weight", include_estimation="summary").results.estimation
+        assert est is not None
+        assert est.coefficients == []
+        assert est.n_coefficients == 2  # true count still reported
+        assert est.coefficients_truncated is True
+        assert est.model_stats["r2"] > 0
+
+    def test_max_coefficients_truncates_and_flags(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        est = execute("regress mpg weight length", max_coefficients=1).results.estimation
+        assert len(est.coefficients) == 1
+        assert est.n_coefficients == 3
+        assert est.coefficients_truncated is True
+
+    def test_rejects_unknown_modes(self, loaded_auto):
+        from stata_code.core.runner import execute
+
+        with pytest.raises(ValueError, match="include_results"):
+            execute("display 1", include_results="everything")
+        with pytest.raises(ValueError, match="include_estimation"):
+            execute("display 1", include_estimation="all")
+        with pytest.raises(ValueError, match="max_coefficients"):
+            execute("display 1", max_coefficients=-1)
+
+
+class TestStataMissingValues:
+    """Stata's system missing is maxdouble (2**1023), not a number."""
+
+    def test_missing_markers_normalize_to_null(self):
+        """Pin the primitive: sfi hands missings back as ordinary floats."""
+        from stata_code.core.runner import _norm_stata_number
+
+        assert _norm_stata_number(2.0**1023) is None  # system missing `.`
+        assert _norm_stata_number(8.990660123939097e307) is None  # extended `.a`
+        assert _norm_stata_number(8.992854573566614e307) is None  # extended `.b`
+        assert _norm_stata_number(float("nan")) is None
+        assert _norm_stata_number(float("inf")) is None
+        # Largest legal Stata double stays a number.
+        assert _norm_stata_number(8.9e307) == 8.9e307
+        assert _norm_stata_number(3.5) == 3.5
+        assert _norm_stata_number(-0.0) == 0.0
+        assert _norm_stata_number(None) is None
+        assert _norm_stata_number("not a number") is None
+
+    def test_omitted_base_level_has_null_not_maxdouble(self, loaded_auto):
+        """`i.rep78`'s base level has missing se/t/p in r(table)."""
+        from stata_code.core.runner import execute
+
+        r = execute("regress price mpg i.rep78")
+        assert r.ok
+        est = r.results.estimation
+        base = [c for c in est.coefficients if c.b == 0.0 and c.se is None]
+        assert base, "expected at least one omitted base level with null se"
+        for c in est.coefficients:
+            for value in (c.b, c.se, c.statistic, c.p_value, c.ci_low, c.ci_high):
+                assert value is None or abs(value) < 1e300
 
 
 class TestCooperativeCancel:

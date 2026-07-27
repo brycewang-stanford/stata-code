@@ -21,14 +21,20 @@ table without re-running anything. This module is pure Python (only the stdlib
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 from stata_code.core.schema import (
     Coefficient,
     EstimationResult,
+    IncludeEstimation,
     Matrix,
     ResultsInfo,
     StataReturns,
 )
+
+# Resolves a ``matrix://`` ref to its row-major values, or ``None`` when the
+# ref is unknown. Supplied by the runner so this module stays Stata-free.
+MatrixResolver = Callable[[str], list[list[float | None]] | None]
 
 # 95% two-sided normal critical value, used only on the e(b)/e(V) fallback path.
 _Z_CRIT_95 = 1.959963984540054
@@ -162,22 +168,57 @@ def _cell(row: list[float | None] | None, j: int) -> float | None:
     return row[j]
 
 
-def _inline(m: Matrix | None) -> bool:
-    """True when a matrix carries inline values we can read directly."""
-    return m is not None and m.values is not None
+def _values(m: Matrix | None, resolve: MatrixResolver | None) -> list[list[float | None]] | None:
+    """Row-major values for a matrix, following its ``ref`` when necessary.
+
+    A matrix that exceeded the inline cell cap (or that the caller asked to be
+    stubbed) carries ``values=None`` and a ``matrix://`` ref. Historically the
+    estimation builder treated that as "no values", which silently blanked
+    ``se`` / ``statistic`` / ``p_value`` / CI for every coefficient of any
+    model whose ``e(V)`` was large enough to be deferred — precisely the
+    fixed-effect-heavy specifications where the table matters most. Resolving
+    the ref keeps inference available regardless of wire representation.
+    """
+    if m is None:
+        return None
+    if m.values is not None:
+        return m.values
+    if m.ref and resolve is not None:
+        return resolve(m.ref)
+    return None
 
 
-def _from_r_table(table: Matrix) -> tuple[list[Coefficient], str] | None:
+def _labels(m: Matrix, values: list[list[float | None]] | None, axis: str) -> list[str]:
+    """Row or column labels, falling back to the ref payload's own labels.
+
+    A stubbed matrix elides ``rows`` / ``cols`` to save tokens, so read them
+    back from the resolved payload when the stub's list is empty.
+    """
+    declared = m.rows if axis == "rows" else m.cols
+    if declared:
+        return list(declared)
+    if values is None:
+        return []
+    if axis == "rows":
+        return [f"r{i + 1}" for i in range(len(values))]
+    width = len(values[0]) if values else 0
+    return [f"c{j + 1}" for j in range(width)]
+
+
+def _from_r_table(
+    table: Matrix, resolve: MatrixResolver | None = None
+) -> tuple[list[Coefficient], str] | None:
     """Parse ``r(table)`` into coefficient rows. Returns (coeffs, stat_kind).
 
     Returns ``None`` if the matrix does not look like a coefficient table
-    (no ``b`` row) or is only available by reference.
+    (no ``b`` row) or its values cannot be obtained.
     """
-    if not _inline(table):
+    values = _values(table, resolve)
+    if values is None:
         return None
-    values = table.values
-    assert values is not None  # narrowed by _inline
-    row_idx = {name: i for i, name in enumerate(table.rows)}
+    rows = _labels(table, values, "rows")
+    cols = _labels(table, values, "cols")
+    row_idx = {name: i for i, name in enumerate(rows)}
     if "b" not in row_idx:
         return None
 
@@ -205,21 +246,21 @@ def _from_r_table(table: Matrix) -> tuple[list[Coefficient], str] | None:
             ci_low=_cell(ll_row, j),
             ci_high=_cell(ul_row, j),
         )
-        for j, term in enumerate(table.cols)
+        for j, term in enumerate(cols)
     ]
     return coeffs, stat_kind
 
 
-def _r_table_matches_b(table: Matrix, b: Matrix) -> bool:
+def _r_table_matches_b(table: Matrix, b: Matrix, resolve: MatrixResolver | None = None) -> bool:
     """True when ``r(table)`` describes the same coefficients as ``e(b)``."""
-    if not _inline(table) or not _inline(b) or list(table.cols) != list(b.cols):
+    table_values = _values(table, resolve)
+    b_values = _values(b, resolve)
+    if table_values is None or b_values is None:
+        return False
+    if _labels(table, table_values, "cols") != _labels(b, b_values, "cols"):
         return False
 
-    table_values = table.values
-    b_values = b.values
-    assert table_values is not None
-    assert b_values is not None
-    row_idx = {name: i for i, name in enumerate(table.rows)}
+    row_idx = {name: i for i, name in enumerate(_labels(table, table_values, "rows"))}
     b_row_index = row_idx.get("b")
     if b_row_index is None or not b_values:
         return False
@@ -238,20 +279,27 @@ def _same_numeric_or_missing(left: float | None, right: float | None) -> bool:
     return math.isclose(left, right, rel_tol=1e-9, abs_tol=1e-12)
 
 
-def _from_b_v(b: Matrix, v: Matrix | None) -> list[Coefficient]:
+def _from_b_v(
+    b: Matrix,
+    v: Matrix | None,
+    resolve: MatrixResolver | None = None,
+    b_values: list[list[float | None]] | None = None,
+) -> list[Coefficient]:
     """Compute coefficient rows from e(b) (and e(V) when available).
 
-    ``se``/``statistic``/``p_value``/CI are filled only when e(V) is present and
-    inline; otherwise just the point estimates are returned. Inference uses the
-    normal approximation — callers flag this via ``source="e_b_v"``.
+    ``se``/``statistic``/``p_value``/CI are filled only when e(V) is
+    obtainable — inline or through its ref; otherwise just the point estimates
+    are returned. Inference uses the normal approximation — callers flag this
+    via ``source="e_b_v"``.
     """
-    assert b.values is not None  # caller guarantees inline
-    b_row = b.values[0] if b.values else []
-    terms = b.cols
+    if b_values is None:
+        b_values = _values(b, resolve)
+    assert b_values is not None  # caller guarantees resolvability
+    b_row = b_values[0] if b_values else []
+    terms = _labels(b, b_values, "cols")
+    vv = _values(v, resolve)
     v_diag: list[float | None] = []
-    if _inline(v) and v is not None:
-        vv = v.values
-        assert vv is not None
+    if vv is not None:
         for i in range(len(terms)):
             v_diag.append(vv[i][i] if i < len(vv) and i < len(vv[i]) else None)
     else:
@@ -312,28 +360,42 @@ def _command_diagnostics(
     return {label: scalars[key] for key, label in spec if key in scalars}
 
 
-def build_estimation_result(results: ResultsInfo) -> EstimationResult | None:
+def build_estimation_result(
+    results: ResultsInfo,
+    *,
+    resolve_matrix: MatrixResolver | None = None,
+) -> EstimationResult | None:
     """Derive a typed coefficient table from captured r()/e() values.
 
     Returns ``None`` when no estimation is in scope (``e(b)`` absent), so the
     field stays unset for non-estimation runs. Prefers ``r(table)`` when its
     columns and ``b`` row match ``e(b)`` (i.e. it describes the *current*
     estimation); otherwise computes from ``e(b)``/``e(V)``.
+
+    ``resolve_matrix`` lets the builder follow ``matrix://`` refs so a deferred
+    ``e(V)`` still yields standard errors.
     """
-    return build_estimation_from_returns(results.e, results.r, results.last_estimation_cmd)
+    return build_estimation_from_returns(
+        results.e,
+        results.r,
+        results.last_estimation_cmd,
+        resolve_matrix=resolve_matrix,
+    )
 
 
 def build_estimation_from_returns(
     e: StataReturns,
     r: StataReturns,
     last_estimation_cmd: str | None = None,
+    *,
+    resolve_matrix: MatrixResolver | None = None,
 ) -> EstimationResult | None:
     """Core builder, split out so it is trivially unit-testable."""
     b = e.matrices.get("b")
-    if b is None or not _inline(b):
-        # No coefficient vector in e-scope (or only by reference): not an
-        # estimation result we can type. ``e(b)`` is small for any normal model,
-        # so the by-reference case is rare and we decline rather than guess.
+    b_values = _values(b, resolve_matrix)
+    if b is None or b_values is None:
+        # No coefficient vector in e-scope, and none reachable through a ref:
+        # not an estimation result we can type.
         return None
 
     v = e.matrices.get("V")
@@ -345,12 +407,12 @@ def build_estimation_from_returns(
     source: str
 
     table = r.matrices.get("table")
-    parsed = _from_r_table(table) if table is not None else None
-    if parsed is not None and table is not None and _r_table_matches_b(table, b):
+    parsed = _from_r_table(table, resolve_matrix) if table is not None else None
+    if parsed is not None and table is not None and _r_table_matches_b(table, b, resolve_matrix):
         coeffs, statistic_kind = parsed
         source = "r_table"
     else:
-        coeffs = _from_b_v(b, v)
+        coeffs = _from_b_v(b, v, resolve_matrix, b_values)
         statistic_kind = "z"
         source = "e_b_v"
 
@@ -374,4 +436,38 @@ def build_estimation_from_returns(
         coefficients=coeffs,
         model_stats=_model_stats(e.scalars),
         diagnostics=_command_diagnostics(command, e.scalars),
+        n_coefficients=len(coeffs),
+        coefficients_truncated=False,
     )
+
+
+def trim_estimation(
+    est: EstimationResult | None,
+    *,
+    mode: IncludeEstimation = IncludeEstimation.FULL,
+    max_coefficients: int | None = None,
+) -> EstimationResult | None:
+    """Apply the caller's estimation-payload budget to a built result.
+
+    ``n_coefficients`` always reports the model's true term count, so an agent
+    can tell a 12-term model from the first 12 rows of a 141-term one.
+    ``mode="none"`` drops the block entirely; ``"summary"`` keeps the
+    model-level fields and diagnostics but no coefficient rows.
+    """
+    if est is None or mode == IncludeEstimation.NONE:
+        return None
+    if mode == IncludeEstimation.SUMMARY:
+        return est.model_copy(
+            update={
+                "coefficients": [],
+                "coefficients_truncated": bool(est.n_coefficients),
+            }
+        )
+    if max_coefficients is not None and 0 <= max_coefficients < len(est.coefficients):
+        return est.model_copy(
+            update={
+                "coefficients": est.coefficients[:max_coefficients],
+                "coefficients_truncated": True,
+            }
+        )
+    return est
