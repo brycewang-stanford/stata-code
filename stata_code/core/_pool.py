@@ -52,7 +52,7 @@ from queue import Empty, Queue
 from typing import Any
 
 from stata_code.core import _refs
-from stata_code.core.errors import recovery_for
+from stata_code.core.errors import recovery_for, suggestions_for
 from stata_code.core.policy import check as policy_check
 from stata_code.core.schema import (
     Backend,
@@ -480,10 +480,29 @@ class WorkerProcess:
         """Send one execute request and return (result_dict, ref_blobs).
 
         Raises `_WorkerTimeout` on timeout (caller is responsible for
-        killing the worker), `_WorkerError` on protocol or worker-side
-        crash.
+        killing the worker), `_WorkerBusy` when the worker is already running
+        another request and the wait would exceed `timeout_ms` (nothing was
+        written, so the caller must NOT kill it), `_WorkerError` on protocol or
+        worker-side crash.
+
+        ``timeout_ms`` budgets the WHOLE call, queueing included. Stata is
+        single-threaded per session, so a second request for the same session
+        waits behind the first; taking the deadline only after the lock was
+        acquired meant a call queued behind a 10-minute bootstrap blocked
+        forever no matter what timeout the caller asked for.
         """
-        with self._lock:
+        deadline: float | None = None
+        if timeout_ms is None:
+            acquired = self._lock.acquire()
+        else:
+            deadline = time.monotonic() + timeout_ms / 1000.0
+            acquired = self._lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+        if not acquired:
+            raise _WorkerBusy(
+                f"worker for {self.session_id!r} is busy with another request; "
+                f"waited {timeout_ms} ms for it to free up"
+            )
+        try:
             proc = self._ensure_alive()
             assert proc.stdin is not None and proc.stdout is not None  # for mypy
             req_id = uuid.uuid4().hex
@@ -501,11 +520,6 @@ class WorkerProcess:
                 except BrokenPipeError as exc:
                     raise _WorkerError(f"worker pipe broken on write: {exc}") from exc
 
-                deadline: float | None
-                deadline = (
-                    None if timeout_ms is None else time.monotonic() + timeout_ms / 1000.0
-                )
-
                 response = self._read_json_response_with_deadline(
                     proc, deadline, expect_id=req_id
                 )
@@ -519,6 +533,8 @@ class WorkerProcess:
                 return response["result"], response.get("ref_blobs", {})
             finally:
                 self.busy = False
+        finally:
+            self._lock.release()
 
     @staticmethod
     def _readline_with_deadline(
@@ -871,6 +887,17 @@ class SessionPool:
             )
         try:
             result_dict, ref_blobs = worker.execute(code, worker_options, timeout_ms=timeout_ms)
+        except _WorkerBusy:
+            # Healthy worker, mid-run on an earlier request. Nothing was
+            # written to it, so it must NOT be killed — that would abort the
+            # in-flight run and wipe the session's loaded data. Report the
+            # contention instead; the caller can wait, use another session, or
+            # send the long job to the background.
+            return _build_busy_result(
+                session_id=session_id,
+                elapsed_ms=max(1, int((time.monotonic() - started) * 1000)),
+                timeout_ms=timeout_ms or 0,
+            )
         except _WorkerTimeout:
             worker.kill()
             with self._lock:
@@ -1163,6 +1190,71 @@ def _build_timeout_result(
         error=err,
         schema_version="1.0",
         capabilities=["pystata", "subprocess_timeout"],
+    )
+
+
+def _build_busy_result(
+    *,
+    session_id: str,
+    elapsed_ms: int,
+    timeout_ms: int,
+) -> RunResult:
+    """Synthesize the rc=-5 result for a session whose worker is mid-run.
+
+    Distinct from a timeout: nothing was submitted to Stata, the worker is
+    healthy, and the earlier run is still going. Retrying the identical code
+    later succeeds, so `recovery.retriable` is true and no code change is
+    implied.
+    """
+    err = ErrorInfo(
+        kind=ErrorKind.SESSION_BUSY,
+        rc=-5,
+        rc_label="session_busy",
+        message=(
+            f"Session {session_id!r} is already executing an earlier request; "
+            f"waited {timeout_ms} ms for it to finish. Nothing was submitted to "
+            "Stata by this call."
+        ),
+        command=None,
+        line=None,
+        context=ErrorContext(before=[], failing="", after=[]),
+        commands_executed=0,
+        path=None,
+        varname=None,
+        name=None,
+        suggestions=suggestions_for(ErrorKind.SESSION_BUSY),
+        recovery=recovery_for(ErrorKind.SESSION_BUSY),
+    )
+    return RunResult(
+        ok=False,
+        rc=-5,
+        session_id=session_id,
+        request_id=uuid.uuid4().hex,
+        started_at=_utc_iso_ms(),
+        elapsed_ms=elapsed_ms,
+        stata_elapsed_ms=0,
+        stata=StataInfo(
+            version="unknown",
+            edition=StataEdition.UNKNOWN,
+            backend=Backend.PYSTATA,
+        ),
+        log=LogInfo(
+            head="",
+            tail="",
+            lines_total=0,
+            bytes_total=0,
+            truncated=False,
+            complete=True,
+            error_window=None,
+            ref=None,
+        ),
+        results=ResultsInfo(r=_empty_returns(), e=_empty_returns(), last_estimation_cmd=None),
+        dataset=_empty_dataset(),
+        graphs=[],
+        warnings=[],
+        error=err,
+        schema_version="1.0",
+        capabilities=["pystata", "subprocess_timeout", "background_runs"],
     )
 
 

@@ -62,7 +62,7 @@ except ImportError:  # pragma: no cover - environment without mcp installed
     stdio_server = None  # type: ignore[assignment]
     _MCP_AVAILABLE = False
 
-from stata_code.core import _refs
+from stata_code.core import _refs, jobs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable
 from stata_code.core.lint import lint_code
@@ -147,6 +147,35 @@ _INFO_OUTPUT_SCHEMA = _object_schema(
         "error": {"type": "string"},
     },
     ["available", "schema_version", "capabilities"],
+)
+
+_JOB_SUMMARY_PROPERTIES: dict[str, Any] = {
+    "job_id": {"type": "string"},
+    "session_id": {"type": "string"},
+    "status": {"type": "string", "enum": ["running", "done", "error"]},
+    "submitted_at": {"type": "string"},
+    "finished_at": {"type": ["string", "null"]},
+    "elapsed_ms": {"type": "integer"},
+    "code_preview": {"type": "string"},
+}
+
+_RUN_STATUS_OUTPUT_SCHEMA = _object_schema(
+    {
+        **_JOB_SUMMARY_PROPERTIES,
+        "result": {"type": ["object", "null"]},
+        "error": {"type": ["string", "null"]},
+    },
+    ["job_id", "status"],
+)
+
+_BACKGROUND_RUNS_OUTPUT_SCHEMA = _object_schema(
+    {
+        "jobs": {
+            "type": "array",
+            "items": _object_schema(_JOB_SUMMARY_PROPERTIES, ["job_id", "status"]),
+        }
+    },
+    ["jobs"],
 )
 
 _LOG_OUTPUT_SCHEMA = _object_schema(
@@ -512,6 +541,89 @@ def _tool_definitions() -> list[Tool]:
                         "type": "boolean",
                         "default": True,
                     },
+                    "include_results": {
+                        "type": "string",
+                        "enum": ["none", "scalars", "full"],
+                        "default": "scalars",
+                        "description": (
+                            "How much of results.r / results.e to inline. "
+                            "'scalars' (default) keeps scalars and macros and "
+                            "turns every matrix into a matrix:// stub with its "
+                            "shape — an estimation is otherwise encoded four "
+                            "times over (e(b), e(V), e(beta), r(table)) when "
+                            "results.estimation already has the typed table. "
+                            "'full' inlines matrix values up to ~10,000 cells; "
+                            "'none' drops r()/e() entirely. Stubbed values stay "
+                            "retrievable with get_matrix(ref)."
+                        ),
+                    },
+                    "include_estimation": {
+                        "type": "string",
+                        "enum": ["none", "summary", "full"],
+                        "default": "full",
+                        "description": (
+                            "How much of results.estimation to return. "
+                            "'summary' keeps command/N/model_stats/diagnostics "
+                            "but drops per-term coefficient rows — useful for "
+                            "specifications dominated by i.year i.firm-style "
+                            "nuisance terms."
+                        ),
+                    },
+                    "max_coefficients": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": (
+                            "Cap on coefficient rows in results.estimation. "
+                            "estimation.n_coefficients always reports the true "
+                            "count and coefficients_truncated flags the cut."
+                        ),
+                    },
+                    "timeout_ms": {
+                        "type": ["integer", "null"],
+                        "minimum": 1000,
+                        "default": 600000,
+                        "description": (
+                            "Hard wall-clock timeout, enforced by killing the "
+                            "session's worker process. null disables it. The "
+                            "budget covers queueing too: a call waiting behind "
+                            "another run in the same session returns rc=-5 "
+                            "(error.kind='session_busy') rather than blocking "
+                            "indefinitely."
+                        ),
+                    },
+                    "run_in_background": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Return immediately with a job_id instead of "
+                            "waiting. Poll stata_run_status(job_id) for the "
+                            "RunResult. Use for bootstraps, permutation tests "
+                            "and other multi-minute jobs. Give the job its own "
+                            "session_id if you want to keep running other code "
+                            "meanwhile — one Stata process serves one session."
+                        ),
+                    },
+                    "track_output_files": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Report files the run created or modified in its "
+                            "working directory under result.outputs (esttab "
+                            "tables, exported graphs, saved .dta). Independent "
+                            "of persist_log_files."
+                        ),
+                    },
+                    "auto_close_logs": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "On a failed run, close log handles that this run "
+                            "opened, so a script that aborts between `log "
+                            "using` and `log close` does not fail every "
+                            "subsequent run with r(604). Handles opened by "
+                            "earlier runs are left alone."
+                        ),
+                    },
                     "persist_log_files": {
                         "type": "boolean",
                         "default": False,
@@ -597,6 +709,71 @@ def _tool_definitions() -> list[Tool]:
                 destructiveHint=True,
                 idempotentHint=False,
                 openWorldHint=True,
+            ),
+        ),
+        Tool(
+            name="stata_run_status",
+            title="Check Background Stata Run",
+            description=(
+                "Poll a background run submitted with "
+                "stata_run(run_in_background=true). While it is still going "
+                "the response is just the job summary; once finished it "
+                "carries the full RunResult under `result` (or `error` if the "
+                "job itself failed to start). Pass wait_ms to block up to that "
+                "long for completion instead of returning immediately — that "
+                "is cheaper than a tight poll loop."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "job_id returned by stata_run(run_in_background=true).",
+                    },
+                    "wait_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": jobs.MAX_WAIT_MS,
+                        "default": 0,
+                        "description": (
+                            "Block up to this many milliseconds for the job to "
+                            f"finish (max {jobs.MAX_WAIT_MS}). 0 returns the "
+                            "current status immediately."
+                        ),
+                    },
+                },
+                "required": ["job_id"],
+            },
+            outputSchema=_RUN_STATUS_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="Check Background Stata Run",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="list_background_runs",
+            title="List Background Stata Runs",
+            description=(
+                "List background runs tracked by this server, newest first, "
+                "with their status and elapsed time. Result payloads are not "
+                "included — fetch one with stata_run_status."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {},
+            },
+            outputSchema=_BACKGROUND_RUNS_OUTPUT_SCHEMA,
+            annotations=ToolAnnotations(
+                title="List Background Stata Runs",
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
             ),
         ),
         Tool(
@@ -2380,6 +2557,10 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
     try:
         if name == "stata_run":
             return await _run_blocking(_run_tool, arguments)
+        if name == "stata_run_status":
+            return await _run_blocking(_run_status_tool, arguments)
+        if name == "list_background_runs":
+            return _json_result({"jobs": [job.summary() for job in jobs.list_jobs()]})
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
@@ -2509,14 +2690,47 @@ _RUN_BOOL_KEYS: tuple[tuple[str, bool], ...] = (
     ("persist_log_files", False),
     ("persist_generated_files", True),
     ("use_origin_workdir", True),
+    ("track_output_files", True),
+    ("auto_close_logs", True),
 )
 
+# Lower bound on `timeout_ms`. Anything under a second cannot outlast pystata
+# initialization on a cold worker, so accepting it would guarantee a spurious
+# timeout rather than express a real intent.
+_MIN_TIMEOUT_MS = 1000
 
-def _run_tool(arguments: dict[str, Any]) -> Any:
+
+def _int_arg(
+    arguments: dict[str, Any],
+    key: str,
+    *,
+    minimum: int = 0,
+    allow_null: bool = False,
+) -> tuple[Any, Any]:
+    """Read an optional integer argument, rejecting bools and out-of-range values."""
+    value = arguments.get(key, _SENTINEL)
+    if value is _SENTINEL:
+        return _SENTINEL, None
+    if value is None:
+        if allow_null:
+            return None, None
+        return None, _error_result(f"{key} must not be null", kind="invalid_request")
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None, _error_result(
+            f"{key} must be an integer, got {type(value).__name__}",
+            kind="invalid_request",
+        )
+    if value < minimum:
+        return None, _error_result(f"{key} must be ≥ {minimum}", kind="invalid_request")
+    return value, None
+
+
+def _prepare_run_arguments(arguments: dict[str, Any]) -> tuple[str, dict[str, Any], Any]:
+    """Validate `stata_run` arguments. Returns ``(code, options, error_result)``."""
     args = dict(arguments)
     code = args.pop("code", None)
-    if not code:
-        return _error_result("code is required", kind="missing_argument")
+    if not code or not isinstance(code, str):
+        return "", {}, _error_result("code is required", kind="missing_argument")
     # Validate booleans up front rather than letting truthy strings ("false",
     # "no", …) silently flip behaviour inside the runner.
     for key, default in _RUN_BOOL_KEYS:
@@ -2524,13 +2738,163 @@ def _run_tool(arguments: dict[str, Any]) -> Any:
             continue
         value, err = _bool_arg(args, key, default=default)
         if err is not None:
-            return err
+            return "", {}, err
         args[key] = value
+
+    timeout, err = _int_arg(args, "timeout_ms", minimum=_MIN_TIMEOUT_MS, allow_null=True)
+    if err is not None:
+        return "", {}, err
+    if timeout is not _SENTINEL:
+        args["timeout_ms"] = timeout
+
+    max_coefs, err = _int_arg(args, "max_coefficients", minimum=0)
+    if err is not None:
+        return "", {}, err
+    if max_coefs is not _SENTINEL:
+        args["max_coefficients"] = max_coefs
+
+    for key in ("log_lines_head", "log_lines_tail"):
+        value, err = _int_arg(args, key, minimum=0)
+        if err is not None:
+            return "", {}, err
+        if value is not _SENTINEL:
+            args[key] = value
+
+    return code, args, None
+
+
+def _run_tool(arguments: dict[str, Any]) -> Any:
+    code, args, err = _prepare_run_arguments(arguments)
+    if err is not None:
+        return err
+
+    background, err = _bool_arg(args, "run_in_background", default=False)
+    if err is not None:
+        return err
+    args.pop("run_in_background", None)
+
+    if background:
+        try:
+            job = jobs.submit(code, **args)
+        except (ValueError, NotImplementedError, TypeError) as exc:
+            return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
+        payload = job.summary()
+        payload["hint"] = (
+            "Poll stata_run_status with this job_id. Runs in the same session "
+            "queue behind each other; cancel_session aborts this job."
+        )
+        return _json_result(payload)
+
     try:
         result = pool_execute(code, **args)
     except (ValueError, NotImplementedError) as exc:
         return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
+    return _run_result_payload(result)
+
+
+# Cap on graphs delivered as image content blocks in one response. Vision
+# models gain nothing from the 9th plot of a batch, and each one costs real
+# tokens.
+_MAX_INLINE_IMAGES = 4
+
+# Formats a client can actually render as an image. PDF is excluded — it is a
+# document, and no MCP client displays it from an ImageContent block.
+_INLINE_IMAGE_FORMATS = {"png", "svg"}
+
+
+def _run_result_payload(
+    result: RunResult,
+    *,
+    envelope: dict[str, Any] | None = None,
+) -> Any:
+    """Build the MCP response for a completed run.
+
+    Graphs captured with ``include_graphs="inline"`` are delivered as real MCP
+    ImageContent blocks rather than base64 buried inside the JSON text. A
+    base64 string in a JSON field is invisible to a vision-capable client — it
+    was pure token cost — whereas an ImageContent block is displayable. The
+    ``inline`` field is cleared from the structured payload so the bytes cross
+    the wire once, and ``inline_delivered`` records that they were sent.
+
+    ``envelope`` wraps the run payload under a ``result`` key, which is how a
+    background job's status response carries its finished run.
+    """
     payload = json.loads(result.model_dump_json())
+    images: list[Any] = []
+    truncated_images = 0
+
+    for entry in payload.get("graphs") or []:
+        b64 = entry.get("inline")
+        if not b64:
+            continue
+        entry["inline"] = None
+        fmt = entry.get("format") or "png"
+        if fmt not in _INLINE_IMAGE_FORMATS:
+            entry["inline_delivered"] = False
+            entry["inline_skipped_reason"] = f"{fmt} cannot be delivered as an image block"
+            continue
+        if len(images) >= _MAX_INLINE_IMAGES:
+            truncated_images += 1
+            entry["inline_delivered"] = False
+            entry["inline_skipped_reason"] = "inline image cap reached; fetch with get_graph(ref)"
+            continue
+        images.append(
+            ImageContent(
+                type="image",
+                data=b64,
+                mimeType=_GRAPH_MIME.get(fmt, "image/png"),
+            )
+        )
+        entry["inline_delivered"] = True
+
+    if truncated_images:
+        payload.setdefault("warnings", []).append(
+            {
+                "kind": "inline_graphs_truncated",
+                "message": (
+                    f"{truncated_images} further graph(s) were captured but not inlined "
+                    f"(cap {_MAX_INLINE_IMAGES}); fetch them with get_graph(ref)."
+                ),
+            }
+        )
+
+    if envelope is not None:
+        envelope["result"] = payload
+        payload = envelope
+
+    if not images:
+        return _json_result(payload)
+    return CallToolResult(
+        content=[*images, TextContent(type="text", text=json.dumps(payload))],
+        structuredContent=payload,
+        isError=False,
+    )
+
+
+def _run_status_tool(arguments: dict[str, Any]) -> Any:
+    job_id, err = _require_str(arguments, "job_id")
+    if err is not None:
+        return err
+    wait_ms, err = _int_arg(arguments, "wait_ms", minimum=0)
+    if err is not None:
+        return err
+    if wait_ms is _SENTINEL:
+        wait_ms = 0
+    wait_ms = min(int(wait_ms), jobs.MAX_WAIT_MS)
+
+    job = jobs.get(job_id)
+    if job is None:
+        return _error_result(f"Unknown job_id: {job_id}", kind="unknown_job")
+    if wait_ms:
+        job.wait(wait_ms / 1000.0)
+
+    payload: dict[str, Any] = job.summary()
+    payload["error"] = job.error
+    if job.result is not None:
+        # Reuse the completed-run projection so a background run's graphs and
+        # payload look exactly like a foreground run's.
+        return _run_result_payload(job.result, envelope=payload)
+    payload["result"] = None
     return _json_result(payload)
 
 
@@ -3070,6 +3434,10 @@ def _info_payload_from_stata(
                 "subprocess_timeout",
                 "log_files",
                 "run_artifacts",
+                "result_budget",        # include_results / include_estimation
+                "background_runs",      # run_in_background + stata_run_status
+                "output_tracking",      # RunResult.outputs
+                "log_hygiene",          # auto-close of logs leaked by a failed run
                 # Notebook side-channel — present when the server registers
                 # the corresponding `notebook_*` and `list_runs` tools.
                 # Clients can feature-detect rather than calling each tool

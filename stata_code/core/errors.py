@@ -98,6 +98,14 @@ RC_TO_KIND: dict[int, ErrorKind] = {
     602: ErrorKind.FILE_EXISTS,  # file already exists
     603: ErrorKind.FILE_IO,  # file could not be opened
     610: ErrorKind.FILE_CORRUPT,  # file not Stata format
+    # Log-file state. Verified against the live runtime: reopening a log while
+    # one is already open is r(604), and `log close` / `log off` / `log on`
+    # with nothing open is r(606). These are their own kind because the fix is
+    # neither a file fix nor a data fix — it is a session-state fix
+    # (`capture log close _all`), and it is the failure agents hit most often
+    # after a do-file aborts mid-run and leaves its log handle dangling.
+    604: ErrorKind.LOG_STATE,  # log file already open
+    606: ErrorKind.LOG_STATE,  # no log file open
     688: ErrorKind.FILE_CORRUPT,  # file is corrupt
     691: ErrorKind.FILE_IO,  # I/O error (local filesystem; was mis-mapped to NETWORK)
     692: ErrorKind.FILE_IO,  # file I/O error on read (was mis-mapped to NETWORK)
@@ -119,6 +127,7 @@ SYNTHETIC_RC_TO_KIND: dict[int, ErrorKind] = {
     -2: ErrorKind.TIMEOUT,
     -3: ErrorKind.CANCELLED,
     -4: ErrorKind.POLICY_BLOCKED,
+    -5: ErrorKind.SESSION_BUSY,
 }
 
 
@@ -178,6 +187,8 @@ RC_LABEL: dict[int, str] = {
     601: "file not found",
     602: "file already exists",
     603: "file could not be opened",
+    604: "log file already open",
+    606: "no log file open",
     608: "file is read-only; cannot be modified or erased",
     610: "file not Stata format",
     631: "host not found",
@@ -204,6 +215,7 @@ SYNTHETIC_RC_LABEL: dict[int, str] = {
     -2: "timeout",
     -3: "cancelled",
     -4: "policy_blocked",
+    -5: "session_busy",
 }
 
 
@@ -264,10 +276,17 @@ _RECOVERY: dict[ErrorKind, tuple[str, bool, bool, bool]] = {
     ErrorKind.FILE_NOT_FOUND: ("environment", False, True, False),
     ErrorKind.FILE_CORRUPT: ("environment", False, False, True),
     ErrorKind.PERMISSION: ("environment", False, False, True),
+    # Log state is a property of the *session*, not of the code or the data.
+    # Re-running the identical code succeeds once the stale handle is closed,
+    # so this is retriable — after a one-line `capture log close _all`.
+    ErrorKind.LOG_STATE: ("environment", True, False, False),
     # Internal / producer-side: nothing wrong with the Stata code itself.
     ErrorKind.INTERRUPT: ("internal", True, False, False),
     ErrorKind.CANCELLED: ("internal", False, False, False),
     ErrorKind.TIMEOUT: ("internal", True, False, False),
+    # The session's Stata process is mid-run on someone else's request. Nothing
+    # ran, nothing is wrong with the code — wait, or use another session_id.
+    ErrorKind.SESSION_BUSY: ("resource", True, False, False),
     ErrorKind.ADAPTER_CRASH: ("internal", True, False, False),
     # Command policy blocked the code before Stata ran: the submitted code must
     # change (drop the OS-escape command), or a human must relax the policy.
@@ -417,6 +436,7 @@ COMMON_STATA_COMMANDS: tuple[str, ...] = (
 def suggestions_for(
     kind: ErrorKind,
     *,
+    rc: int | None = None,
     varname: str | None = None,
     name: str | None = None,
     command: str | None = None,
@@ -431,6 +451,10 @@ def suggestions_for(
     ----------
     kind : ErrorKind
         The classified error kind.
+    rc : int, optional
+        The raw Stata return code. Used where one ``ErrorKind`` covers several
+        rcs whose remedies differ (currently ``log_state``: r(604) "already
+        open" versus r(606) "none open").
     varname : str, optional
         The bad variable name parsed from the Stata error message
         (used for VARNAME_NOT_FOUND).
@@ -662,6 +686,22 @@ def suggestions_for(
             )
         )
 
+    elif kind == ErrorKind.LOG_STATE:
+        out.extend(_log_state_suggestions(rc))
+
+    elif kind == ErrorKind.SESSION_BUSY:
+        out.append(
+            Suggestion(
+                action=(
+                    "This session's Stata process is still executing an "
+                    "earlier request. Wait and retry, raise `timeout_ms`, run "
+                    "the long job with `run_in_background` and poll "
+                    "`stata_run_status`, or use a different `session_id` so "
+                    "the two runs get separate Stata processes."
+                ),
+            )
+        )
+
     elif kind == ErrorKind.FILE_IO:
         out.extend(_file_io_suggestions(path))
 
@@ -762,6 +802,43 @@ def _command_suggestions(command: str | None) -> list[Suggestion]:
         )
     )
     return out
+
+
+def _log_state_suggestions(rc: int | None) -> list[Suggestion]:
+    """Build log_state suggestions for r(604) / r(606).
+
+    r(604) is overwhelmingly the aftermath of an earlier run that aborted
+    between `log using` and `log close`, so the fix is to clear the stale
+    handle rather than to change the code that just failed.
+    """
+    if rc == 606:
+        return [
+            Suggestion(
+                action=(
+                    "No log is open, so `log close` / `log off` / `log on` "
+                    "has nothing to act on. Guard the call with `capture` "
+                    "(`capture log close`) when the log may not be open."
+                ),
+                command="capture log close",
+            )
+        ]
+    return [
+        Suggestion(
+            action=(
+                "A log is already open — usually left dangling by an earlier "
+                "run that aborted before its `log close`. Close every open "
+                "log, then re-run unchanged."
+            ),
+            command="capture log close _all",
+        ),
+        Suggestion(
+            action=(
+                "To make the script re-runnable, start it with "
+                "`capture log close _all` before `log using`."
+            ),
+            command="capture log close _all",
+        ),
+    ]
 
 
 def _file_io_suggestions(path: str | None) -> list[Suggestion]:

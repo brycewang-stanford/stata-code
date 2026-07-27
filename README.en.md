@@ -273,7 +273,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 19 tools (`stata_run`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 21 tools (`stata_run`, `stata_run_status`, `list_background_runs`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
 
 #### Error Recovery in Agent Workflows
 
@@ -361,7 +361,7 @@ If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
 upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
 processes keep advertising the stale schema until they are restarted.
 
-The MCP server registers 19 tools:
+The MCP server registers 21 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -516,7 +516,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   ├── server.py      # MCP server (19 tools)
+│   ├── server.py      # MCP server (21 tools)
 │   └── ...
 ├── core/console.py    # console (batch) backend — Stata 13+, no pystata
 └── kernel/
@@ -571,7 +571,7 @@ teardown.
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 32-kind error taxonomy with canonical suggestions
-- MCP server: 19 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
+- MCP server: 21 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
 - Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
 - Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
 - Console (batch) backend (`core/console.py`, `--backend console`, `run_console()`): drives the Stata command-line executable, parses the log into the same typed `RunResult`, and supports **Stata 13+ with no pystata**

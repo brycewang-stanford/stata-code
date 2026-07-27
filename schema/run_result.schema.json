@@ -269,6 +269,18 @@
           ],
           "default": null
         },
+        "source_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source File"
+        },
         "suggestions": {
           "items": {
             "$ref": "#/$defs/Suggestion"
@@ -319,6 +331,7 @@
         "file_exists",
         "file_corrupt",
         "file_io",
+        "log_state",
         "network",
         "permission",
         "encoding",
@@ -327,6 +340,7 @@
         "interrupt",
         "cancelled",
         "timeout",
+        "session_busy",
         "adapter_crash",
         "policy_blocked",
         "unknown"
@@ -349,6 +363,11 @@
           },
           "title": "Coefficients",
           "type": "array"
+        },
+        "coefficients_truncated": {
+          "default": false,
+          "title": "Coefficients Truncated",
+          "type": "boolean"
         },
         "command": {
           "anyOf": [
@@ -437,6 +456,11 @@
           },
           "title": "Model Stats",
           "type": "object"
+        },
+        "n_coefficients": {
+          "default": 0,
+          "title": "N Coefficients",
+          "type": "integer"
         },
         "n_obs": {
           "anyOf": [
@@ -761,6 +785,30 @@
           "title": "Cols",
           "type": "array"
         },
+        "n_cols": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Cols"
+        },
+        "n_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "N Rows"
+        },
         "ref": {
           "anyOf": [
             {
@@ -867,6 +915,38 @@
         }
       },
       "title": "OriginInfo",
+      "type": "object"
+    },
+    "OutputFile": {
+      "additionalProperties": true,
+      "description": "A file the run created or modified in its working directory.\n\nDetected by diffing a size/mtime snapshot of the working directory taken\naround the run, filtered to the extensions econometric scripts actually\nexport (``.tex``, ``.csv``, ``.docx``, ``.png``, ``.dta``, \u2026). This is\nreported for every run \u2014 unlike ``log.files.output_paths``, which only\nexists when the caller also asked for a persisted run bundle.",
+      "properties": {
+        "bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bytes"
+        },
+        "created": {
+          "default": false,
+          "title": "Created",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "OutputFile",
       "type": "object"
     },
     "Recovery": {
@@ -1141,6 +1221,13 @@
         }
       ],
       "default": null
+    },
+    "outputs": {
+      "items": {
+        "$ref": "#/$defs/OutputFile"
+      },
+      "title": "Outputs",
+      "type": "array"
     },
     "rc": {
       "title": "Rc",
