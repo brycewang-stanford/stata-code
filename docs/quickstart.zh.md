@@ -73,7 +73,7 @@ stata-code setup --claude        # 写入项目级 .mcp.json（会保留其它 s
 # 或： stata-code setup --cursor / --vscode / --all
 ```
 
-然后运行 `claude`，`/mcp` 里应能看到 `stata-code` 及其 19 个工具
+然后运行 `claude`，`/mcp` 里应能看到 `stata-code` 及其 21 个工具
 （`stata_run`、`lint_do`、`inspect_data`、`install_package` 等）。
 
 ---

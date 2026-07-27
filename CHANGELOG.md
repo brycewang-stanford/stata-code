@@ -6,6 +6,117 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Agent-ergonomics pass
+
+Driven by a report from an agent that used the MCP server for a full empirical
+paper. Each item below is a cost that agent actually paid.
+
+#### Result payloads are now bounded (and correct)
+
+- **`include_results`** (`"none" | "scalars" | "full"`, default **`"scalars"`**).
+  A single estimation used to encode the same numbers four times over — `e(b)`,
+  `e(V)`'s row/column labels, `e(beta)`, and `r(table)` — on top of
+  `results.estimation`. Under the new default, scalars and macros stay inline
+  and every matrix becomes a `matrix://` stub carrying only its shape
+  (`n_rows` / `n_cols`); values and labels remain retrievable with
+  `get_matrix(ref)`. A 123-term regression's envelope drops from ~57 KB to
+  ~28 KB. **This is a behaviour change** — pass `include_results="full"` for
+  the previous shape. The Jupyter kernel keeps `"full"`, since a notebook has
+  no token budget to defend.
+- **`include_estimation`** (`"none" | "summary" | "full"`, default `"full"`)
+  and **`max_coefficients`**. `"summary"` keeps the model-level block and
+  diagnostics but drops per-term rows — the right setting for specifications
+  dominated by `i.year i.firm` nuisance terms. `estimation.n_coefficients`
+  always reports the model's true term count and
+  `estimation.coefficients_truncated` flags any cut, so trimmed output can
+  never be mistaken for a smaller model.
+
+#### Fixed: two silent numeric-correctness bugs
+
+- **Standard errors were blanked whenever `e(V)` was returned by reference.**
+  Any model whose VCV exceeded the inline cell cap (roughly >100 terms) came
+  back with `se`, `statistic`, `p_value` and both CI bounds `null` for *every*
+  coefficient, while still reporting `source: "e_b_v"` as though inference had
+  been computed. The estimation builder now resolves `matrix://` refs, so the
+  wire representation no longer degrades the numbers. `e(b)` by reference is
+  resolved too, where it previously suppressed the estimation block entirely.
+- **`r()` did not survive to the next call.** The runner's own probes are all
+  r-class (`graph dir` before a run, `graph export` after), so the canonical
+  two-call pattern — `summarize price`, then `display r(mean)` — read back a
+  missing value. All internal housekeeping now runs inside a Stata
+  `_return hold` / `_return restore` pair. Pre-existing; the new `log query`
+  probe would have widened it to runs with `include_graphs="none"`.
+- **Stata's missing values leaked as `8.988e+307`.** `sfi` returns system
+  missing (`.`) and extended missings (`.a`–`.z`) as ordinary doubles at or
+  above `2^1023`. These reached the wire unconverted in `r()`/`e()` scalars and
+  in every matrix cell — an omitted base level's standard error arrived as a
+  number an agent would format into a table. All numerics now normalize to
+  `null`, matching what SCHEMA.md already required of scalars.
+
+#### Errors inside `do`-files are now located
+
+- `error.line` and `error.context` are resolved **inside the invoked script**.
+  A failing `do "analysis.do"` previously produced `line: null`, empty
+  before/after context, and `message: "end of do-file"` — Stata's epilogue
+  rather than the diagnosis. The transcript parser now skips structural
+  boilerplate (`end of do-file`, `--Break--`), folds `///` continuation
+  fragments back into one logical command, and resolves the failing command
+  against the script on disk. New `error.source_file` names the file that
+  `error.line` indexes into.
+- **A failed run now produces a log.** pystata raises the whole transcript as
+  its exception message and leaves stdout empty, so failures used to come back
+  with no `log.head`, no `log://` ref and nothing for `search_log` to search —
+  exactly when the transcript matters most.
+
+#### A failed run can no longer poison its session
+
+- New **`auto_close_logs`** (default `true`) closes log handles that a *failed*
+  run opened. A script aborting between `log using` and `log close` previously
+  left the handle dangling, and every subsequent run in that session died with
+  r(604) — an error about a different run, with no suggestions attached.
+  Handles opened by earlier runs are left alone; a `log_closed` warning records
+  what was closed.
+- r(604) and r(606) are now the typed `ErrorKind.LOG_STATE` with Stata's
+  official labels and rc-specific fixes (`capture log close _all` for 604,
+  `capture log close` guarding for 606), and `recovery.retriable = true`.
+
+#### Long runs no longer block the caller
+
+- **`timeout_ms` is an advertised `stata_run` argument.** It was enforced but
+  not exposed, so passing it was an input-validation error.
+- **`run_in_background`** returns a `job_id` immediately; poll with the new
+  **`stata_run_status`** tool (`wait_ms` blocks up to 60 s instead of
+  busy-polling) and enumerate with **`list_background_runs`**. Intended for
+  bootstraps, permutation tests and grouped estimation loops.
+- **Fixed: the worker lock was acquired without a deadline**, so a call queued
+  behind a long run blocked indefinitely no matter what `timeout_ms` said.
+  `timeout_ms` now budgets the whole call, queueing included, and contention
+  returns the new `rc=-5` / `error.kind="session_busy"` — distinct from a
+  timeout because nothing was submitted to Stata and the healthy worker is
+  *not* killed.
+
+#### Inline graphs are visible again
+
+- `include_graphs: "inline"` now delivers graph bytes as MCP `ImageContent`
+  blocks instead of base64 inside a JSON string. The old form was unreadable to
+  a vision-capable client and was pure token cost. `graphs[].inline` is cleared
+  from the structured body so the bytes cross the wire once, and
+  `inline_delivered` records the outcome. At most 4 images per response (the
+  rest stay reachable via `get_graph(ref)`, reported as an
+  `inline_graphs_truncated` warning); `pdf` is never sent as an image block.
+
+#### Generated files are reported
+
+- New top-level **`outputs`** lists files a run created or modified in its
+  working directory (`esttab` tables, exported graphs, saved `.dta`), with
+  `path` / `bytes` / `created`. Previously this required
+  `persist_log_files=true` *and* `origin_path` — a dependency that was not
+  obvious from `persist_generated_files` defaulting to `true`, so the field was
+  always `null` in practice. Controlled by the new `track_output_files`
+  (default `true`); working directories above 5,000 files skip detection and
+  say so with an `output_tracking_skipped` warning rather than reporting a
+  partial answer.
+
 ### Added
 
 - The VS Code extension now accepts Stata's familiar `Ctrl+D` shortcut

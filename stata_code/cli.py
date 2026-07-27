@@ -176,6 +176,17 @@ def _add_run_parser(
         help="Include the complete Stata log (text summary and JSON).",
     )
     parser.add_argument(
+        "--results",
+        choices=["none", "scalars", "full"],
+        default="full",
+        help=(
+            "How much of r()/e() to include. Defaults to 'full' here — unlike "
+            "the MCP server, this process exits when the run ends, so a "
+            "matrix:// reference would have nothing left to resolve against. "
+            "Use 'scalars' or 'none' to shrink --json output."
+        ),
+    )
+    parser.add_argument(
         "--graphs",
         metavar="DIR",
         default=None,
@@ -254,6 +265,7 @@ def _run_command(args: argparse.Namespace) -> int:
             timeout_ms=timeout_ms,
             include_full_log=args.full_log,
             include_graphs="ref",
+            include_results=args.results,
             origin_path=origin_path,
             origin_kind="do_file" if origin_path else None,
         )

@@ -911,26 +911,49 @@ class TestCollectReturns:
             scalars={"r(miss)": None},
             macros={"r(mm)": None},
         )
-        out = runner._collect_returns(rt, "r", "req-none")
+        out = runner._collect_returns(rt, "r")
         assert out.scalars == {"miss": None}
         assert out.macros == {"mm": ""}
 
-    def test_large_matrix_goes_to_ref(self, monkeypatch):
-        """Above the inline cell cap: values=None, ref set, payload in _refs."""
-        monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 3)
-        text = "matrices:\n              r(big) :  2 x 2\n"
+    def test_stata_missing_markers_become_null(self):
+        """maxdouble is Stata's `.`, not a 8.99e307 number to print in a table."""
+        text = (
+            "scalars:\n"
+            "               r(miss) =  .\n"
+            "matrices:\n"
+            "              r(m) :  1 x 2\n"
+        )
         rt = FakeRt(
             capture={"return list": (text, 0, None)},
-            matrices={"r(big)": {"values": [[1, None], [3, 4]], "rows": ["a", "b"], "cols": ["x", "y"]}},
+            scalars={"r(miss)": 2.0**1023},
+            matrices={"r(m)": {"values": [[1.5, 2.0**1023]], "rows": ["a"], "cols": ["x", "y"]}},
         )
-        out = runner._collect_returns(rt, "r", "req-big")
-        m = out.matrices["big"]
-        assert m.values is None
-        assert m.ref == "matrix://req-big/r/big"
-        payload = runner.get_matrix(m.ref)
-        assert payload["values"] == [[1.0, None], [3.0, 4.0]]
-        assert payload["rows"] == ["a", "b"]
-        assert payload["cols"] == ["x", "y"]
+        out = runner._collect_returns(rt, "r")
+        assert out.scalars == {"miss": None}
+        assert out.matrices["m"].values == [[1.5, None]]
+
+    def test_want_named_false_skips_scalars_and_macros(self):
+        rt = FakeRt(
+            capture={"return list": (self._text(), 0, None)},
+            scalars={"r(N)": 74, "r(mean)": 21.5},
+            macros={"r(varlist)": "mpg"},
+            matrices={"r(small)": {"values": [[1, 2], [3, 4]], "rows": ["r1", "r2"], "cols": ["c1", "c2"]}},
+        )
+        out = runner._collect_returns(rt, "r", want_named=False)
+        assert out.scalars == {} and out.macros == {}
+        assert "small" in out.matrices
+
+    def test_matrix_names_filter_limits_reads(self):
+        text = "matrices:\n              r(keep) :  1 x 1\n              r(skip) :  1 x 1\n"
+        rt = FakeRt(
+            capture={"return list": (text, 0, None)},
+            matrices={
+                "r(keep)": {"values": [[1.0]], "rows": ["a"], "cols": ["x"]},
+                "r(skip)": {"values": [[2.0]], "rows": ["a"], "cols": ["x"]},
+            },
+        )
+        out = runner._collect_returns(rt, "r", matrix_names={"keep"})
+        assert list(out.matrices) == ["keep"]
 
     def test_matrix_with_missing_row_names_gets_positional_names(self):
         """sfi returning None row/col names must not drop the matrix.
@@ -943,10 +966,79 @@ class TestCollectReturns:
             capture={"return list": (text, 0, None)},
             matrices={"r(noname)": {"values": [[5.0]], "rows": None, "cols": None}},
         )
-        out = runner._collect_returns(rt, "r", "req-noname")
+        out = runner._collect_returns(rt, "r")
         assert out.matrices["noname"].rows == ["r1"]
         assert out.matrices["noname"].cols == ["c1"]
         assert out.matrices["noname"].values == [[5.0]]
+
+
+class TestProjectReturns:
+    """`_project_returns` decides what a collected matrix looks like on the wire."""
+
+    def _collected(self):
+        from stata_code.core.schema import Matrix, StataReturns
+
+        return StataReturns(
+            scalars={"N": 74.0},
+            macros={"cmd": "regress"},
+            matrices={
+                "big": Matrix(
+                    rows=["a", "b"],
+                    cols=["x", "y"],
+                    values=[[1.0, None], [3.0, 4.0]],
+                    n_rows=2,
+                    n_cols=2,
+                )
+            },
+        )
+
+    def test_full_mode_inlines_below_the_cap(self):
+        from stata_code.core.schema import IncludeResults
+
+        out = runner._project_returns(
+            self._collected(), prefix="r", request_id="req", mode=IncludeResults.FULL
+        )
+        m = out.matrices["big"]
+        assert m.values == [[1.0, None], [3.0, 4.0]]
+        assert m.ref is None
+
+    def test_full_mode_refs_above_the_cap_and_keeps_labels(self, monkeypatch):
+        from stata_code.core.schema import IncludeResults
+
+        monkeypatch.setattr(runner, "MATRIX_INLINE_CELL_CAP", 3)
+        out = runner._project_returns(
+            self._collected(), prefix="r", request_id="req-big", mode=IncludeResults.FULL
+        )
+        m = out.matrices["big"]
+        assert m.values is None
+        assert m.ref == "matrix://req-big/r/big"
+        assert m.rows == ["a", "b"] and m.cols == ["x", "y"]
+        payload = runner.get_matrix(m.ref)
+        assert payload["values"] == [[1.0, None], [3.0, 4.0]]
+
+    def test_scalars_mode_stubs_even_a_tiny_matrix(self):
+        from stata_code.core.schema import IncludeResults
+
+        out = runner._project_returns(
+            self._collected(), prefix="e", request_id="req-s", mode=IncludeResults.SCALARS
+        )
+        assert out.scalars == {"N": 74.0}
+        assert out.macros == {"cmd": "regress"}
+        m = out.matrices["big"]
+        assert m.values is None
+        assert m.ref == "matrix://req-s/e/big"
+        # Labels are the expensive part for a wide model — elided, not lost.
+        assert m.rows == [] and m.cols == []
+        assert (m.n_rows, m.n_cols) == (2, 2)
+        assert runner.get_matrix(m.ref)["rows"] == ["a", "b"]
+
+    def test_none_mode_returns_nothing(self):
+        from stata_code.core.schema import IncludeResults
+
+        out = runner._project_returns(
+            self._collected(), prefix="r", request_id="req-n", mode=IncludeResults.NONE
+        )
+        assert out.scalars == {} and out.macros == {} and out.matrices == {}
 
 
 class TestCollectDataset:
