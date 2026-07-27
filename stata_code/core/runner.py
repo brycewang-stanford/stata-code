@@ -26,7 +26,8 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar
@@ -1136,6 +1137,44 @@ def _safe_file_stem(value: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _LOG_NAME_RE = re.compile(r"^\s*name:\s*(\S+)\s*$")
+
+# Name used to park the user's r() while the runner issues its own r-class
+# housekeeping commands. Prefixed so it cannot collide with a user hold.
+_RETURN_HOLD_NAME = "_stata_code_rhold"
+
+
+@contextmanager
+def _preserved_returns(rt: Any) -> Iterator[None]:
+    """Run internal housekeeping without destroying the caller's ``r()``.
+
+    ``graph dir``, ``log query`` and ``graph export`` are all r-class: running
+    them around user code silently wipes ``r()``, so the very common two-call
+    pattern — ``summarize price`` then ``display r(mean)`` — returned missing.
+    Stata's ``_return hold`` / ``_return restore`` parks the whole ``r()``
+    bundle for the duration. ``e()`` is unaffected by these commands and is
+    left alone.
+
+    Entirely best-effort: if the hold fails (an ancient Stata, a leftover hold
+    we could not clear) the housekeeping still runs, just without protection.
+    """
+    held = False
+    try:
+        # A hold leaked by a previous crash would make ours fail with r(110).
+        rt.run_capture(f"capture _return drop {_RETURN_HOLD_NAME}")
+        _stdout, rc, _err = rt.run_capture(f"_return hold {_RETURN_HOLD_NAME}")
+        held = rc == 0
+    except Exception:  # noqa: BLE001
+        held = False
+    try:
+        yield
+    finally:
+        if held:
+            try:
+                rt.run_capture(f"capture _return restore {_RETURN_HOLD_NAME}")
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # Stata's placeholder for the log opened without `name(...)`; `log close`
 # with no argument is what closes it.
 _UNNAMED_LOG = "<unnamed>"
@@ -1296,14 +1335,17 @@ def execute(
     if want_snapshot and effective_dir:
         output_snapshot = snapshot_working_dir_files(effective_dir, origin_path=origin_path)
 
-    # Snapshot open log handles so a run that aborts mid-script cannot leave a
-    # dangling handle that fails every subsequent run with r(604).
-    pre_log_names = _open_log_names(rt) if auto_close_logs else []
+    # Pre-run probes are r-class commands, so they run inside a hold that parks
+    # the caller's r(). Without it, submitting `display r(mean)` one call after
+    # `summarize price` reads back a missing value.
+    with _preserved_returns(rt):
+        # Snapshot open log handles so a run that aborts mid-script cannot leave
+        # a dangling handle that fails every subsequent run with r(604).
+        pre_log_names = _open_log_names(rt) if auto_close_logs else []
 
-    # Snapshot existing graph names before user code so we can take a delta
-    # afterward. This itself calls `graph dir`, which clobbers r(); user code
-    # will overwrite r() if they care about return values.
-    pre_graphs = _list_graph_names(rt) if include_graphs != "none" else []
+        # Snapshot existing graph names before user code so we can take a delta
+        # afterward.
+        pre_graphs = _list_graph_names(rt) if include_graphs != "none" else []
     graph_source_hints, unnamed_graph_source_hints = (
         _graph_source_hints(code) if include_graphs != "none" else ({}, [])
     )
@@ -1379,17 +1421,20 @@ def execute(
     stata_info = _stata_info(rt)
 
     # Graph capture happens AFTER r/e collection so that `graph dir` /
-    # `graph display` / `graph export` (all r-class) don't clobber user r().
+    # `graph display` / `graph export` (all r-class) don't clobber the r() we
+    # report, and inside a hold so they don't clobber the r() the NEXT call
+    # may want to read.
     if include_graphs != "none":
-        graphs = _collect_graphs(
-            rt,
-            request_id=request_id,
-            pre_existing=pre_graphs,
-            fmt=gfmt,
-            inline=(include_graphs == "inline"),
-            source_hints=graph_source_hints,
-            unnamed_source_hints=unnamed_graph_source_hints,
-        )
+        with _preserved_returns(rt):
+            graphs = _collect_graphs(
+                rt,
+                request_id=request_id,
+                pre_existing=pre_graphs,
+                fmt=gfmt,
+                inline=(include_graphs == "inline"),
+                source_hints=graph_source_hints,
+                unnamed_source_hints=unnamed_graph_source_hints,
+            )
     else:
         graphs = []
 
@@ -1413,8 +1458,9 @@ def execute(
     # this run opened: a log the caller opened in an earlier successful run is
     # theirs to manage and must survive.
     if auto_close_logs and not ok:
-        leaked = [n for n in _open_log_names(rt) if n not in pre_log_names]
-        closed = _close_log_handles(rt, leaked)
+        with _preserved_returns(rt):
+            leaked = [n for n in _open_log_names(rt) if n not in pre_log_names]
+            closed = _close_log_handles(rt, leaked)
         if closed:
             names = ", ".join(closed)
             warnings.append(
@@ -1430,6 +1476,10 @@ def execute(
 
     outputs: list[OutputFile] = []
     if track_output_files and output_snapshot is not None and effective_dir:
+        # Advertised whenever detection ran, not only when it found something —
+        # a capability describes what the producer supports, so gating it on a
+        # non-empty result would read as "feature missing" on a quiet run.
+        capabilities.append("output_tracking")
         if snapshot_is_truncated(output_snapshot):
             warnings.append(
                 StataWarning(
@@ -1454,8 +1504,6 @@ def execute(
                 ]
             except OSError:
                 outputs = []
-        if outputs:
-            capabilities.append("output_tracking")
 
     if persist_log_files and origin_path:
         try:

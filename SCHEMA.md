@@ -70,44 +70,50 @@ Every successful or failed Stata execution returns one result object:
       "macros":  {"cmd": "regress", "depvar": "mpg"},
       "matrices": {
         "b": {
-          "rows": ["mpg"],
-          "cols": ["weight", "_cons"],
-          "values": [[-0.006, 39.44]],
-          "ref": null
+          "rows": [],
+          "cols": [],
+          "values": null,
+          "ref": "matrix://01HXJ2K4Q9V8P3F7N6M5R2T1B0/e/b",
+          "n_rows": 1,
+          "n_cols": 2
         }
       }
     },
     "last_estimation_cmd": "regress",
     "estimation": {
       "command": "regress",
+      "command_family": "ols",
       "depvar": "mpg",
       "n_obs": 74,
       "df_model": 1,
-      "df_resid": null,
-      "statistic_kind": "z",
-      "source": "e_b_v",
+      "df_resid": 72,
+      "statistic_kind": "t",
+      "source": "r_table",
       "ci_level": 95.0,
       "coefficients": [
         {
           "term": "weight",
           "b": -0.006,
-          "se": null,
-          "statistic": null,
-          "p_value": null,
-          "ci_low": null,
-          "ci_high": null
+          "se": 0.00051,
+          "statistic": -11.6,
+          "p_value": 0.0,
+          "ci_low": -0.00702,
+          "ci_high": -0.00498
         },
         {
           "term": "_cons",
           "b": 39.44,
-          "se": null,
-          "statistic": null,
-          "p_value": null,
-          "ci_low": null,
-          "ci_high": null
+          "se": 1.614,
+          "statistic": 24.44,
+          "p_value": 0.0,
+          "ci_low": 36.22,
+          "ci_high": 42.66
         }
       ],
-      "model_stats": {"N": 74, "df_m": 1, "r2": 0.219}
+      "n_coefficients": 2,
+      "coefficients_truncated": false,
+      "model_stats": {"N": 74, "df_m": 1, "r2": 0.219},
+      "diagnostics": {}
     }
   },
 
@@ -137,11 +143,16 @@ Every successful or failed Stata execution returns one result object:
     }
   ],
 
+  "outputs": [
+    {"path": "/work/tables/table1.tex", "bytes": 4552, "created": true}
+  ],
+
   "warnings": [],
   "error": null,
 
   "schema_version": "1.0",
-  "capabilities": ["log_truncation", "graph_ref", "matrix_ref", "multi_session"]
+  "capabilities": ["log_truncation", "graph_ref", "matrix_ref", "multi_session",
+                   "result_budget", "output_tracking", "log_hygiene"]
 }
 ```
 
@@ -187,6 +198,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
     "message": "variable mpgg not found",
     "command": "summarize mpgg",
     "line": 2,
+    "source_file": null,
     "context": {
       "before": ["use auto, clear"],
       "failing": "summarize mpgg",
@@ -233,6 +245,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | `results` | `object` | yes | Stata `r()` and `e()` returns; see §3.4. Always present, may be empty. |
 | `dataset` | `object` | yes | Snapshot of the active frame; see §3.5. |
 | `graphs` | `array` | yes | Captured graphs; see §3.6. May be empty. |
+| `outputs` | `array<OutputFile>` | no | Files the run created or modified in its working directory; see §3.6a. Empty when nothing was written or `track_output_files: false`. |
 | `warnings` | `array<Warning>` | yes | Non-fatal advisories. See §3.8. De-duplicated by `(kind, message)`. |
 | `error` | `object \| null` | yes | `null` iff `ok: true`. See §3.7. |
 | `origin` | `object \| null` | no | Echo of the editor-side origin metadata supplied with the request (`origin_path`, `origin_kind`, `origin_label`, `origin_cell_id`). `null` when the caller provided none. See §3.9. |
@@ -241,9 +254,9 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 
 **Producer consistency.** When `ok: true`, the producer MUST set `error: null` and `rc: 0`. When `ok: false`, the producer MUST set `error` to a non-null object whose `rc` equals the top-level `rc`. If a consumer encounters inconsistency, it MUST treat the result as failed.
 
-**Synthetic rcs and `error.rc`.** When `rc < 0` (adapter crash, timeout, cancellation, policy block), `error.rc` mirrors that synthetic code. The corresponding `error.kind` is `adapter_crash` (`-1`), `timeout` (`-2`), `cancelled` (`-3`), or `policy_blocked` (`-4`).
+**Synthetic rcs and `error.rc`.** When `rc < 0` (adapter crash, timeout, cancellation, policy block, session contention), `error.rc` mirrors that synthetic code. The corresponding `error.kind` is `adapter_crash` (`-1`), `timeout` (`-2`), `cancelled` (`-3`), `policy_blocked` (`-4`), or `session_busy` (`-5`).
 
-**Numeric encoding.** All JSON numbers in this schema are IEEE-754 doubles. Producers MUST emit them with sufficient precision to roundtrip (typically 17 significant digits for doubles). Consumers MUST treat them as doubles. Stata's system missing (`.`) is encoded as JSON `null`. Stata's *extended* missing values (`.a`–`.z`) are lost in this representation — agents needing them must request via `r(missing_class)` ad-hoc commands. Stata does not emit `Inf`/`NaN` in normal operation; if encountered, producers encode them as `null` and emit a warning of kind `non_finite`.
+**Numeric encoding.** All JSON numbers in this schema are IEEE-754 doubles. Producers MUST emit them with sufficient precision to roundtrip (typically 17 significant digits for doubles). Consumers MUST treat them as doubles. Stata's system missing (`.`) is encoded as JSON `null`, in `scalars` and in every matrix cell alike. Stata's *extended* missing values (`.a`–`.z`) also become `null`, so which extended missing it was is lost — agents needing that must request it with ad-hoc Stata commands. Note that Stata represents missings internally as doubles at or above `2^1023` (`8.988e+307`); producers MUST convert them rather than passing that number through, or a consumer will format a missing standard error as a real one. Stata does not emit `Inf`/`NaN` in normal operation; if encountered, producers encode them as `null` and emit a warning of kind `non_finite`.
 
 ### 3.2 `stata`
 
@@ -340,13 +353,18 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
   "rows":   ["<label>", ...],
   "cols":   ["<label>", ...],
   "values": [[<number | null>, ...], ...],
-  "ref":    "matrix://..." | null
+  "ref":    "matrix://..." | null,
+  "n_rows": <int | null>,
+  "n_cols": <int | null>
 }
 ```
 
 - `values` is row-major: `values.length == rows.length`, every inner array has `cols.length`. Producers MUST NOT flatten.
+- Every numeric cell follows the same missing-value rule as `scalars`: Stata's system missing (`.`) and extended missings (`.a`–`.z`) become JSON `null`. Producers MUST NOT emit Stata's internal `8.988e+307` representation as a number.
 - For `e(b)`: `cols` are coefficient names, `rows` are equation names. Single-equation models populate `rows` with the depvar name (or Stata's placeholder `"y1"`); multi-equation models (`mlogit`, `sureg`, `gsem`) populate them with real equation names.
 - For large matrices, the producer MAY emit `values: null` and `ref: "matrix://..."` to be fetched via `get_matrix(ref)`. Producers SHOULD do this when a matrix would inline more than ~10,000 cells. `values: null` and `ref: null` together are forbidden.
+- `n_rows` / `n_cols` report the matrix's true shape and are populated even when `rows` / `cols` are elided, so a consumer can judge whether fetching the values is worth a round-trip.
+- Under `include_results: "scalars"` (the default; see §4) *every* matrix is emitted as a **stub**: `values: null`, a `ref`, empty `rows` / `cols`, and populated `n_rows` / `n_cols`. `get_matrix(ref)` returns the labels along with the values. This is a wire-representation choice only — `results.estimation` is always derived from the complete values, so inference is never degraded by the budget.
 
 **Top-level convenience field:**
 
@@ -366,9 +384,11 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | `df_model` | `number \| null` | Mirrors `e(df_m)`. |
 | `df_resid` | `number \| null` | Mirrors `e(df_r)`. |
 | `statistic_kind` | `"t" \| "z"` | Which statistic fills each coefficient's `statistic` field. |
-| `source` | `"r_table" \| "e_b_v"` | `r_table` means values were copied from Stata's displayed `r(table)` after verifying its columns and `b` row match `e(b)`; `e_b_v` means point estimates come from `e(b)` and inference, when present, is computed from `e(V)` with a normal approximation. |
+| `source` | `"r_table" \| "e_b_v"` | `r_table` means values were copied from Stata's displayed `r(table)` after verifying its columns and `b` row match `e(b)`; `e_b_v` means point estimates come from `e(b)` and inference, when present, is computed from `e(V)` with a normal approximation. A matrix returned by `ref` is resolved before use, so a deferred `e(V)` still yields standard errors. |
 | `ci_level` | `number` | Confidence level used for `ci_low` / `ci_high`; currently `95.0`. |
-| `coefficients` | `array<Coefficient>` | One row per term in `e(b)`. |
+| `coefficients` | `array<Coefficient>` | One row per term in `e(b)`, subject to the caller's `include_estimation` / `max_coefficients` budget. |
+| `n_coefficients` | `int` | The model's true term count. Equals `coefficients.length` unless the caller trimmed the table, so `12` rows out of `n_coefficients: 141` is never mistaken for a 12-term model. |
+| `coefficients_truncated` | `bool` | `true` when rows were dropped to satisfy the budget. |
 | `model_stats` | `dict<str, number \| null>` | High-signal subset of `e()` scalars such as `N`, `df_m`, `df_r`, `r2`, `F`, `chi2`, `ll`, and `rmse`. Full scalars remain under `results.e.scalars`. |
 | `diagnostics` | `dict<str, number \| null>` | Command-aware identification/specification statistics surfaced from `e()` (e.g. weak-ID F and Hansen J for `ivreg2`/`ivreghdfe`, AR(2)/Hansen for `xtabond2`, within-R² for `reghdfe`, `rho` for `xtreg`). Only scalars actually present in `e()` appear — never fabricated. |
 
@@ -424,8 +444,23 @@ Each entry describes one captured graph. By default the bytes are **not** inline
 | `height` | `int \| null` | CSS pixels, same convention. |
 | `source_command` | `string \| null` | The user-submitted command line that produced this graph, when isolatable. |
 | `source_line` | `int \| null` | 1-indexed line within the submitted code that produced this graph. |
-| `inline` | `string \| null` | Base64-encoded bytes when the caller explicitly asked for inline (`include_graphs: "inline"`); else `null`. |
+| `inline` | `string \| null` | Base64-encoded bytes when the caller explicitly asked for inline (`include_graphs: "inline"`); else `null`. **Transports with a native image type SHOULD deliver the bytes in that form and set `inline: null`** — see below. |
+| `inline_delivered` | `bool \| null` | Set by such a transport: `true` when the bytes were delivered natively, `false` when they were not (with `inline_skipped_reason` explaining why). Absent on transports that inline into the JSON. |
 | `file_path` | `string \| null` | Persistent graph file path when the run bundle materialized captured graphs under `log.files.graphs_dir`; else `null`. |
+
+**Inline graphs and native image transports.** A base64 string sitting in a JSON field is not viewable by a vision-capable consumer — it costs tokens and conveys nothing. A transport with a first-class image type (MCP's `ImageContent`, a Jupyter `display_data` bundle) MUST use it: emit the bytes as an image part, set `inline: null` in the structured body, and set `inline_delivered: true`. Producers SHOULD cap how many images one response carries (the MCP server's cap is 4) and report the overflow as a `inline_graphs_truncated` warning; the remaining graphs stay reachable through `get_graph(ref)`. Formats a consumer cannot render as an image (`pdf`) are not delivered inline at all.
+
+### 3.6a `outputs`
+
+Files the run created or modified inside its working directory — the `esttab` tables, `graph export` images, and `save`d datasets a script produces. Detected by diffing a size/mtime snapshot taken around the run and filtering to common export extensions.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `path` | `string` | Absolute path of the written file. |
+| `bytes` | `int \| null` | Size after the run; `null` if it could not be stat'ed. |
+| `created` | `bool` | `true` when the file did not exist before the run, `false` when it was overwritten. |
+
+This is deliberately independent of `persist_log_files`: knowing *what a run wrote* is useful on every call, whereas copying those files into an immutable run bundle is an explicit archival choice. When the working directory holds more than the producer's scan cap (5,000 files), detection is skipped and an `output_tracking_skipped` warning is emitted rather than reporting a partial answer as complete.
 
 ### 3.7 `error`
 
@@ -438,7 +473,8 @@ Populated iff `ok: false`. The schema's most important contribution to agent UX:
 | `rc_label` | `string` | Stata's official short label for that rc when known; else a producer-supplied descriptor. |
 | `message` | `string` | Human-readable, single line. Truncated to 4,096 characters; truncation indicator `…` appended if cut. |
 | `command` | `string \| null` | The specific command line that failed, if isolatable. Truncated to 1,024 characters. |
-| `line` | `int \| null` | 1-indexed line within the *top-level submitted code*. Errors inside nested `do`-files set `line: null` (and `path` to the script if known). |
+| `line` | `int \| null` | 1-indexed line within the file named by `source_file`, or within the *top-level submitted code* when `source_file` is `null`. |
+| `source_file` | `string \| null` | Absolute path of the `do` / `run` script `line` indexes into, when the failure happened inside a script the submitted code invoked. `null` means `line` refers to the submitted code. Producers SHOULD resolve this: a bare `do "analysis.do"` otherwise yields no line number at all, which is the most expensive failure mode for an agent to debug. |
 | `context` | `object` | Surrounding-code window; see below. |
 | `commands_executed` | `int \| null` | Number of commands that ran before the failure, if isolatable. The state in `results` and `dataset` reflects this post-failure state, not a pre-failure rollback. |
 | `path` | `string \| null` | For `file_*` kinds, the file path at issue. |
@@ -504,6 +540,7 @@ rc(s) below cite StataCorp `[P] error` (Stata 19, 2025). The code is authoritati
 | `file_exists` | 602 | `path` populated. Suggestion: pass `replace` option. |
 | `file_corrupt` | 610, 688 | `path` populated. "Not a Stata file" (610) or genuinely corrupt (688). |
 | `file_io` | 603, 691, 692, 693 | `path` populated. Catch-all for open/read/write failures (691–693 are local filesystem I/O). |
+| `log_state` | 604, 606 | The session's log handles are in the wrong state: a log is already open (604) or none is open (606). Almost always the residue of an earlier run that aborted between `log using` and `log close`. `recovery.retriable` is true — the fix is `capture log close _all`, not a code change. |
 | `network` | 2, 631, 672, 677 | Connection timed out / host not found / server refused / remote connection failed. |
 | `permission` | 608 | `path` populated. File is read-only / not writable. |
 | `encoding` | (no dedicated rc) | Unicode / encoding-conversion failures; producer-set. |
@@ -512,6 +549,7 @@ rc(s) below cite StataCorp `[P] error` (Stata 19, 2025). The code is authoritati
 | `interrupt` | 1 | User Break / Ctrl-C from a frontend. |
 | `cancelled` | (synthetic `rc: -3`) | Cancellation was requested. Subprocess-backed producers may terminate an in-flight worker; the direct in-process runner only short-circuits before Stata receives code. |
 | `timeout` | (synthetic `rc: -2`) | Adapter-imposed time limit exceeded. |
+| `session_busy` | (synthetic `rc: -5`) | The session's Stata process was still running an earlier request when this call's `timeout_ms` elapsed. **Nothing was submitted to Stata**, the worker is healthy and is not killed. Retriable as-is; alternatives are a longer `timeout_ms`, `run_in_background`, or a different `session_id`. |
 | `adapter_crash` | (synthetic `rc: -1`) | Producer-side failure (pystata exception, IPC death). |
 | `policy_blocked` | (synthetic `rc: -4`) | The command-safety policy rejected the code before Stata ran (an OS-escape / file-deletion command such as `shell`, `erase`, `rmdir`, or `!`). `error.recovery.needs_code_change` is true. Configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`. |
 | `unknown` | any unmapped rc | Catch-all. Agents fall back to `message`. We aim to shrink this over time. |
@@ -569,9 +607,15 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | `include_graphs` | `"ref" \| "inline" \| "none"` | `"ref"` | `"none"` skips graph capture entirely (cheapest); `"ref"` captures and returns refs; `"inline"` base64-encodes bytes into `inline`. |
 | `graph_format` | `"png" \| "svg" \| "pdf"` | `"png"` | Render format. |
 | `include_dataset_variables` | `bool` | `true` | Set `false` to omit `dataset.variables`. |
-| `timeout_ms` | `int \| null` | `600000` (10 min) | Hard timeout. `null` disables. On expiry, returns `ok: false`, `error.kind: "timeout"`, `rc: -2`. Frontends MAY override the default if their use case demands. |
+| `include_results` | `"none" \| "scalars" \| "full"` | `"scalars"` | Payload budget for `results.r` / `results.e`. `"scalars"` inlines scalars and macros and emits every matrix as a stub (§3.4); `"full"` inlines matrix values up to the ~10,000-cell cap; `"none"` omits `r()` / `e()` entirely. Never affects `results.estimation`. |
+| `include_estimation` | `"none" \| "summary" \| "full"` | `"full"` | Payload budget for `results.estimation`. `"summary"` keeps the model-level block and drops per-term rows. |
+| `max_coefficients` | `int \| null` | `null` | Cap on `estimation.coefficients` rows. `n_coefficients` still reports the true count. |
+| `timeout_ms` | `int \| null` | `600000` (10 min) | Hard timeout. `null` disables. On expiry, returns `ok: false`, `error.kind: "timeout"`, `rc: -2`. The budget covers **queueing**: a call waiting on a session whose Stata process is mid-run returns `rc: -5`, `error.kind: "session_busy"` rather than blocking past its deadline. Frontends MAY override the default if their use case demands. |
+| `run_in_background` | `bool` | `false` | Return a `job_id` immediately instead of the `Result`; poll with `stata_run_status`. Producers that do not implement background execution MUST ignore it and run synchronously. |
+| `track_output_files` | `bool` | `true` | Populate `outputs` by diffing the working directory around the run. Independent of `persist_log_files`. |
+| `auto_close_logs` | `bool` | `true` | On a failed run, close log handles that this run opened. Handles opened by earlier runs are left alone. |
 | `persist_log_files` | `bool` | `false` | With `origin_path`, writes immutable `.log` / `.smcl` / manifest files under the source `.do` file's `log-files/` directory. |
-| `persist_generated_files` | `bool` | `true` | When log files are persisted, also copies newly created or modified table/export files into `outputs/` and captured graphs into `graphs/`. |
+| `persist_generated_files` | `bool` | `true` | When log files are persisted (i.e. `persist_log_files: true` **and** `origin_path` set), also copies newly created or modified table/export files into the bundle's `outputs/` and captured graphs into `graphs/`. To merely *learn* what a run wrote, use `track_output_files` — it needs no bundle. |
 | `origin_path` | `string \| null` | `null` | Absolute source `.do` (or `.ipynb`) path used for working-directory defaults and run-bundle placement. |
 | `origin_kind` | `string \| null` | `null` | Editor surface that produced the code (`"file"`, `"selection"`, `"line"`, `"cell"`, `"section"`, `"code"`, `"unknown"`). Echoed in `result.origin` and the run-bundle manifest. |
 | `origin_label` | `string \| null` | `null` | Human-readable source label, e.g. `demo/test1.do:1`. Echoed in `result.origin` and the run-bundle manifest. |
@@ -592,6 +636,8 @@ The schema implies a small set of follow-up calls. Frontends expose them under c
 | `get_log(ref)` | Fetch the full log behind a `log.ref`. **Mandatory** when any `run()` may emit `truncated: true`. | `{text: string, lines_total: int, bytes_total: int}` |
 | `get_graph(ref, format?)` | Fetch graph bytes (default returns the captured format; can request a re-render to png/svg/pdf). | `{format: string, bytes_b64: string, width: int, height: int}` |
 | `get_matrix(ref)` | Fetch a matrix's `values` when the producer omitted them inline. **Mandatory** when any `run()` may emit `matrices[*].ref != null`. | `{rows: [...], cols: [...], values: [[...]]}` |
+| `stata_run_status(job_id, wait_ms?)` | Poll a run submitted with `run_in_background: true`. **Mandatory** for producers that advertise `background_runs`. `wait_ms` blocks up to a bounded ceiling (60 s) so a caller need not busy-poll. | `{job_id, session_id, status: "running" \| "done" \| "error", submitted_at, finished_at, elapsed_ms, code_preview, result: Result \| null, error: string \| null}` |
+| `list_background_runs()` | Enumerate background runs the producer is tracking, newest first. Summaries only — no result payloads. | `{jobs: [{job_id, session_id, status, ...}, ...]}` |
 | `list_sessions()` | Enumerate live sessions. | `[{session_id, started_at, last_used_at, n_obs}, ...]` |
 | `reset_session(session_id?)` | Hard-reset a session (`clear all`). Invalidates all refs scoped to it. | `Result` with the cleared state. |
 | `stata_info()` | Report installed Stata. | `{stata: {...}, available: bool, capabilities: [...]}` |
@@ -642,6 +688,10 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `notebook_edit` | Producer registers atomic `notebook_edit_cell` / `notebook_insert_cell` / `notebook_delete_cell`. |
 | `run_index` | Producer registers `list_runs` to query the on-disk run-bundle manifests. |
 | `origin_echo` | Producer accepts `origin_path` / `origin_kind` / `origin_label` / `origin_cell_id` and echoes them in `result.origin`. |
+| `result_budget` | Producer honours `include_results` / `include_estimation` / `max_coefficients` and emits matrix stubs. |
+| `background_runs` | Producer accepts `run_in_background` and registers `stata_run_status` / `list_background_runs`. |
+| `output_tracking` | Producer populates `outputs` by diffing the working directory around a run. |
+| `log_hygiene` | Producer closes log handles a failed run leaked, so an aborted script cannot poison the session with r(604). |
 
 Consumers detect optional features via `capabilities`, not by parsing `schema_version`. Producers may add entries; agents MUST treat unknown capability names as opaque.
 

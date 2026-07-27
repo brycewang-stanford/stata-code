@@ -124,17 +124,24 @@ class JobRegistry:
         return job
 
     def _run(self, job: Job, code: str, session_id: str, options: dict[str, Any]) -> None:
+        result: RunResult | None = None
+        error: str | None = None
+        status = "done"
         try:
-            job.result = pool_execute(code, session_id=session_id, **options)
-            job.status = "done"
+            result = pool_execute(code, session_id=session_id, **options)
         except BaseException as exc:  # noqa: BLE001 - a job thread must never die silently
             # Includes ValueError for a bad option set. Recorded on the job so
             # the polling caller sees the failure instead of a job that stays
             # "running" forever.
-            job.error = f"{type(exc).__name__}: {exc}"
-            job.status = "error"
+            error = f"{type(exc).__name__}: {exc}"
+            status = "error"
         finally:
+            # `status` is published LAST of the data fields, so a reader that
+            # sees a terminal status is guaranteed to see the payload with it.
+            job.result = result
+            job.error = error
             job.finished_at = _utc_iso_ms()
+            job.status = status
             job._done.set()  # noqa: SLF001 - same-module private handshake
 
     def get(self, job_id: str) -> Job | None:

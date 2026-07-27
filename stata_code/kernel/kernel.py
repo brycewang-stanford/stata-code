@@ -4,6 +4,8 @@ The kernel uses `runner.execute()` for every cell. Defaults are tuned for
 human/notebook use rather than agent use:
 - `include_full_log=True`: full log shown in stdout (no head/tail truncation)
 - `include_graphs="inline"`: graph bytes embedded for direct rendering
+- `include_results="full"`: r()/e() matrices stay inline rather than becoming
+  `matrix://` stubs, since a notebook has no token budget to defend
 - `session_id="main"`: single-session unless the kernel is configured with
   multiple kernel specs
 
@@ -177,6 +179,10 @@ class StataKernel(_KernelBase):
                 code.strip(),
                 include_full_log=True,
                 include_graphs="inline",
+                # A notebook has no token budget to defend and no natural place
+                # to resolve a `matrix://` ref, so keep r()/e() matrices inline
+                # for anyone poking at `_last_result`.
+                include_results="full",
             )
         except PystataNotAvailable as exc:
             return self._error_reply(f"Stata not available: {exc}")
