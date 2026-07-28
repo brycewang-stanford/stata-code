@@ -2,7 +2,7 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.9 (June 2026).** Full UI surface — orange Stata title-bar
+> **Status: v0.11 (July 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / data (variables) / run history / logs / graphs / outputs panels,
 > syntax highlighting, outline/section navigation, code-lens cells and sections,
@@ -16,6 +16,17 @@ A thin VSCode transport in front of the same `stata-code-mcp` server
 that Claude Code / Cursor use. The extension owns no Stata logic;
 everything goes through MCP `stata_run`, `get_log`, `get_graph`,
 `get_matrix`, `list_sessions`, `cancel_session`, `reset_session`.
+
+Because it is a human-facing surface rather than an agent one, the extension
+requests `include_results: "full"` — matrices stay inline instead of becoming
+the `matrix://` stubs the server returns by default, so the sidebar's matrix
+view has values to render. The Jupyter kernel does the same, for the same
+reason.
+
+The **Outputs** panel is currently backed by `log.files.output_paths`, so it
+populates only for runs that requested a persisted run bundle. The server also
+reports `result.outputs` on *every* run since 0.11; wiring the panel to that is
+a pending improvement.
 
 ## UI surface
 

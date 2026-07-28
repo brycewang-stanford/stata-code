@@ -62,7 +62,7 @@ export STATA_CODE_STATA_CLI=/usr/local/stata18/stata-mp   # 例
 ```
 
 无论哪个后端，返回的都是**同一套 v1.0 结构化结果**：带类型的 `r()`/`e()`、
-估计系数表、32 类错误分类 + 修复建议。
+估计系数表、34 类错误分类 + 修复建议。
 
 ---
 
@@ -75,6 +75,30 @@ stata-code setup --claude        # 写入项目级 .mcp.json（会保留其它 s
 
 然后运行 `claude`，`/mcp` 里应能看到 `stata-code` 及其 21 个工具
 （`stata_run`、`lint_do`、`inspect_data`、`install_package` 等）。
+
+---
+
+## 长任务与返回体大小
+
+默认设置已经为 agent 调优过，一般不用动。真正需要时有这几个开关：
+
+```jsonc
+// 需要原始矩阵数值（默认矩阵是只带形状的 matrix:// stub）
+{"code": "...", "include_results": "full"}
+
+// 固定效应很多、只想要模型层面的结果
+{"code": "...", "include_estimation": "summary"}
+
+// bootstrap / 置换检验等几分钟起步的任务：立刻拿到 job_id，之后轮询
+{"code": "bootstrap, reps(10000): ...", "session_id": "bg", "run_in_background": true}
+```
+
+后台任务用 `stata_run_status(job_id, wait_ms)` 查询（`wait_ms` 最多阻塞 60 秒），
+用 `list_background_runs()` 列出。**给后台任务单独的 `session_id`** —— 一个 Stata
+进程只服务一个 session，同一 session 的前台调用会排队，超时后返回
+`rc=-5` / `session_busy`（此时代码本身没问题，什么都没执行）。
+
+每次运行还会用 `result.outputs` 列出写到磁盘的表格/导出文件，不用再自己去翻目录。
 
 ---
 

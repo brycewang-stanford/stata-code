@@ -126,6 +126,33 @@ The extension auto-discovers a Python interpreter for the MCP server in this ord
 The MCP client is reset whenever `stataCode.*` settings change so users don't have
 to reload the window.
 
+## Agent-ergonomics surface (0.11)
+
+Five knobs and two tools were added in 0.11 in response to a report from an
+agent that drove a full empirical paper through the MCP server. If you are
+touching `runner.execute()` or the `stata_run` schema, these are the invariants
+to preserve:
+
+| Surface | Invariant that must not regress |
+| --- | --- |
+| `include_results` (default `scalars`) | `results.estimation` is **always** built from the complete matrix values — following `matrix://` refs when needed — *before* the wire representation is trimmed. Trimming the payload must never blank `se` / `p_value` / CI. See `_collect_results` in `core/runner.py`. |
+| `include_estimation`, `max_coefficients` | `estimation.n_coefficients` always reports the model's true term count; `coefficients_truncated` flags any cut. A trimmed table must never be indistinguishable from a smaller model. |
+| `timeout_ms` | Budgets the **whole** call including the wait for the session's worker lock. Acquiring that lock without a deadline is the bug that made queued calls hang forever (`WorkerProcess.execute`). Contention returns `rc=-5` / `session_busy` and must **not** kill the healthy worker. |
+| `run_in_background` | Jobs live in `core/jobs.py`. Running jobs are never evicted from the registry; a job's `status` is published *after* its result, so a reader seeing a terminal status also sees the payload. |
+| `auto_close_logs` | Only handles opened by **this** run are closed. A handle opened by an earlier run belongs to the caller. |
+| `track_output_files` | Detection is a working-dir snapshot diff, capped at `MAX_SNAPSHOT_ENTRIES`; past the cap it must skip and warn rather than report a partial answer as complete. |
+
+Two cross-cutting rules that are easy to break:
+
+- **Stata missings are not numbers.** `sfi` returns `.` and `.a`–`.z` as doubles
+  at or above `2**1023`. Every numeric crossing the wire goes through
+  `_norm_stata_number`. Adding a new numeric field means routing it through that
+  helper too.
+- **Internal probes are r-class.** `graph dir`, `log query` and `graph export`
+  all clobber `r()`. Any new housekeeping command must run inside
+  `_preserved_returns(rt)`, or the caller's `summarize` → `display r(mean)`
+  pattern breaks across calls.
+
 ## Notebook cell repair loop (Phase 1)
 
 `stata_run` is intentionally cell-agnostic: it accepts a code string and a few
@@ -148,6 +175,9 @@ Recommended loop (opt-in; never run without an explicit "fix and rerun" request)
 4. On failure:
    - `error.line` is **already cell-relative** because the agent submitted the
      cell's source verbatim — no off-by-one math against the notebook file.
+     (`error.source_file` is `null` in this case. It is only populated when the
+     cell itself invoked a `do`/`run` script, and then `line` indexes into that
+     script rather than into the cell.)
    - `error.context.failing` is the failing command line; use it as a content
      fingerprint when the user describes the failure later.
 5. If the user authorised repairs, apply the edit via

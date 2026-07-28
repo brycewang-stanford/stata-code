@@ -1,6 +1,6 @@
 ---
 name: stata-code
-description: Use this skill whenever the user asks to run Stata code, debug a `.do` file, work with a Stata-backed Jupyter notebook, repair a Stata error, interpret `r()` / `e()` results, or write/plan a Stata analysis — and the `stata-code` MCP server is available (or, when it is not, to generate self-contained do-files). The skill teaches Claude the v1.0 RunResult schema, the 18 MCP tools, token-economy defaults, the typed-error repair loop, and a routing table into an on-demand Stata reference library (syntax, data management, econometrics, causal inference, panel/time series, graphics, tables, error codes, defensive coding, and key packages).
+description: Use this skill whenever the user asks to run Stata code, debug a `.do` file, work with a Stata-backed Jupyter notebook, repair a Stata error, interpret `r()` / `e()` results, or write/plan a Stata analysis — and the `stata-code` MCP server is available (or, when it is not, to generate self-contained do-files). The skill teaches Claude the v1.0 RunResult schema, the 21 MCP tools, token-economy defaults, the typed-error repair loop, and a routing table into an on-demand Stata reference library (syntax, data management, econometrics, causal inference, panel/time series, graphics, tables, error codes, defensive coding, and key packages).
 ---
 
 # stata-code Skill
@@ -56,16 +56,18 @@ The skill ships a `references/` library of dense Stata domain knowledge. **Progr
 
 Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+ `panel-timeseries.md`); "my merge gives wrong N" → `defensive-coding.md`; "command not found: reghdfe" → `error-codes.md` + `packages/reghdfe.md`; "make a publication table" → `tables-export.md` + `recipes/publication-tables.md`; "compare Stata csdid against R did" → `parity-audit.md` + `packages/csdid.md`; "OECD MCP pulled a CSV; now analyze it in Stata" → `data-mcp-handoff.md`; "run the full DiD/event-study workflow" → `recipes/did-event-study.md`.
 
-## 4. The 18 MCP tools (cheat sheet)
+## 4. The 21 MCP tools (cheat sheet)
 
 | Tool | Use it when… |
 |---|---|
-| `stata_run(code, session_id?, …)` | The user wants Stata code executed. Default to `session_id="main"`. |
+| `stata_run(code, session_id?, …)` | The user wants Stata code executed. Default to `session_id="main"`. See §4.1 for the payload/timeout knobs. |
+| `stata_run_status(job_id, wait_ms?)` | Poll a run you submitted with `run_in_background: true`. `wait_ms` blocks up to 60 s — far cheaper than a tight poll loop. |
+| `list_background_runs()` | See which background runs are still going. Summaries only; fetch a result with `stata_run_status`. |
 | `stata_info()` | At session start (also picks live vs offline mode), or when capabilities / Stata edition matter. |
 | `get_log(ref)` | A prior `stata_run` returned `log.truncated: true` and you need the full log. |
 | `search_log(ref, pattern, is_regex?, ignore_case?, context?, max_matches?)` | You need only specific lines from a truncated `log://` ref — grep it instead of pulling the whole log back with `get_log`. |
 | `get_graph(ref, format?)` | The user wants graph bytes (export, display, embed). |
-| `get_matrix(ref)` | A matrix in `results.r.matrices` / `results.e.matrices` came back with `values: null` (over 10k cells). |
+| `get_matrix(ref)` | A matrix in `results.r.matrices` / `results.e.matrices` came back with `values: null`. By default *every* matrix is a stub, so this is the normal way to get raw `e(V)` / `e(b)` numbers. |
 | `inspect_data(varlist?, detail?, session_id?)` | "What's in this dataset?" Runs `describe` + `codebook`; returns the structured `dataset` block plus the codebook log. |
 | `lint_do(code? / path?)` | Before running a long or generated do-file, statically check it (unbalanced braces, missing `end`, dangling `///`). Cheap, Stata-free; catches structural mistakes without spending a run. Advisory — a clean result is not a guarantee. |
 | `install_package(name, source?, url?, replace?, session_id?)` | A run failed with `command_not_found` (rc 199) for a community package, or the user asks to install one. Builds `ssc`/`net install`, then verifies with `which`. |
@@ -80,6 +82,20 @@ Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+
 | `notebook_delete_cell(path, cell_id, expected_source?)` | Remove a cell. Pass `expected_source` when guarding against drift. |
 | `list_runs(log_dir or origin_path, …)` | Search the on-disk run-bundle index — "show me my last failed run on this file". |
 
+### 4.1 `stata_run` options worth knowing
+
+Defaults are already tuned for you; reach for these only when the situation calls for it.
+
+| Option | Default | Reach for it when… |
+|---|---|---|
+| `include_results` | `"scalars"` | You genuinely need raw matrix numbers inline: `"full"`. Under the default, scalars and macros are inline and every matrix is a `matrix://` stub with its shape — because one estimation otherwise ships the same numbers four times (`e(b)`, `e(V)`, `e(beta)`, `r(table)`) on top of `results.estimation`. `"none"` drops `r()`/`e()` entirely and still gives you `estimation`. |
+| `include_estimation` | `"full"` | The model is dominated by `i.year i.firm` nuisance terms and you only want the model-level block: `"summary"`. |
+| `max_coefficients` | unset | You want the first N coefficient rows. `estimation.n_coefficients` still reports the true count and `coefficients_truncated` flags the cut, so you can always tell. |
+| `timeout_ms` | `600000` | A run legitimately needs longer, or you want to fail fast. The budget covers **queueing**, so a call waiting on a busy session returns `rc: -5` rather than hanging. |
+| `run_in_background` | `false` | Bootstraps, permutation tests, `prodest` loops — anything multi-minute. Returns a `job_id` immediately; poll `stata_run_status`. **Give the job its own `session_id`** if you want to keep working, since one Stata process serves one session. |
+| `track_output_files` | `true` | Leave it on: `result.outputs` tells you which `esttab` tables / exports / `.dta` files the run wrote, so you don't have to go hunting with shell tools. |
+| `auto_close_logs` | `true` | Leave it on. It closes log handles a *failed* run leaked; without it an aborted `log using` makes every later run in that session die with r(604). |
+
 There are also MCP resources (`stata://schema/run-result`, `log://...`, `graph://...`, `matrix://...`) and prompts (`run_do_file_and_report`, `debug_stata_error`, `fix_and_rerun_until_passes`, `replication_audit`, `summarize_estimation_results`, `run_notebook_cell_and_report`, `fix_and_rerun_notebook_cell`, `plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`, `did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`).
 
 ## 5. The v1.0 RunResult schema (read this once)
@@ -89,7 +105,8 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 ```jsonc
 {
   "ok": true,                      // ← branch on this first
-  "rc": 0,                         // Stata _rc; -1 adapter crash, -2 timeout, -3 cancelled
+  "rc": 0,                         // Stata _rc; -1 adapter crash, -2 timeout, -3 cancelled,
+                                   //   -4 policy blocked, -5 session busy
   "session_id": "main",
   "request_id": "01HX…",
   "started_at": "2026-…Z",
@@ -109,26 +126,44 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 
   "results": {
     "r": {"scalars": {…}, "macros": {…}, "matrices": {…}},
-    "e": {"scalars": {…}, "macros": {…}, "matrices": {"b": {rows, cols, values, ref}, …}},
-    "last_estimation_cmd": "regress"
+    // By default every matrix is a STUB: no values, no labels, just shape + ref.
+    "e": {"scalars": {…}, "macros": {…},
+          "matrices": {"b": {"rows": [], "cols": [], "values": null,
+                             "ref": "matrix://…", "n_rows": 1, "n_cols": 2}, …}},
+    "last_estimation_cmd": "regress",
+    // ← THE typed view. Read this instead of the raw matrices.
+    "estimation": {
+      "command": "regress", "command_family": "ols", "depvar": "price",
+      "n_obs": 74, "statistic_kind": "t", "source": "r_table",
+      "coefficients": [{"term": "mpg", "b": …, "se": …, "statistic": …,
+                        "p_value": …, "ci_low": …, "ci_high": …}, …],
+      "n_coefficients": 2,            // true term count, even if rows were trimmed
+      "coefficients_truncated": false,
+      "model_stats":  {"N": 74, "r2": 0.219, …},
+      "diagnostics":  {"weak_id_F": …, "hansen_p": …}   // command-aware, never fabricated
+    }
   },
 
   "dataset": {"frame": "default", "n_obs": 74, "n_vars": 12, "changed": false, …},
   "graphs":   [{"ref": "graph://…", "format": "png", "source_command": "scatter …", "source_line": 5}],
+  "outputs":  [{"path": "/w/tables/t1.tex", "bytes": 4552, "created": true}],  // files the run wrote
   "warnings": [{"kind": "convergence", "message": "…"}],
 
   "error": null,                   // populated iff ok=false; see §7
   "origin": null,                  // echoes origin_* request fields
   "schema_version": "1.0",
-  "capabilities": ["log_truncation", "graph_ref", "matrix_ref", "multi_session", …]
+  "capabilities": ["log_truncation", "graph_ref", "matrix_ref", "multi_session",
+                   "result_budget", "background_runs", "output_tracking", "log_hygiene", …]
 }
 ```
 
 **Key invariants:**
 - Branch on `ok` first; never grep `log.head` to decide success.
-- Scalars are native numbers. Missing is JSON `null`, not `"."`.
-- Matrices over ~10k cells arrive with `values: null` + a `matrix://` ref — call `get_matrix` lazily.
-- Graphs default to refs, not base64 bytes. Only ask for `include_graphs: "inline"` if you genuinely need the bytes.
+- Scalars are native numbers. Missing is JSON `null`, not `"."` and never `8.988e+307`. The same holds for every matrix cell.
+- **`results.estimation` is the coefficient table to read.** It is always derived from the complete values, so it carries real `se` / `p_value` / CI even when the matrices are stubs. Do not reconstruct inference from `e(b)` and `e(V)` yourself.
+- Matrices arrive as `values: null` + a `matrix://` ref by default — call `get_matrix` only when you need the raw numbers.
+- `result.outputs` lists the files the run wrote. Read it instead of shelling out to find the `esttab` table you just produced.
+- Graphs default to refs, not base64 bytes. `include_graphs: "inline"` now returns real image content blocks (viewable), capped at 4 per response.
 
 ## 6. Token-economy defaults — keep responses small
 
@@ -137,9 +172,12 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 - **Do not** pass `include_full_log: true` unless the user asked for the full log or the head/tail clearly miss the relevant content.
 - **Do not** pass `include_graphs: "inline"` unless the agent needs the bytes (rare; usually surface the `ref`).
 - **Do not** read `get_log(ref)` proactively; prefer `search_log(ref, pattern)` to pull just the lines you need, and only fall back to `get_log` for the full transcript.
-- **Do** quote specific numbers from `results.e.scalars` / `results.r.scalars` rather than dumping JSON.
+- **Do not** pass `include_results: "full"` reflexively. `results.estimation` already has the typed table with real standard errors; `"full"` roughly doubles the envelope for a wide model and hands you the same numbers three more times.
+- **Do** reach for `include_estimation: "summary"` or `max_coefficients` when a model has dozens of fixed-effect terms you are not going to report.
+- **Do** quote specific numbers from `results.estimation` / `results.e.scalars` rather than dumping JSON.
+- **Do** send genuinely long jobs to `run_in_background` on their own `session_id` instead of blocking a foreground call for minutes.
 
-## 7. The typed-error taxonomy (31 kinds)
+## 7. The typed-error taxonomy (34 kinds)
 
 On failure, the `error` block looks like:
 
@@ -150,13 +188,21 @@ On failure, the `error` block looks like:
   "rc_label": "variable not found",
   "message": "variable mpgg not found",
   "command": "summarize mpgg",
-  "line": 3,
+  "line": 3,                        // line within source_file, else within submitted code
+  "source_file": null,              // set when the failure was inside a `do`/`run` script
   "context": {"before": ["use auto"], "failing": "summarize mpgg", "after": []},
   "commands_executed": 1,
   "varname": "mpgg",               // populated for varname_* / file_* / name_* kinds
-  "suggestions": [{"action": "Did you mean `mpg`?", "command": "describe"}]
+  "suggestions": [{"action": "Did you mean `mpg`?", "command": "describe"}],
+  "recovery": {"category": "user_code", "retriable": false,
+               "needs_code_change": true, "needs_user_input": false}
 }
 ```
+
+When you submit `do "analysis.do"` and it fails, `line` and `context` point **inside
+`analysis.do`** and `source_file` names it — you do not need to re-read the script to
+find the offending line. A failed run also still carries a full `log`, so
+`search_log(ref, …)` works on failures.
 
 Kinds you will see most often:
 
@@ -168,6 +214,8 @@ Kinds you will see most often:
 - `name_conflict` (rc 110) — use `replace` or pick a fresh name.
 - `convergence` / `infeasible` (rc 430/491) — model issue, not a typo; do not loop on it.
 - `no_estimation_results` (rc 301) — likely `predict`/`margins` before any `regress`.
+- `log_state` (rc 604/606) — a log handle is in the wrong state, almost always left by an earlier aborted run. Fix is `capture log close _all`, **not** a code change; `recovery.retriable` is true. `auto_close_logs` prevents most of these.
+- `session_busy` (−5) — that session's Stata process is still running an earlier request. **Nothing ran**; the code is fine. Wait, raise `timeout_ms`, use a different `session_id`, or send the long job to the background.
 - `timeout` (−2) / `cancelled` (−3) / `adapter_crash` (−1) — system-level; do not retry blindly.
 
 **The full rc → kind → fix table and the self-repair algorithm live in `references/error-codes.md`.** Read it whenever you hit a non-trivial failure. Use `error.suggestions` as hints, **not** directives — apply a fix automatically only if the user asked you to repair and rerun.

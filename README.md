@@ -81,7 +81,7 @@ claude mcp add stata-code --scope user -- uvx --from "stata-code[mcp]" stata-cod
 
 此外还有第四个前端——**终端命令行**（`stata-code run` / `lint` / `setup`），让任何能调用 shell 的 agent（或纯终端）拿到同一套带类型的 `RunResult`；core 支持两种后端：**pystata**（Stata 17+，内存会话）或 **console 后端**（Stata 13+ 批处理，无需 pystata），两者返回完全相同的 schema。
 
-**当前状态：v0.10（2026 年 7 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展和命令行都已经在 Stata 18 MP 上端到端跑通；console 后端把覆盖范围扩展到无需 pystata 的 Stata 13+。测试套件覆盖 schema、runner、console 解析器、MCP、kernel、notebook、run-index、subprocess pool、命令安全、linter 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。快速上手见 [docs/quickstart.zh.md](docs/quickstart.zh.md)。
+**当前状态：v0.11（2026 年 7 月）** —— core、MCP server、Jupyter kernel、VS Code 扩展和命令行都已经在 Stata 18 MP 上端到端跑通；console 后端把覆盖范围扩展到无需 pystata 的 Stata 13+。v0.11 是一个「agent 使用体验」版本：返回体可裁剪、长任务可后台执行、do 文件内报错可定位、失败运行的 log 句柄自动关闭、生成文件自动上报 —— 详见 [changelog](CHANGELOG.md)。测试套件覆盖 schema、runner、console 解析器、MCP、kernel、notebook、run-index、subprocess pool、命令安全、linter 和 VS Code 等模块；CI 也检查 lint、类型、schema 生成、包元数据和 VSIX 打包。许可证：**MIT**。快速上手见 [docs/quickstart.zh.md](docs/quickstart.zh.md)。
 
 当前代码树明确支持的三类用户 / agent 工作流：
 
@@ -387,11 +387,14 @@ client 是否已经指向 `stata-code`。
 
 ## 默认节省 token
 
-典型的 `stata_run` 响应比现有 MCP server 直接返回日志和图片的方式小约 **10 倍**。核心设计有三点：
+典型的 `stata_run` 响应比现有 MCP server 直接返回日志和图片的方式小约 **10 倍**。核心设计有四点：
 
-1. **日志默认只返回 `head` + `tail` + `ref`**。完整日志可以按需用 `get_log(ref)` 获取。Stata 回归日志可能有约 6,000 tokens，`stata-code` 默认约 600 tokens。
-2. **图形默认返回 refs，不内联 base64**。一个 30 KB PNG 转成 base64 约 50,000 tokens；返回 ref 可以让智能体只在真正需要渲染时再取 bytes。
-3. **错误是结构化 typed errors**。智能体可以判断 `err.kind == "varname_not_found"`，而不是正则解析英文日志。
+1. **日志默认只返回 `head` + `tail` + `ref`**。完整日志可以按需用 `get_log(ref)` 获取，也可以用 `search_log(ref, pattern)` 直接在 ref 里检索。Stata 回归日志可能有约 6,000 tokens，`stata-code` 默认约 600 tokens。
+2. **图形默认返回 refs，不内联 base64**。一个 30 KB PNG 转成 base64 约 50,000 tokens；返回 ref 可以让智能体只在真正需要渲染时再取 bytes。确实需要内联时，图形会以真正的 MCP image content block 返回 —— 视觉模型能直接看到，而不是塞在 JSON 字符串里、既烧 token 又看不见的 base64。
+3. **一次估计只描述一次**。默认（`include_results: "scalars"`）保留 `r()` / `e()` 的 scalars 和 macros，而把每个矩阵降级成只带形状的 `matrix://` stub。否则同一批数字会被编码四遍 —— `e(b)`、`e(V)` 的行列标签、`e(beta)`、`r(table)` —— 而 `results.estimation` 里其实已经有带类型的系数表了。一个 123 项的回归返回体从约 57 KB 降到约 28 KB。原始数值仍然只差一次 `get_matrix(ref)`；`include_results: "full"` 可恢复旧行为。
+4. **错误是结构化 typed errors**。智能体可以判断 `err.kind == "varname_not_found"`，而不是正则解析英文日志。
+
+固定效应很多的场景还有两个开关：`include_estimation: "summary"` 保留模型层面的信息但丢掉逐项系数，`max_coefficients` 则给系数表设上限。两种情况下 `estimation.n_coefficients` 都仍然报告模型真实的项数，`coefficients_truncated` 会标记被截断 —— 所以裁剪过的表不会被误当成一个更小的模型。
 
 例如，变量名写错时返回的是结构化错误：
 
@@ -403,6 +406,7 @@ client 是否已经指向 `stata-code`。
     "kind": "varname_not_found",
     "varname": "mpgg",
     "line": 3,
+    "source_file": null,
     "context": {
       "before": ["use auto"],
       "failing": "summarize mpgg",
@@ -410,10 +414,18 @@ client 是否已经指向 `stata-code`。
     },
     "suggestions": [
       {"action": "Did you mean `mpg`?", "command": "describe"}
-    ]
+    ],
+    "recovery": {
+      "category": "user_code",
+      "retriable": false,
+      "needs_code_change": true,
+      "needs_user_input": false
+    }
   }
 }
 ```
+
+当出错的命令位于你调用的脚本里（`do "analysis.do"`）时，`line` 和 `context` 指向的是**那个脚本内部**的行，`source_file` 给出文件路径 —— 智能体不需要再把文件重新读一遍去找出错行。
 
 完整 schema 见 [SCHEMA.md](SCHEMA.md)。
 
@@ -468,7 +480,7 @@ stata_code/
 - 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
-- 31 类错误分类法 + 标准化建议
+- 34 类错误分类法 + 标准化建议，以及机器可读的 `recovery` 判定（可重试 / 需改代码 / 需人工介入）
 - MCP server：21 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）和包安装（`install_package`）
 - 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
 - Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置
@@ -477,8 +489,12 @@ stata_code/
 - VS Code 一键上手：扩展可自动在工作区创建 `.venv` 并安装 server（命令面板：“Stata: Set Up MCP Server”）
 - 中文快速上手指南：[docs/quickstart.zh.md](docs/quickstart.zh.md)
 - Jupyter kernel：接入 v1.0 pipeline，kernel logo 已随 wheel 一起打包
-- 矩阵大小上限 + 大矩阵的 `get_matrix(ref)`（>10k cells）
-- 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`、`cancel(session_id)`、MCP `cancel_session`
+- 返回体预算：`include_results`（默认把矩阵降级为 `matrix://` stub）、`include_estimation`、`max_coefficients`，需要原始数值时用 `get_matrix(ref)` 按需拉取
+- 公共 Python API 和 MCP server 的 subprocess-backed 硬超时与取消：`timeout_ms`（现已成为 `stata_run` 的正式入参，并且把排队时间也计入预算 —— 同一 session 冲突时返回 `rc=-5` / `session_busy`，不再无限阻塞）、`cancel(session_id)`、MCP `cancel_session`
+- 长任务后台执行：`run_in_background` 立即返回 job id，用 `stata_run_status`（可 `wait_ms` 有界阻塞）和 `list_background_runs` 轮询
+- `do` / `run` 脚本内部的报错定位：`error.line` 和 `error.context` 落在被调用文件内，`error.source_file` 给出文件路径；失败的运行同样带有完整可检索的 log
+- log 句柄卫生：失败运行泄漏的 log 句柄会被自动关闭（`auto_close_logs`），中途 abort 的脚本不会让该 session 后续每次运行都以 r(604) 失败
+- 生成文件上报：`result.outputs` 列出每次运行写出的表格、导出文件和数据集，与 run bundle 选项无关
 - `.ipynb` 单 cell 修复闭环：`notebook_outline` / `notebook_get_cell` / `notebook_edit_cell`，并通过 `expected_source` 做乐观并发控制；`stata_run` 回显 `origin_cell_id`
 - 持久化 run bundle + `list_runs`：按 cell / origin / session / since / ok 查询 `manifest.json`，并用 limit / offset 翻页
 - 只读 `stata-code doctor` / `verify` 诊断：检查 package 版本、extras、
@@ -491,6 +507,7 @@ stata_code/
 
 ### 下一步
 
+- 长任务的流式 / 增量进度（`log.complete:false`、部分日志行）。v0.11 的 `run_in_background` 已经让 20 分钟的 `boottest` / `csdid` 不再阻塞调用方，但运行中的任务在结束前仍然不汇报任何中间结果
 - Stata 11–16 的 console fallback，按 v1.0 schema 重新实现
 - 决定 Jupyter kernel 是否也迁到 subprocess pool，或者继续清楚记录当前为了交互性保留 in-process runner 的取舍
 - VS Code 体验打磨：Extension Host 端到端测试、首次启动诊断、命令面板 UX

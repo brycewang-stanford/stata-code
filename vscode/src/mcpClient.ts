@@ -15,6 +15,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { version as extensionVersion } from "../package.json";
 
 import type { RunResult } from "./types/runResult";
+import { buildRunArguments, type RunStataOptions } from "./runArgs";
 
 export interface StataServerLaunch {
   command: string;
@@ -23,18 +24,7 @@ export interface StataServerLaunch {
   env?: Record<string, string>;
 }
 
-export interface RunStataOptions {
-  sessionId?: string;
-  includeFullLog?: boolean;
-  includeGraphs?: "ref" | "inline" | "none";
-  persistLogFiles?: boolean;
-  persistGeneratedFiles?: boolean;
-  originPath?: string;
-  originKind?: "file" | "selection" | "line" | "cell" | "section" | "code" | "unknown";
-  originLabel?: string;
-  useOriginWorkdir?: boolean;
-  workingDir?: string;
-}
+export type { RunStataOptions } from "./runArgs";
 
 export class StataMcpClient implements vscode.Disposable {
   private client: Client | null = null;
@@ -131,20 +121,7 @@ export class StataMcpClient implements vscode.Disposable {
     await this.start();
     if (!this.client) throw new Error("MCP client not initialized");
 
-    const args: Record<string, unknown> = { code };
-    if (opts.sessionId !== undefined) args.session_id = opts.sessionId;
-    if (opts.includeFullLog !== undefined) args.include_full_log = opts.includeFullLog;
-    if (opts.includeGraphs !== undefined) args.include_graphs = opts.includeGraphs;
-    if (opts.persistLogFiles !== undefined) args.persist_log_files = opts.persistLogFiles;
-    if (opts.persistGeneratedFiles !== undefined) {
-      args.persist_generated_files = opts.persistGeneratedFiles;
-    }
-    if (opts.originPath !== undefined) args.origin_path = opts.originPath;
-    if (opts.originKind !== undefined) args.origin_kind = opts.originKind;
-    if (opts.originLabel !== undefined) args.origin_label = opts.originLabel;
-    if (opts.useOriginWorkdir !== undefined) args.use_origin_workdir = opts.useOriginWorkdir;
-    if (opts.workingDir !== undefined) args.working_dir = opts.workingDir;
-
+    const args = buildRunArguments(code, opts);
     const reply = await this.client.callTool({ name: "stata_run", arguments: args });
     return parseTextResult<RunResult>(reply, "stata_run");
   }
