@@ -6,10 +6,19 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
-### Agent-ergonomics pass
+## 0.11.0 — 2026-07-28
 
-Driven by a report from an agent that used the MCP server for a full empirical
-paper. Each item below is a cost that agent actually paid.
+An agent-ergonomics release, driven by a report from an agent that used the MCP
+server to write a full empirical paper. Each item below is a cost that agent
+actually paid.
+
+**Minor, not patch:** `include_results` defaults to `"scalars"`, so `r()` / `e()`
+matrices now arrive as `matrix://` stubs instead of inline values. Pass
+`include_results="full"` for the previous shape. `results.estimation` is
+unaffected — and is now *more* accurate, since two silent numeric bugs in it are
+fixed. The Jupyter kernel and the `stata-code run` CLI keep `"full"`.
+
+### Agent-ergonomics pass
 
 #### Result payloads are now bounded (and correct)
 
