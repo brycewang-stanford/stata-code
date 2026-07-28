@@ -6,6 +6,46 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Added
+
+#### Resident session daemon — state across CLI invocations
+
+The subprocess pool already kept one Stata worker alive per session, but a plain
+`stata-code run` owned that pool and tore it down on exit, so two consecutive CLI
+calls could not share data in memory. The new `daemon` subcommand holds the pool
+in a resident process behind a Unix socket:
+
+```bash
+stata-code run --daemon -e 'sysuse auto, clear' -e 'gen z = price/1000'
+stata-code run --daemon -e 'summarize z'      # new process, z is still loaded
+```
+
+- **`stata-code run --daemon`** routes the run through the daemon, starting it on
+  demand. `--socket` overrides the path. Graph refs are resolved back over the
+  socket, so `--graphs DIR` keeps working.
+- **`stata-code daemon start | stop | restart | status`** for explicit control;
+  `status --json` is machine-readable.
+- **Idle retirement** after 30 minutes by default (`--idle-timeout`, `0` disables)
+  so a forgotten daemon does not hold a Stata license slot.
+- **Unix socket only, never TCP** — mode 0600 inside a mode-0700 directory. The
+  command-safety guard still applies to everything the daemon runs.
+- **Requires the pystata backend.** `--backend console` is stateless batch
+  execution, so combining it with `--daemon` is a hard error rather than a silent
+  no-op.
+- Falls back to a short hashed `/tmp` socket path when the natural location would
+  exceed the platform's ~104-byte `sun_path` limit; every entry point derives the
+  same fallback, so clients still find the daemon.
+
+### Fixed
+
+- Documentation: the error taxonomy was described as "32 kinds" in `README.md`,
+  `README.en.md`, and `SCHEMA.md` while `ErrorKind` has had 34 members (the
+  English README's prose already said 34, contradicting its own table).
+- Documentation: both READMEs listed "Stata 17+" as a hard install requirement,
+  which contradicted the console backend's documented Stata 13+ support.
+- `README.md` was missing the command-line, client-setup, and command-safety
+  sections that `README.en.md` has had since 0.11.0.
+
 ## 0.11.0 — 2026-07-28
 
 An agent-ergonomics release, driven by a report from an agent that used the MCP

@@ -8,6 +8,8 @@ Subcommands:
   shell out gets the same typed error loop the MCP server exposes).
 * ``setup`` — opt-in, write the MCP server entry into a client's config.
 * ``lint`` — static, Stata-free check of do-file source.
+* ``daemon`` — manage the resident session daemon that keeps Stata sessions
+  warm between ``run`` invocations (``run --daemon`` routes through it).
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_run_parser(subparsers)
     _add_setup_parser(subparsers)
     _add_lint_parser(subparsers)
+    _add_daemon_parser(subparsers)
 
     args = parser.parse_args(argv)
     if args.version:
@@ -53,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         return _setup_command(args)
     if args.command == "lint":
         return _lint_command(args)
+    if args.command == "daemon":
+        return _daemon_command(args, parser)
 
     parser.print_help()
     return 0
@@ -197,6 +202,20 @@ def _add_run_parser(
         action="store_true",
         help="Suppress the log in the text summary (ignored with --json).",
     )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help=(
+            "Route the run through the resident session daemon so data stays in "
+            "memory across invocations. Starts the daemon if it is not running. "
+            "Requires the pystata backend."
+        ),
+    )
+    parser.add_argument(
+        "--socket",
+        default=None,
+        help="Daemon socket path (default: $STATA_CODE_DAEMON_SOCKET or ~/.stata-code/daemon.sock).",
+    )
 
 
 def _read_run_code(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
@@ -244,6 +263,21 @@ def _run_command(args: argparse.Namespace) -> int:
 
     timeout_ms = args.timeout_ms if args.timeout_ms and args.timeout_ms > 0 else None
     backend = _resolve_backend(args.backend)
+
+    if getattr(args, "daemon", False):
+        if backend == "console":
+            print(
+                "error: --daemon needs the pystata backend; the console backend is "
+                "stateless by design, so a daemon would buy nothing.",
+                file=sys.stderr,
+            )
+            return 2
+        return _run_via_daemon(
+            args,
+            code=code,
+            origin_path=origin_path,
+            timeout_ms=timeout_ms,
+        )
 
     if backend == "console":
         try:
@@ -351,6 +385,227 @@ def _format_run_summary(result: object, *, quiet: bool) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# daemon
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _socket_arg(args: argparse.Namespace) -> Path | None:
+    raw = getattr(args, "socket", None)
+    return Path(raw).expanduser() if raw else None
+
+
+def _run_via_daemon(
+    args: argparse.Namespace,
+    *,
+    code: str,
+    origin_path: str | None,
+    timeout_ms: int | None,
+) -> int:
+    """Execute one run inside the resident daemon and render it like a local run."""
+    from stata_code.core import daemon as daemon_mod
+    from stata_code.core.schema import RunResult
+
+    socket_path = _socket_arg(args)
+
+    if not daemon_mod.is_running(socket_path, timeout=2.0):
+        started, message = daemon_mod.start_background(socket_path=socket_path)
+        if not started:
+            print(f"error: {message}", file=sys.stderr)
+            return 2
+
+    options: dict[str, Any] = {
+        "session_id": args.session,
+        "timeout_ms": timeout_ms,
+        "include_full_log": args.full_log,
+        "include_graphs": "ref",
+        "include_results": args.results,
+        "origin_path": origin_path,
+        "origin_kind": "do_file" if origin_path else None,
+    }
+    # The daemon enforces `timeout_ms` inside the pool; give the socket read a
+    # margin on top so a legitimately slow run is not cut short by the transport.
+    wire_timeout = None if timeout_ms is None else (timeout_ms / 1000.0) + 30.0
+
+    try:
+        reply = daemon_mod.request(
+            {"op": "run", "code": code, "options": options},
+            socket_path=socket_path,
+            timeout=wire_timeout,
+        )
+    except daemon_mod.DaemonError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not reply.get("ok"):
+        print(f"error: {reply.get('error', 'daemon run failed')}", file=sys.stderr)
+        return 2
+
+    result = RunResult.model_validate(reply["result"])
+
+    graph_notes: list[str] = []
+    if args.graphs:
+        # Graph payloads live in the daemon's ref registry, so resolve them over
+        # the socket rather than in this short-lived process.
+        def _daemon_get_graph(ref: str) -> dict[str, Any]:
+            got = daemon_mod.request(
+                {"op": "get_graph", "ref": ref}, socket_path=socket_path, timeout=60.0
+            )
+            if not got.get("ok"):
+                raise _DaemonRefNotFound(str(got.get("error", ref)))
+            payload: dict[str, Any] = got["graph"]
+            return payload
+
+        graph_notes = _export_graphs(result, args.graphs, _daemon_get_graph, _DaemonRefNotFound)
+
+    if args.json:
+        print(result.model_dump_json(indent=2))
+    else:
+        print(_format_run_summary(result, quiet=args.quiet))
+        for note in graph_notes:
+            print(note)
+    return 0 if result.ok else 1
+
+
+class _DaemonRefNotFound(KeyError):
+    """A ref the daemon could not resolve (mirrors ``stata_code.RefNotFound``)."""
+
+
+def _add_daemon_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    parser = subparsers.add_parser(
+        "daemon",
+        help="Manage the resident session daemon (keeps Stata sessions warm).",
+        description=(
+            "The subprocess pool already keeps one Stata worker per session "
+            "alive, but a plain `stata-code run` owns that pool and tears it "
+            "down on exit. The daemon holds the pool in a resident process "
+            "behind a mode-0600 Unix socket, so consecutive `stata-code run "
+            "--daemon` calls land in the same session with data still loaded."
+        ),
+    )
+    from stata_code.core import daemon as daemon_mod
+
+    parser.set_defaults(_daemon_parser=parser)
+    sub = parser.add_subparsers(dest="daemon_command")
+
+    def _add_socket_option(target: argparse.ArgumentParser) -> None:
+        target.add_argument(
+            "--socket",
+            default=None,
+            help=("Socket path (default: $STATA_CODE_DAEMON_SOCKET or ~/.stata-code/daemon.sock)."),
+        )
+
+    start = sub.add_parser("start", help="Start the daemon (detached by default).")
+    _add_socket_option(start)
+    start.add_argument(
+        "--foreground",
+        action="store_true",
+        help="Run in this terminal instead of detaching (used internally by start).",
+    )
+    start.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=None,
+        help=(
+            "Exit after this many seconds with no requests "
+            f"(default: {int(daemon_mod.DEFAULT_IDLE_TIMEOUT_S)}; 0 disables)."
+        ),
+    )
+
+    stop_p = sub.add_parser("stop", help="Ask a running daemon to exit.")
+    _add_socket_option(stop_p)
+
+    restart = sub.add_parser("restart", help="Stop the daemon if running, then start it.")
+    _add_socket_option(restart)
+    restart.add_argument("--idle-timeout", type=float, default=None)
+
+    status_p = sub.add_parser("status", help="Report whether a daemon is listening.")
+    _add_socket_option(status_p)
+    status_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+
+
+def _daemon_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    from stata_code.core import daemon as daemon_mod
+
+    command = getattr(args, "daemon_command", None)
+    if command is None:
+        getattr(args, "_daemon_parser", parser).print_help()
+        return 0
+
+    socket_path = _socket_arg(args)
+    idle = getattr(args, "idle_timeout", None)
+    idle_timeout = daemon_mod.DEFAULT_IDLE_TIMEOUT_S if idle is None else idle
+
+    if command == "start":
+        if args.foreground:
+            return daemon_mod.serve(socket_path=socket_path, idle_timeout=idle_timeout)
+        ok, message = daemon_mod.start_background(
+            socket_path=socket_path, idle_timeout=idle_timeout
+        )
+        print(message if ok else f"error: {message}", file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+
+    if command == "stop":
+        ok, message = daemon_mod.stop(socket_path=socket_path)
+        print(message if ok else f"error: {message}", file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+
+    if command == "restart":
+        if daemon_mod.is_running(socket_path, timeout=2.0):
+            ok, message = daemon_mod.stop(socket_path=socket_path)
+            if not ok:
+                print(f"error: {message}", file=sys.stderr)
+                return 1
+        ok, message = daemon_mod.start_background(
+            socket_path=socket_path, idle_timeout=idle_timeout
+        )
+        print(message if ok else f"error: {message}", file=sys.stdout if ok else sys.stderr)
+        return 0 if ok else 1
+
+    if command == "status":
+        report = daemon_mod.status(socket_path=socket_path)
+        if args.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(_format_daemon_status(report))
+        return 0 if report.get("running") else 1
+
+    parser.error(f"unknown daemon subcommand: {command}")
+    return 2  # pragma: no cover - parser.error raises
+
+
+def _format_daemon_status(report: dict[str, Any]) -> str:
+    if not report.get("running"):
+        lines = [f"daemon: not running  (socket {report.get('socket')})"]
+        if report.get("error"):
+            lines.append(f"  error: {report['error']}")
+        lines.append("  start it with: stata-code daemon start")
+        return "\n".join(lines)
+
+    idle_timeout = report.get("idle_timeout_s")
+    retire = "never" if not idle_timeout else f"{float(idle_timeout):g}s idle"
+    lines = [
+        f"daemon: running  pid={report.get('pid')}  socket={report.get('socket')}",
+        f"  uptime={report.get('uptime_s')}s  idle={report.get('idle_s')}s  retires after {retire}",
+        f"  requests served: {report.get('requests_served')}",
+    ]
+    sessions = report.get("sessions") or []
+    if sessions:
+        lines.append(f"  sessions ({len(sessions)}):")
+        for item in sessions:
+            if isinstance(item, dict):
+                label = item.get("session_id") or item.get("id") or item
+                lines.append(f"    - {label}")
+            else:
+                lines.append(f"    - {item}")
+    else:
+        lines.append("  sessions: none yet")
+    if report.get("note"):
+        lines.append(f"  note: {report['note']}")
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # setup
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -367,9 +622,15 @@ def _add_setup_parser(
             "(preserving other servers, backing up any file it overwrites)."
         ),
     )
-    parser.add_argument("--claude", action="store_true", help="Write .mcp.json (Claude Code, project).")
-    parser.add_argument("--cursor", action="store_true", help="Write .cursor/mcp.json (Cursor, project).")
-    parser.add_argument("--vscode", action="store_true", help="Write .vscode/mcp.json (VS Code, project).")
+    parser.add_argument(
+        "--claude", action="store_true", help="Write .mcp.json (Claude Code, project)."
+    )
+    parser.add_argument(
+        "--cursor", action="store_true", help="Write .cursor/mcp.json (Cursor, project)."
+    )
+    parser.add_argument(
+        "--vscode", action="store_true", help="Write .vscode/mcp.json (VS Code, project)."
+    )
     parser.add_argument(
         "--all",
         action="store_true",

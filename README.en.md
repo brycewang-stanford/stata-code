@@ -119,7 +119,9 @@ For the project's clean-room policy around AGPL/GPL Stata projects, see [LICENSE
 
 ## Install
 
-Requirements: **Stata 17+** (with `pystata` shipped by Stata) and **Python 3.10+**.
+Requirements: **Python 3.10+**, plus either **Stata 17+** (using the `pystata`
+shipped by Stata, for in-memory sessions) or **Stata 13+** (via the console
+backend, which needs no `pystata` and is stateless).
 
 ```bash
 # from PyPI
@@ -224,6 +226,54 @@ CI workflow template at
 [`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml))
 bundles the runtime and needs no Python install. Paired with `--backend console`,
 it is a fully Python-free path to typed Stata results.
+
+### The Session Daemon (State Across Invocations)
+
+By default every `stata-code run` starts a fresh process, so in-memory data dies
+with it. The `daemon` subcommand moves the subprocess pool into a resident
+process behind a Unix socket, and consecutive `run --daemon` calls then land in
+the **same Stata session**:
+
+```bash
+stata-code run --daemon -e 'sysuse auto, clear' -e 'gen z = price/1000'
+stata-code run --daemon -e 'summarize z'       # new process, z is still there
+stata-code run --daemon -e 'regress price mpg'
+stata-code run --daemon -e 'display e(r2)'     # e() from the previous process too
+```
+
+The first `run --daemon` starts the daemon on demand — no manual step needed. You
+can also drive it explicitly:
+
+```bash
+stata-code daemon start                    # detached (--foreground to stay attached)
+stata-code daemon status                   # pid, uptime, live sessions
+stata-code daemon status --json
+stata-code daemon stop
+stata-code daemon restart
+stata-code daemon start --idle-timeout 0   # 0 disables idle retirement
+```
+
+Worth knowing:
+
+- **Session isolation is unchanged.** `--session other` is still a separate Stata
+  frame / worker inside the daemon; sessions cannot see each other's data.
+- **It retires itself after 30 idle minutes** so a forgotten daemon does not sit on
+  a Stata license slot. Tune with `--idle-timeout`; `0` disables it.
+- **Unix socket only, never TCP.** The daemon executes arbitrary Stata code, so it
+  is deliberately reachable only through a mode-0600 socket inside a mode-0700
+  directory. The [command-safety](#command-safety) guard still applies.
+- **Requires the pystata backend.** `--backend console` is stateless batch
+  execution by design, so pairing it with a daemon is an error rather than a
+  silent no-op.
+- **Long socket paths degrade gracefully.** `sun_path` caps out around 104 bytes;
+  when the natural location is longer (a deep home directory, a long
+  `XDG_RUNTIME_DIR`), the socket moves to a short `/tmp` path derived from a hash
+  of the intended one. Every entry point derives it the same way, so clients still
+  find the daemon.
+
+Plain `stata-code run`, `run --daemon`, and the MCP server all drive the same
+engine and return the same `RunResult` schema — they differ only in how long the
+Stata session lives.
 
 ### One-Command Client Setup
 
@@ -549,7 +599,7 @@ stata_code/
 | Standalone MCP | ✓ | ✓ | bundled with VS Code | — (bespoke HTTP + copy-paste) | — |
 | Jupyter kernel | ✓ | — | — | — | ✓ |
 | Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | raw log to the agent | per-tool |
-| Typed errors + suggestions | ✓ (32 kinds) | — | — | — | — |
+| Typed errors + suggestions | ✓ (34 kinds) | — | — | — | — |
 | Token-economy defaults | ✓ (log refs, graph refs) | — | — | — | — |
 | Command-safety guard | ✓ (`shell`/`erase`/`rmdir`/`!`) | ✓ (27-rule) | — | — | — |
 | Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — | — |
@@ -571,6 +621,49 @@ execution contract they don't have. See
 [docs/competitive-landscape.md](docs/competitive-landscape.md) for the full
 teardown.
 
+### Versus calling the Stata CLI directly
+
+To be clear up front: **you can drive Stata from a shell with no tooling at all.**
+Most Stata installs ship a command-line executable, and for one-shot execution it
+is perfectly good — no reason to add a dependency:
+
+```bash
+/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -b do analysis.do
+printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
+```
+
+What's worth knowing is where that path breaks down. Both columns below drive the
+**same Stata binary and parse the same log** (`stata-code` via `--backend console`);
+the only difference is the wrapper around it:
+
+| | plain `stata-mp -b` | `stata-code run` |
+| --- | --- | --- |
+| Exit code on error | **`0`** — fails silently | `1` |
+| How you learn it failed | grep the log for `r(111);` yourself | `ok=False`, `rc=111` |
+| Error classification | none | `[varname_not_found]` (34 kinds) |
+| Recovery hint | none | "Run `describe` to list available variables" |
+| Getting a coefficient | scrape the aligned ASCII table | `e.scalars["r2"] → 0.6515312529087511` (float) |
+| State across calls | no | `run --daemon` (see below) |
+
+The first row is the one that bites: Stata's batch mode **returns exit code 0 even
+when the code errors out**. In an automated loop, an agent sees `exit 0`, moves on,
+and treats a failed run's output as valid.
+
+Rule of thumb:
+
+- **One-shot execution** ("run this do-file and show me the output") — the plain
+  CLI is fine; don't over-engineer it.
+- **Scripts / CI** (anything that branches on success) — use `stata-code run` and
+  get a trustworthy signal for near-zero cost.
+- **Iterative analysis** (many rounds, reading intermediate results, deciding the
+  next step from `e()`) — use `run --daemon` or MCP; otherwise statelessness and
+  text-scraping compound round over round.
+
+> Without `--daemon`, `stata-code run` **starts a fresh process per invocation**:
+> multiple `-e` snippets in one call share a session, but in-memory data is gone
+> once the process exits. With `--daemon` the data stays in a resident process —
+> see [the session daemon](#the-session-daemon-state-across-invocations).
+
 ---
 
 ## Roadmap
@@ -580,6 +673,7 @@ teardown.
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - `pystata`-based runner with native-typed `r()`, `e()`, and matrices
 - Multi-session via Stata frames (`session_id` accepts `[A-Za-z0-9_-]+`; ids such as `model-a` are mapped to private legal frame names internally while the public id is echoed back)
+- Resident session daemon (`stata-code daemon`, `run --daemon`) so CLI invocations share one live Stata session over a mode-0600 Unix socket, with idle retirement
 - Per-line error attribution: line number, context, commands_executed
 - Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store

@@ -113,7 +113,8 @@ Stata 的 AI / agent 工具生态现在比较分散，详见 [References-tools.m
 
 ## 安装
 
-要求：**Stata 17+**（自带 `pystata`）和 **Python 3.10+**。
+要求：**Python 3.10+**，外加以下任一种 Stata —— **Stata 17+**（用其自带的 `pystata`，
+支持内存内会话），或 **Stata 13+**（走 console 后端，不需要 `pystata`，无状态）。
 
 ```bash
 # 从 PyPI 安装
@@ -175,6 +176,108 @@ else:
     print(r.error.kind, r.error.message)       # ErrorKind.VARNAME_NOT_FOUND, "..."
     for s in r.error.suggestions:
         print("hint:", s.action)               # "Did you mean `mpg`?"
+```
+
+### 从命令行使用（Bash）
+
+任何能 shell out 的 agent 或脚本都能用上同一套结构化引擎 —— **不需要 MCP**。
+`stata-code run` 可以执行 `.do` 文件、一个或多个 `-e` 片段，或从 stdin 读入的代码，
+并打印 `RunResult`：
+
+```bash
+stata-code run analysis.do                  # 跑 do 文件，输出文本摘要
+stata-code run -e "sysuse auto" -e "regress mpg weight"
+stata-code run analysis.do --json           # 完整 RunResult JSON（给 agent 用）
+echo "summarize price" | stata-code run -    # 从 stdin 读代码
+stata-code run model.do --graphs out/        # 同时把图形导出到 out/
+stata-code run job.do --session modelA --timeout-ms 120000
+```
+
+成功退出码是 `0`，Stata / adapter 出错时是 `1`，因此可以直接接进 CI 和"改了再跑"的
+脚本循环。`stata-code lint analysis.do` 则在完全不启动 Stata 的前提下做静态检查
+（大括号不配对、缺 `end`、悬空的 `///`）。
+
+**后端 —— Stata 13+ 且没有 pystata。** `--backend` 决定代码怎么跑：`pystata`
+（Stata 17+，内存内会话）、`console`（Stata 13+ 批处理，不需要 pystata，无状态），
+或 `auto`（默认：有 pystata 就用，否则退到 console）。console 后端驱动 Stata 的命令行
+可执行文件，并把日志解析成同样的带类型 `RunResult` —— 带类型的 `r()`/`e()`、估计表、
+以及错误分类 —— 所以老版本 Stata 和无 pystata 的环境同样是一等公民：
+
+```bash
+stata-code run analysis.do --backend console
+export STATA_CODE_STATA_CLI=/usr/local/stata18/stata-mp   # 自动找不到时手动指定
+```
+
+**零 Python 二进制。** 独立的 `stata-code` 可执行文件（由
+[`scripts/build_standalone.py`](scripts/build_standalone.py) 构建，现成的 CI workflow
+模板见 [`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml)）
+把运行时一起打包，不需要安装 Python。配合 `--backend console`，这就是一条完全不依赖
+Python、又能拿到带类型 Stata 结果的路径。
+
+### 会话 daemon（跨调用保持数据）
+
+`stata-code run` 默认每次调用都起一个新进程，进程一退，内存里的数据就没了。
+`daemon` 子命令把 subprocess pool 挪进一个常驻进程，通过 Unix socket 对外服务，
+于是连续两次 `run --daemon` 会落在**同一个 Stata 会话**上：
+
+```bash
+stata-code run --daemon -e 'sysuse auto, clear' -e 'gen z = price/1000'
+stata-code run --daemon -e 'summarize z'      # 新进程，但 z 还在
+stata-code run --daemon -e 'regress price mpg'
+stata-code run --daemon -e 'display e(r2)'    # 上一个进程留下的 e() 也还在
+```
+
+第一次 `run --daemon` 会自动把 daemon 拉起来，不需要手动 start。也可以显式管理：
+
+```bash
+stata-code daemon start                    # 后台启动（--foreground 留在当前终端）
+stata-code daemon status                   # pid、uptime、活跃 session 列表
+stata-code daemon status --json
+stata-code daemon stop
+stata-code daemon restart
+stata-code daemon start --idle-timeout 0   # 0 = 永不因空闲退出
+```
+
+几个要点：
+
+- **会话隔离照旧。** `--session other` 在 daemon 里仍然是独立的 Stata frame / worker，
+  彼此看不到对方的数据。
+- **默认空闲 30 分钟自动退出**，免得忘了关的 daemon 一直占着 Stata license。
+  用 `--idle-timeout` 调整，`0` 表示禁用。
+- **只监听 Unix socket，不开 TCP。** daemon 会执行任意 Stata 代码，所以刻意只暴露在
+  mode-0700 目录下的 mode-0600 socket 上。[命令安全](#命令安全)护栏依然生效。
+- **需要 pystata 后端。** `--backend console` 本身就是无状态批处理，套 daemon 没有意义，
+  因此会直接报错而不是静默失效。
+- **socket 路径过长时自动降级。** `sun_path` 上限约 104 字节；home 目录很深或
+  `XDG_RUNTIME_DIR` 很长时，会自动改用 `/tmp` 下一个由原路径哈希得出的短路径。
+  所有入口都用同一套推导，因此仍能找到同一个 daemon。
+
+`stata-code run`（不加 `--daemon`）、`run --daemon` 和 MCP server 三条路走的是同一个
+引擎、返回同一份 `RunResult` schema，区别只在于 Stata 会话活多久。
+
+### 一条命令配置客户端
+
+`stata-code setup` 把 MCP server 条目写进客户端配置 —— 它是只读的 `doctor` 那个
+「会改文件」的对应物。它会保留配置里其他的 server，并在覆盖任何文件之前先做备份：
+
+```bash
+stata-code setup --all                 # Claude Code、Cursor、VS Code（project scope）
+stata-code setup --claude --dry-run    # 只预览，不写入
+stata-code setup --vscode --python .venv/bin/python   # 指定解释器
+stata-code setup --codex               # 打印可复制粘贴的 TOML 片段
+```
+
+### 命令安全
+
+默认情况下，runner 会在命令抵达 Stata **之前**拦截 OS 逃逸和文件删除类命令
+（`shell`、`winexec`、`erase`、`rm`、`rmdir`，以及 `!` shell 转义），因此一个自主运行的
+agent 循环没办法删文件或执行任意 shell 命令。被拦截时返回 `policy_blocked` 结果
+（`rc=-4`），而不是真的去执行。这是护栏，不是沙箱；可以用环境变量调整：
+
+```bash
+STATA_CODE_COMMAND_POLICY=off      # 完全关闭护栏
+STATA_CODE_POLICY_ALLOW=shell      # 放行特定命令（逗号分隔）
+STATA_CODE_POLICY_BLOCK=python     # 额外拦截某些命令
 ```
 
 ### 作为 MCP server
@@ -461,11 +564,47 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | 统一结果格式 | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | 默认节省 token | ✓ (log refs, graph refs) | — | — | — |
-| 结构化错误和建议 | ✓ (32 kinds) | — | — | — |
+| 结构化错误和建议 | ✓ (34 kinds) | — | — | — |
 | 多 session | ✓ (Stata frames) | partial | — | — |
 | 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
 `stata-code` 是这个问题空间里更年轻的、MIT 许可证的、agent-native 的替代方案。AGPL 方案里，SepineTam 的 `stata-mcp` 目前更成熟；`stata-code` 的目标是服务那些不能接受 copyleft 传染、又需要结构化智能体接口的场景。
+
+### 和直接调用 Stata 命令行比
+
+先把话说明白：**你完全可以不装任何工具，直接从 shell 调 Stata。** 大多数 Stata
+安装都自带一个命令行可执行文件，一次性执行的场景下它挺好用，没必要为此引入依赖：
+
+```bash
+/Applications/Stata/StataMP.app/Contents/MacOS/stata-mp -b do analysis.do
+printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
+```
+
+值得知道的是这条路会在哪里失效。下面两列跑的是**同一个 Stata 二进制、同一份日志**
+（`stata-code` 用的是 `--backend console`），差别只在于外面那层包装：
+
+| | 裸 `stata-mp -b` | `stata-code run` |
+| --- | --- | --- |
+| 出错时的退出码 | **`0`** —— 静默失败 | `1` |
+| 怎么知道出了错 | 自己 grep 日志里的 `r(111);` | `ok=False`、`rc=111` |
+| 错误分类 | 无 | `[varname_not_found]`（共 34 类） |
+| 修复建议 | 无 | "Run `describe` to list available variables" |
+| 取回归系数 | 从对齐的 ASCII 表里抠 | `e.scalars["r2"] → 0.6515312529087511`（float） |
+| 跨调用保持数据 | 不能 | `run --daemon`（见下节） |
+
+第一行是最容易吃亏的地方：Stata 批处理模式**即使代码报错也返回退出码 0**。
+在自动化循环里，agent 看到 `exit 0` 就会继续往下走，把失败的结果当成有效结果用。
+
+选择建议：
+
+- **一次性执行**（"跑一下这个 do 文件给我看结果"）—— 裸命令行就够了，别过度设计。
+- **脚本 / CI**（需要靠退出码判断成败）—— 用 `stata-code run`，最小代价换到可靠信号。
+- **迭代式分析**（多轮改设定、读中间结果、基于 `e()` 决定下一步）—— 用
+  `run --daemon` 或走 MCP，否则无状态和文本解析这两个问题会在多轮里叠加放大。
+
+> 不加 `--daemon` 时，`stata-code run` **每次调用都起一个新进程**：同一次调用里的
+> 多个 `-e` 共享 session，但进程退出后内存里的数据就没了。加上 `--daemon` 之后
+> 数据会留在常驻进程里，详见 [会话 daemon](#会话-daemon跨调用保持数据)。
 
 ---
 
@@ -476,6 +615,7 @@ stata_code/
 - v1.0 result schema ([SCHEMA.md](SCHEMA.md))
 - 基于 `pystata` 的 runner，原生类型化的 `r()`、`e()` 和矩阵
 - 通过 Stata frames 支持多 session（`session_id` 接受 `[A-Za-z0-9_-]+`；例如 `model-a` 这类 id 会在内部映射到合法的私有 frame 名，但返回结果仍回显公开 id）
+- 常驻会话 daemon（`stata-code daemon`、`run --daemon`）：多次 CLI 调用共享同一个活的 Stata 会话，走 mode-0600 Unix socket，支持空闲自动退出
 - 行级错误归属：line number、context、commands_executed
 - 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
 - 日志截断 + ref store
