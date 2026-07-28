@@ -6,6 +6,22 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.12.1 — 2026-07-28
+
+### Fixed
+
+- **`pip install "stata-code[mcp]"` resolved a broken MCP server.** The extra
+  declared `mcp>=1.27` with no upper bound, and the upstream SDK has since
+  released 2.0 — a breaking rewrite in which `Server` no longer exposes the
+  `list_tools` / `call_tool` decorators this server registers through, and
+  `Tool` / `ToolAnnotations` renamed every camelCase field (`inputSchema` →
+  `input_schema`, `readOnlyHint` → `read_only_hint`, …). A fresh install
+  therefore pulled mcp 2.x and `stata-code-mcp` failed at import. The extra is
+  now `mcp>=1.27,<2`; the ceiling comes off together with the 2.x port.
+
+  Existing installs pinned to mcp 1.x were unaffected. **0.12.0 carries the
+  unbounded requirement and should be avoided** — install 0.12.1 or later.
+
 ## 0.12.0 — 2026-07-28
 
 Adds a resident session daemon so the CLI can keep data in memory across

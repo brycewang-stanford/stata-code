@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stata-code"
-version = "0.12.0"
+version = "0.12.1"
 description = "Agent-native Stata bridge — one core, multiple frontends (MCP, Jupyter, VSCode)"
 # The repo default README (README.md) is Chinese; keep the PyPI long description
 # English by pointing at README.en.md.
@@ -44,7 +44,13 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.8",
 ]
-mcp = ["mcp>=1.27"]
+# Upper-bounded deliberately. mcp 2.0 is a breaking rewrite: `Server` dropped
+# the `list_tools` / `call_tool` decorators this server registers through, and
+# `Tool` / `ToolAnnotations` renamed every camelCase field (`inputSchema` →
+# `input_schema`, `readOnlyHint` → `read_only_hint`, ...). Without the ceiling,
+# a fresh `pip install "stata-code[mcp]"` resolves mcp 2.x and the server fails
+# at import. Lift this only together with the 2.x port.
+mcp = ["mcp>=1.27,<2"]
 kernel = ["ipykernel>=6.0"]
 all = ["stata-code[mcp,kernel]"]
 
