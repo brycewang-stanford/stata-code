@@ -6,6 +6,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.12.0 — 2026-07-28
+
+Adds a resident session daemon so the CLI can keep data in memory across
+invocations, and fixes a VS Code regression introduced by 0.11.0's payload
+defaults.
+
 ### Added
 
 #### Resident session daemon — state across CLI invocations
@@ -36,8 +42,28 @@ stata-code run --daemon -e 'summarize z'      # new process, z is still loaded
   exceed the platform's ~104-byte `sun_path` limit; every entry point derives the
   same fallback, so clients still find the daemon.
 
+#### VS Code Outputs panel now lists what every run wrote
+
+The panel read only `log.files.output_paths` — the archived copies inside a run
+bundle — so it stayed empty unless the caller had opted into
+`persist_log_files`. It now also reads `result.outputs`, the files a run wrote
+in its working directory (reported on every run since 0.11.0), shown with their
+size and listed *ahead* of bundle copies, since the working-directory file is
+the one you want to open. Nodes carry an `origin` of `workdir` or `bundle`, and
+an overwritten file says so in its tooltip.
+
 ### Fixed
 
+- **VS Code: r()/e() matrices displayed as `0x0` and opened empty.** 0.11.0
+  made `include_results: "scalars"` the server default, which returns each
+  matrix as a `matrix://` stub with `rows` / `cols` elided (the true shape moved
+  to `n_rows` / `n_cols`). The extension's sidebar derives its dimension label
+  from `rows.length` / `cols.length` and renders `matrix.values` directly, so
+  every matrix showed `0x0` and exported an empty table. The extension now
+  requests `include_results: "full"` — an editor is a human surface with no
+  token budget to defend, matching what the Jupyter kernel already did. The
+  argument builder moved to a `vscode`-free `runArgs.ts` so the behaviour is
+  covered by unit tests.
 - Documentation: the error taxonomy was described as "32 kinds" in `README.md`,
   `README.en.md`, and `SCHEMA.md` while `ErrorKind` has had 34 members (the
   English README's prose already said 34, contradicting its own table).
@@ -45,6 +71,21 @@ stata-code run --daemon -e 'summarize z'      # new process, z is still loaded
   which contradicted the console backend's documented Stata 13+ support.
 - `README.md` was missing the command-line, client-setup, and command-safety
   sections that `README.en.md` has had since 0.11.0.
+- Documentation: `SKILL.md` and the agent reference library still described the
+  pre-0.11 surface — 18 tools, 31 error kinds, no mention of matrix stubs,
+  background runs, `result.outputs`, or `error.source_file`. Counts in every doc
+  are now checked against the code.
+
+### Internal
+
+- `_collect_returns` no longer takes a `request_id` or creates `matrix://` refs.
+  Nothing passed it — neither the production path nor any test — and ref
+  creation belongs to `_project_returns`, which owns the payload budget.
+- `test_varname_not_found_emits_did_you_mean` failed once and could not be
+  reproduced. Its fuzzy match draws candidates from `dataset.variables`, so a
+  lost `auto.dta` in the shared in-process Stata degrades the suggestion for
+  reasons unrelated to the matching logic. The assertion was **split**, not
+  loosened: a precondition check now reports which of the two it was.
 
 ## 0.11.0 — 2026-07-28
 

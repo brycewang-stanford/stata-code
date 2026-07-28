@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Agent-native Stata bridge for empirical research — MCP server, Jupyter kernel, and VS Code extension sharing one token-economy v1.0 result schema, with one-call DiD/IV/RDD/table workflows and StatsPAI cross-validation.",
-    "version": "0.11.0"
+    "version": "0.12.0"
   },
   "plugins": [
     {
       "name": "stata-code",
       "source": ".",
       "description": "Run Stata from Claude Code through the stata-code MCP server (21 tools, 14 workflow prompts, typed errors, token-economy logs/graphs, multi-session) and an agent skill that teaches Claude the result schema and modern DiD/IV/RDD/table workflows, including StatsPAI cross-validation.",
-      "version": "0.11.0",
+      "version": "0.12.0",
       "author": {
         "name": "Bryce Wang",
         "email": "brycewang@stanford.edu",

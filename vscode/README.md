@@ -2,7 +2,7 @@
 
 Run Stata code from VSCode through the agent-native [stata-code](https://github.com/brycewang-stanford/stata-code) MCP server.
 
-> **Status: v0.11 (July 2026).** Full UI surface — orange Stata title-bar
+> **Status: v0.12 (July 2026).** Full UI surface — orange Stata title-bar
 > buttons, editor context menu, status bar with session/cancel actions, activity-bar
 > sidebar with sessions / last result / data (variables) / run history / logs / graphs / outputs panels,
 > syntax highlighting, outline/section navigation, code-lens cells and sections,
@@ -120,12 +120,14 @@ A new entry on the activity bar opens a sidebar with seven sections:
   save it directly from the item context menu.
 - **Outputs** — table and export artifacts written during your runs
   (`esttab`/`outreg2` tables, `export delimited`/`export excel` files,
-  saved `.dta`, figures exported to disk). The runner snapshots the
-  working directory around each run and copies new/changed files into the
-  run bundle; this view lists them newest-first with a format-aware icon.
-  Click to open the file, or reveal it in Finder/Explorer from the item
-  context menu. Populated when run-bundle logging is on
-  (`persist_log_files=true`, which the method-workflow MCP prompts set).
+  saved `.dta`, figures exported to disk), newest-first with a format-aware
+  icon and file size. Click to open the file, or reveal it in
+  Finder/Explorer from the item context menu. Since 0.12 this is populated
+  on **every** run from `result.outputs` — the files written in the working
+  directory — and no longer needs run-bundle logging. When
+  `persist_log_files=true` is also on (as the method-workflow MCP prompts
+  set it), the bundle's archived copies appear too, tagged `bundle` and
+  listed after the working-directory originals.
 
 ### Run bundles
 
