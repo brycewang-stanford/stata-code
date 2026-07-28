@@ -534,17 +534,16 @@ def _list_returns(rt: Any, prefix: str) -> dict[str, list[str]]:
 def _collect_returns(
     rt: Any,
     prefix: str,
-    request_id: str | None = None,
     *,
     want_named: bool = True,
     matrix_names: Iterable[str] | None = None,
 ) -> StataReturns:
     """Read r() or e() out of Stata using sfi for typed access.
 
-    Matrices come back fully inline; deciding what actually goes on the wire
-    (inline / ref / stub) is :func:`_project_returns`' job, so that the
-    estimation contract can always be built from complete values regardless of
-    the caller's payload budget.
+    Matrices come back fully inline — this function never creates a ref.
+    Deciding what actually goes on the wire (inline / ref / stub) is
+    :func:`_project_returns`' job, so that the estimation contract can always
+    be built from complete values regardless of the caller's payload budget.
 
     ``want_named`` false suppresses scalars and macros — used when the caller
     asked for ``include_results="none"`` but still wants ``estimation``.
@@ -600,7 +599,7 @@ def _collect_returns(
                 rows = [f"r{i + 1}" for i in range(n_rows)]
             if len(cols) != n_cols:
                 cols = [f"c{j + 1}" for j in range(n_cols)]
-            matrix = Matrix(
+            matrices[name] = Matrix(
                 rows=rows,
                 cols=cols,
                 values=norm_values,
@@ -608,22 +607,6 @@ def _collect_returns(
                 n_rows=n_rows,
                 n_cols=n_cols,
             )
-            # Preserve the pre-1.0 helper contract for callers that still
-            # provide a request id directly. The production path collects
-            # complete matrices first so estimation can be derived reliably,
-            # then applies the payload budget in _project_returns.
-            if request_id is not None and n_rows * n_cols > MATRIX_INLINE_CELL_CAP:
-                ref = f"matrix://{request_id}/{prefix}/{name}"
-                _refs.put(ref, {"rows": rows, "cols": cols, "values": norm_values})
-                matrix = Matrix(
-                    rows=rows,
-                    cols=cols,
-                    values=None,
-                    ref=ref,
-                    n_rows=n_rows,
-                    n_cols=n_cols,
-                )
-            matrices[name] = matrix
         except Exception:  # noqa: BLE001
             continue
 

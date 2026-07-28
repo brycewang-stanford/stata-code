@@ -23,10 +23,12 @@ the `matrix://` stubs the server returns by default, so the sidebar's matrix
 view has values to render. The Jupyter kernel does the same, for the same
 reason.
 
-The **Outputs** panel is currently backed by `log.files.output_paths`, so it
-populates only for runs that requested a persisted run bundle. The server also
-reports `result.outputs` on *every* run since 0.11; wiring the panel to that is
-a pending improvement.
+The **Outputs** panel draws on both of the server's artifact sources: the files
+a run wrote in its working directory (`result.outputs`, reported on every run
+since 0.11, shown with their size) and the archived copies inside a run bundle
+(`log.files.output_paths`, present only when `persist_log_files` was requested,
+labelled `bundle`). Working-directory files are listed first — that is the file
+you actually want to open.
 
 ## UI surface
 

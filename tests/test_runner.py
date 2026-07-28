@@ -142,11 +142,22 @@ class TestErrorClassification:
 
         r = execute("summarize mpgg")
         assert r.ok is False
+        # Precondition, asserted separately so a rare failure here is
+        # self-diagnosing. The fuzzy match draws its candidate set from
+        # `dataset.variables`; if the shared in-process Stata lost auto.dta
+        # (cross-module state pollution), the suggestion degrades to the
+        # generic "run describe" hint and the assertion below fails for a
+        # reason that has nothing to do with the matching logic.
+        assert r.dataset.variables, (
+            "precondition failed: auto.dta is not loaded in the shared session, "
+            f"so there are no candidate varnames to match against "
+            f"(n_vars={r.dataset.n_vars}, n_obs={r.dataset.n_obs})"
+        )
         # The headline win for agents: a "Did you mean `mpg`?" suggestion.
         assert any(
             "Did you mean" in s.action and "mpg" in s.action
             for s in r.error.suggestions
-        )
+        ), f"no did-you-mean suggestion; got {[s.action for s in r.error.suggestions]}"
 
     def test_unrecognized_command(self):
         from stata_code.core.runner import execute

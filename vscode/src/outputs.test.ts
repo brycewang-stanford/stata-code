@@ -1,9 +1,16 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { baseName, buildOutputNodes, extName, outputIcon, outputKind } from "./outputs";
+import {
+  baseName,
+  buildOutputNodes,
+  extName,
+  formatBytes,
+  outputIcon,
+  outputKind,
+} from "./outputs";
 import type { OutputRun } from "./outputs";
-import type { RunResult } from "./types/runResult";
+import type { OutputFile, RunResult } from "./types/runResult";
 
 function run(runId: string, ts: number, outputPaths: string[], sessionId = "main"): OutputRun {
   const result = {
@@ -47,6 +54,18 @@ function run(runId: string, ts: number, outputPaths: string[], sessionId = "main
     capabilities: [],
   } as unknown as RunResult;
   return { runId, ts, result };
+}
+
+/** A run that reported working-directory outputs but no run bundle. */
+function runWithOutputs(
+  runId: string,
+  ts: number,
+  outputs: OutputFile[],
+  sessionId = "main",
+): OutputRun {
+  const base = run(runId, ts, [], sessionId);
+  base.result.outputs = outputs;
+  return base;
 }
 
 describe("baseName / extName", () => {
@@ -110,5 +129,66 @@ describe("buildOutputNodes", () => {
     assert.equal(nodes[0].path, "/bundle/r1/outputs/t.rtf");
     assert.equal(nodes[0].tooltip, "/bundle/r1/outputs/t.rtf");
     assert.equal(nodes[0].kind, "doc");
+  });
+
+  test("bundle-sourced nodes are labelled as archived copies", () => {
+    const nodes = buildOutputNodes([run("r1", 1, ["/bundle/r1/outputs/t.tex"])]);
+    assert.equal(nodes[0].origin, "bundle");
+    assert.match(nodes[0].description, /bundle/);
+  });
+});
+
+describe("buildOutputNodes — result.outputs (working-directory files)", () => {
+  test("surfaces files a run wrote without any run bundle", () => {
+    // The whole point: `persist_log_files` was never passed, so
+    // `log.files` is null and the panel used to stay empty.
+    const nodes = buildOutputNodes([
+      runWithOutputs("r1", 1, [{ path: "/w/tables/t1.tex", bytes: 4552, created: true }]),
+    ]);
+    assert.equal(nodes.length, 1);
+    assert.equal(nodes[0].path, "/w/tables/t1.tex");
+    assert.equal(nodes[0].origin, "workdir");
+    assert.equal(nodes[0].kind, "table");
+    assert.match(nodes[0].description, /TEX · main · 4 KB/);
+  });
+
+  test("flags an overwritten file in the tooltip", () => {
+    const nodes = buildOutputNodes([
+      runWithOutputs("r1", 1, [{ path: "/w/t.csv", bytes: 10, created: false }]),
+    ]);
+    assert.match(nodes[0].tooltip, /overwritten by this run/);
+  });
+
+  test("working-directory files come before bundle copies of the same run", () => {
+    const r = runWithOutputs("r1", 1, [{ path: "/w/t.tex", bytes: 1, created: true }]);
+    r.result.log.files = {
+      directory: "/bundle/r1",
+      log_path: "/bundle/r1/run.log",
+      smcl_path: "/bundle/r1/run.smcl",
+      manifest_path: "/bundle/r1/manifest.json",
+      output_paths: ["/bundle/r1/outputs/t.tex"],
+    } as never;
+    const nodes = buildOutputNodes([r]);
+    assert.deepEqual(
+      nodes.map((n) => n.origin),
+      ["workdir", "bundle"],
+    );
+  });
+
+  test("tolerates a result from an older server with no outputs field", () => {
+    const nodes = buildOutputNodes([run("r1", 1, ["/bundle/r1/outputs/t.tex"])]);
+    assert.equal(nodes.length, 1);
+    assert.equal(nodes[0].origin, "bundle");
+  });
+});
+
+describe("formatBytes", () => {
+  test("scales units and tolerates missing sizes", () => {
+    assert.equal(formatBytes(0), "0 B");
+    assert.equal(formatBytes(512), "512 B");
+    assert.equal(formatBytes(4552), "4 KB");
+    assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
+    assert.equal(formatBytes(null), "");
+    assert.equal(formatBytes(undefined), "");
   });
 });

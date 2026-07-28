@@ -164,6 +164,12 @@ export interface OriginInfo {
   cell_id: string | null;
 }
 
+export interface OutputFile {
+  path: string;
+  bytes?: number | null;
+  created?: boolean;
+}
+
 export interface RunResult {
   ok: boolean;
   rc: number;
@@ -177,6 +183,13 @@ export interface RunResult {
   results: ResultsInfo;
   dataset: DatasetInfo;
   graphs: GraphInfo[];
+  /**
+   * Files the run created or modified in its working directory (SCHEMA §3.6a).
+   * Reported on every run since 0.11, independent of the run-bundle options.
+   * Optional here because run history may still hold results produced by an
+   * older server.
+   */
+  outputs?: OutputFile[];
   warnings: StataWarning[];
   error: ErrorInfo | null;
   origin?: OriginInfo | null;
