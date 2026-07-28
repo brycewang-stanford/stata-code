@@ -81,7 +81,7 @@ Then just ask:
 
 A fourth frontend, a **plain-terminal CLI** (`stata-code run` / `lint` / `setup`), gives any agent that can shell out — or a bare terminal — the same typed `RunResult`. And the core runs two backends: **pystata** (Stata 17+, in-memory sessions) or a **console backend** (Stata 13+ in batch mode, no pystata) — both returning the identical schema.
 
-**Status: v0.10 (July 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
+**Status: v0.11 (July 2026)** — the core, MCP server, Jupyter kernel, VS Code extension, and CLI work end-to-end against Stata 18 MP; the console backend broadens coverage to Stata 13+ without pystata. v0.11 is an agent-ergonomics release: bounded result payloads, background execution for multi-minute jobs, error localization inside `do`-files, automatic log-handle cleanup, and generated-file reporting — see the [changelog](CHANGELOG.md). The test suite covers schema, runner, console parser, MCP, kernel, notebook, run-index, subprocess-pool, command policy, linter, and VS Code modules; CI also checks linting, type safety, schema generation, package metadata, and VSIX packaging. License: **MIT**.
 
 Four workflows the current tree explicitly supports for end users and agents:
 
@@ -474,11 +474,14 @@ The extension still requires the MCP extra on your system Python (`pip install "
 
 ## Token-Economy Defaults
 
-A typical `stata_run` response is about **10x smaller** than servers that dump logs and images directly. Three design choices drive this:
+A typical `stata_run` response is about **10x smaller** than servers that dump logs and images directly. Four design choices drive this:
 
-1. **Logs return `head` + `tail` + `ref`** by default. Full logs are fetched on demand via `get_log(ref)`. A Stata regression log can be about 6,000 tokens; `stata-code` returns about 600 by default.
-2. **Graphs return refs, not inline base64**. A 30 KB PNG can become about 50,000 base64 tokens; returning a ref avoids that unless the agent actually needs the bytes.
-3. **Errors are typed**. Agents can check `err.kind == "varname_not_found"` instead of regex-parsing English logs.
+1. **Logs return `head` + `tail` + `ref`** by default. Full logs are fetched on demand via `get_log(ref)`, or grepped in place with `search_log(ref, pattern)`. A Stata regression log can be about 6,000 tokens; `stata-code` returns about 600 by default.
+2. **Graphs return refs, not inline base64**. A 30 KB PNG can become about 50,000 base64 tokens; returning a ref avoids that unless the agent actually needs the bytes. When they are requested inline, they come back as real MCP image content blocks — viewable by a vision-capable client, rather than base64 buried in a JSON string that costs tokens and shows nothing.
+3. **Each estimation is described once.** By default (`include_results: "scalars"`) `r()` / `e()` scalars and macros are inline, while every matrix becomes a `matrix://` stub carrying just its shape. Without this, one regression ships the same numbers four times — `e(b)`, `e(V)`'s label lists, `e(beta)`, `r(table)` — on top of `results.estimation`, which already holds the typed coefficient table. A 123-term regression drops from ~57 KB to ~28 KB. Raw values stay one `get_matrix(ref)` away, and `include_results: "full"` restores the old shape.
+4. **Errors are typed**. Agents can check `err.kind == "varname_not_found"` instead of regex-parsing English logs.
+
+Two further knobs matter for fixed-effect-heavy work: `include_estimation: "summary"` keeps the model-level block and drops per-term rows, and `max_coefficients` caps the table. Either way `estimation.n_coefficients` reports the model's true size and `coefficients_truncated` flags the cut, so a trimmed table is never mistaken for a smaller model.
 
 For example, a misspelled variable returns a structured error:
 
@@ -490,6 +493,7 @@ For example, a misspelled variable returns a structured error:
     "kind": "varname_not_found",
     "varname": "mpgg",
     "line": 3,
+    "source_file": null,
     "context": {
       "before": ["use auto"],
       "failing": "summarize mpgg",
@@ -497,10 +501,18 @@ For example, a misspelled variable returns a structured error:
     },
     "suggestions": [
       {"action": "Did you mean `mpg`?", "command": "describe"}
-    ]
+    ],
+    "recovery": {
+      "category": "user_code",
+      "retriable": false,
+      "needs_code_change": true,
+      "needs_user_input": false
+    }
   }
 }
 ```
+
+When the failing command lives inside a script you invoked (`do "analysis.do"`), `line` and `context` point *inside that script* and `source_file` names it — so an agent does not have to re-read the file to find the offending line.
 
 The full schema is in [SCHEMA.md](SCHEMA.md).
 
@@ -551,7 +563,7 @@ stata_code/
 
 `stata-code` owns the **agent-native, typed-contract** lane: one structured
 `RunResult` schema across MCP, Jupyter, VS Code, and a plain-terminal CLI; a
-32-kind error taxonomy with recovery contracts; token-economy refs; and now a
+34-kind error taxonomy with recovery contracts; token-economy refs; and now a
 console backend (Stata 13+) plus a zero-Python binary. Editor-first tools like
 `stata-all-in-one` lead on human IDE polish and hand the agent raw log text;
 `stata-code` matches their onboarding/version reach while keeping the typed
@@ -572,7 +584,7 @@ teardown.
 - Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
-- 32-kind error taxonomy with canonical suggestions
+- 34-kind error taxonomy with canonical suggestions and a machine-readable `recovery` verdict (retriable / needs-code-change / needs-user-input)
 - MCP server: 21 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), and package installation (`install_package`)
 - Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
 - Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
@@ -580,8 +592,12 @@ teardown.
 - Zero-Python standalone binary ([`scripts/build_standalone.py`](scripts/build_standalone.py) + CI workflow template [`packaging/standalone.github-workflow.yml`](packaging/standalone.github-workflow.yml)); with `--backend console` it is a fully Python-free path to typed results
 - One-click VS Code onboarding: the extension offers to create a workspace `.venv` and install the server (command palette: “Stata: Set Up MCP Server”)
 - Jupyter kernel: rewired to the v1.0 pipeline, kernel logos bundled
-- Matrix size cap + `get_matrix(ref)` for large matrices (>10k cells)
-- Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms`, `cancel(session_id)`, and MCP `cancel_session`
+- Result-payload budget: `include_results` (matrices become `matrix://` stubs by default), `include_estimation`, and `max_coefficients`, with `get_matrix(ref)` to pull raw values on demand
+- Subprocess-backed hard timeout and cancellation for the public Python API and MCP server: `timeout_ms` (now an advertised `stata_run` argument, and it budgets queueing too — contention returns `rc=-5` / `session_busy` instead of blocking), `cancel(session_id)`, and MCP `cancel_session`
+- Background execution for multi-minute jobs: `run_in_background` returns a job id; `stata_run_status` (with a bounded `wait_ms`) and `list_background_runs` poll it
+- Error localization inside `do`/`run` scripts: `error.line` + `error.context` resolve within the invoked file and `error.source_file` names it; a failed run still carries a full searchable log
+- Log-handle hygiene: handles leaked by a failed run are closed automatically (`auto_close_logs`), so an aborted script cannot make every later run in that session fail with r(604)
+- Generated-file reporting: `result.outputs` lists the tables, exports and datasets each run wrote, independent of the run-bundle options
 - Per-cell repair loop on `.ipynb` via `notebook_outline` / `notebook_get_cell` / `notebook_edit_cell` with optimistic-concurrency `expected_source` guards and `origin_cell_id` echo on `RunResult`
 - Persistent run bundles + `list_runs` query over `manifest.json` files (filter by cell / origin / session / since / ok; page with limit / offset)
 - Read-only `stata-code doctor` / `verify` diagnostics for package version,
@@ -596,7 +612,7 @@ teardown.
 
 ### Next Up
 
-- Streaming / progress for long runs (`log.complete:false`, incremental log lines) so 20-minute `boottest` / `csdid` jobs report before they finish
+- Streaming / incremental progress for long runs (`log.complete:false`, partial log lines). v0.11's `run_in_background` already unblocks the caller for 20-minute `boottest` / `csdid` jobs, but a running job still reports nothing until it finishes
 - Hard timeout / cancellation for the Jupyter kernel (move it from the direct in-process runner to the subprocess pool, or an equivalent)
 - Console backend: graph capture and richer matrix coverage (values currently materialized for the estimation matrices; state is per-call)
 - Human IDE polish to match editor-first tools: inline graph rendering + DPI export, a scalable data viewer, and an optional "attach to a running Stata" backend

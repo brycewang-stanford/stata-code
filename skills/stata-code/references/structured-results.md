@@ -28,7 +28,9 @@ After any estimation command, `RunResult.results.estimation` is a typed table
      "p_value": 0.000, "ci_low": 0.066, "ci_high": 0.148}
   ],
   "model_stats": {"N": 3010, "r2": 0.31, "F": 42.1},
-  "diagnostics": {"weak_id_F": 23.5, "overid_j": 1.8, "overid_j_df": 2}
+  "diagnostics": {"weak_id_F": 23.5, "overid_j": 1.8, "overid_j_df": 2},
+  "n_coefficients": 1,             // true term count, even if rows were trimmed
+  "coefficients_truncated": false
 }
 ```
 
@@ -39,8 +41,17 @@ After any estimation command, `RunResult.results.estimation` is a typed table
     scope. `se`/`statistic`/`p_value`/CI use a **normal approximation**
     (`statistic_kind` is `"z"`). Fine for point estimates; flag the inference
     method if precision matters.
-- **Null cells are honest.** If `e(V)` was unavailable, `se`/`p_value`/CI are
-  `null` rather than guessed. Don't invent them.
+- **Null cells are honest.** If `e(V)` was genuinely unavailable, `se`/`p_value`/CI
+  are `null` rather than guessed. Don't invent them. Note that a `null` here
+  means the *matrix* was missing — not that it was large: the table is always
+  built from the complete values, following `matrix://` refs when the wire
+  representation defers them. A stubbed `e(V)` still yields real standard errors.
+  Base levels of a factor variable (`1b.rep78`) legitimately have `b == 0` and
+  `se == null` — that is Stata's omitted category, not a defect.
+- **`n_coefficients` vs `len(coefficients)`.** They match unless the caller
+  passed `include_estimation: "summary"` or `max_coefficients`, in which case
+  `coefficients_truncated` is `true`. Always report `n_coefficients` as the
+  model's size; never infer it from the array length.
 - **`command_family`** lets you branch on the *kind* of model without a command
   lookup (e.g. apply IV-specific checks when `family == "iv"`).
 
@@ -62,6 +73,42 @@ fabricated). High-value checks:
 If a diagnostic you need is absent from `diagnostics`, it wasn't in `e()` — run
 the appropriate post-estimation command (e.g. `estat firststage`,
 `estat overid`) and read the next result.
+
+## 1a. Matrix stubs — `results.r/e.matrices` by default
+
+By default (`include_results: "scalars"`) every matrix in `r()` / `e()` arrives
+as a **stub**: no values, no row/column labels, just the shape and a ref.
+
+```jsonc
+"V": {"rows": [], "cols": [], "values": null,
+      "ref": "matrix://<request_id>/e/V", "n_rows": 141, "n_cols": 141}
+```
+
+This is deliberate. A single estimation otherwise encodes the same numbers four
+times — `e(b)`, `e(V)`'s label lists, `e(beta)`, and `r(table)` — on top of
+`results.estimation`, which already has the typed table.
+
+- Want the coefficient table? Read `results.estimation`. It is complete and
+  carries real inference regardless of what the matrices look like.
+- Want raw matrix numbers (a custom Wald test, a VCV you will post-process)?
+  Call `get_matrix(ref)` — it returns `rows`, `cols` and `values` together.
+- Want everything inline in one call? Pass `include_results: "full"`. Do this
+  only when you know you need it; it roughly doubles the envelope for a wide model.
+
+## 1b. `outputs` — what the run actually wrote
+
+`result.outputs` lists files the run created or modified in its working
+directory, filtered to real export formats (`.tex`, `.csv`, `.docx`, `.png`,
+`.dta`, …):
+
+```jsonc
+"outputs": [{"path": "/work/tables/table1.tex", "bytes": 4552, "created": true}]
+```
+
+Use it instead of shelling out to find the `esttab` table you just produced.
+`created: false` means the run overwrote an existing file. This is populated on
+every run and is independent of the run-bundle options (`persist_log_files`);
+turn it off with `track_output_files: false` if the working directory is huge.
 
 ## 2. `error.recovery` + `error.rc_label` — what to do on failure
 
