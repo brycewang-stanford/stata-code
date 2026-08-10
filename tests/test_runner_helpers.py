@@ -1040,6 +1040,34 @@ class TestProjectReturns:
         )
         assert out.scalars == {} and out.macros == {} and out.matrices == {}
 
+    def test_oversized_macro_is_elided_with_a_marker(self):
+        # e(rngstate) is ~2 KB of hex on every bootstrap / permute / simulate
+        # run and carries nothing an agent can branch on.
+        from stata_code.core.schema import IncludeResults, StataReturns
+
+        rngstate = "X" + "a1b2c3d4" * 260
+        collected = StataReturns(macros={"cmd": "bootstrap", "rngstate": rngstate})
+        out = runner._project_returns(
+            collected, prefix="e", request_id="req-m", mode=IncludeResults.SCALARS
+        )
+        assert out.macros["cmd"] == "bootstrap"  # short macros pass through
+        capped = out.macros["rngstate"]
+        assert len(capped) < len(rngstate)
+        assert capped.startswith(rngstate[: runner.MACRO_INLINE_CHAR_CAP])
+        assert "chars elided" in capped
+
+    def test_macro_exactly_at_the_cap_is_untouched(self):
+        from stata_code.core.schema import IncludeResults, StataReturns
+
+        exact = "z" * runner.MACRO_INLINE_CHAR_CAP
+        out = runner._project_returns(
+            StataReturns(macros={"m": exact}),
+            prefix="e",
+            request_id="req-e",
+            mode=IncludeResults.SCALARS,
+        )
+        assert out.macros["m"] == exact
+
 
 class TestCollectDataset:
     def test_full_metadata_with_variables(self):

@@ -9,8 +9,18 @@ parse from log prose:
   exactly what Stata printed, so we copy them verbatim.
 * ``e(b)`` / ``e(V)`` — the coefficient vector and its variance–covariance
   matrix. Always present after an estimation command. We use these as a
-  fallback, computing ``se`` from ``diag(V)`` and ``z``/``p``/CI under a normal
-  approximation (clearly flagged via ``source`` / ``statistic_kind``).
+  fallback, computing ``se`` from ``diag(V)`` and the statistic / p-value / CI
+  ourselves (flagged via ``source="e_b_v"``).
+
+The fallback matters more than "fallback" suggests: ``r(table)`` is wiped by
+the *next* command, so any block that ends in ``graph export`` / ``esttab`` /
+``summarize`` after its estimation lands here. It therefore has to reproduce
+what Stata displayed, not merely something defensible. Stata's own rule (see
+``_coef_table``) is distributional: when ``e(df_r)`` is set the table is a
+*t* table on that many residual degrees of freedom, and otherwise a *z* table.
+We follow exactly that rule, so the fallback CI agrees with the printed log
+digit for digit instead of quietly reporting a normal-approximation interval
+alongside a log that says ``P>|t|``.
 
 The result is :class:`EstimationResult`, attached to ``RunResult.results.
 estimation`` so every frontend (MCP, kernel, VS Code) gets the same typed
@@ -22,6 +32,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from functools import lru_cache
 
 from stata_code.core.schema import (
     Coefficient,
@@ -162,6 +173,111 @@ def _two_sided_normal_p(z: float) -> float:
     return 2.0 * (1.0 - _normal_cdf(abs(z)))
 
 
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the incomplete beta function (Lentz's method)."""
+    tiny = 1e-30
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < tiny:
+        d = tiny
+    d = 1.0 / d
+    h = d
+    for m in range(1, 301):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-15:
+            break
+    return h
+
+
+def _betainc_reg(a: float, b: float, x: float) -> float:
+    """Regularized incomplete beta ``I_x(a, b)``, stdlib only."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    ln_front = (
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x)
+    )
+    front = math.exp(ln_front)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1.0 - x) / b
+
+
+def _two_sided_t_p(t: float, df: float) -> float:
+    """Two-sided p-value for a t statistic on ``df`` degrees of freedom.
+
+    ``P(|T| > |t|) = I_{df/(df+t²)}(df/2, 1/2)`` — exact, no table lookup.
+    """
+    if df <= 0.0:
+        return _two_sided_normal_p(t)
+    if math.isinf(t):
+        return 0.0
+    return _betainc_reg(df / 2.0, 0.5, df / (df + t * t))
+
+
+@lru_cache(maxsize=256)
+def _t_crit(df: float, level: float) -> float:
+    """Two-sided critical value of the t distribution for a CI ``level`` in %.
+
+    Found by bisection on :func:`_two_sided_t_p`, which is strictly decreasing
+    in ``|t|`` — robust for any ``df`` without shipping a quantile table.
+    """
+    alpha = 1.0 - level / 100.0
+    if df <= 0.0 or not (0.0 < alpha < 1.0):
+        return _z_crit(level)
+    lo, hi = 0.0, 1.0
+    while _two_sided_t_p(hi, df) > alpha and hi < 1e12:
+        hi *= 2.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _two_sided_t_p(mid, df) > alpha:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-13 * max(1.0, hi):
+            break
+    return 0.5 * (lo + hi)
+
+
+@lru_cache(maxsize=64)
+def _z_crit(level: float) -> float:
+    """Two-sided standard-normal critical value for a CI ``level`` in %."""
+    alpha = 1.0 - level / 100.0
+    if not (0.0 < alpha < 1.0):
+        return _Z_CRIT_95
+    lo, hi = 0.0, 40.0
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _two_sided_normal_p(mid) > alpha:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-14 * max(1.0, hi):
+            break
+    return 0.5 * (lo + hi)
+
+
 def _cell(row: list[float | None] | None, j: int) -> float | None:
     if row is None or j >= len(row):
         return None
@@ -284,13 +400,16 @@ def _from_b_v(
     v: Matrix | None,
     resolve: MatrixResolver | None = None,
     b_values: list[list[float | None]] | None = None,
-) -> list[Coefficient]:
+    df_resid: float | None = None,
+    level: float = 95.0,
+) -> tuple[list[Coefficient], str]:
     """Compute coefficient rows from e(b) (and e(V) when available).
 
     ``se``/``statistic``/``p_value``/CI are filled only when e(V) is
     obtainable — inline or through its ref; otherwise just the point estimates
-    are returned. Inference uses the normal approximation — callers flag this
-    via ``source="e_b_v"``.
+    are returned. Returns ``(coefficients, statistic_kind)``: a *t* table on
+    ``df_resid`` degrees of freedom when Stata set ``e(df_r)``, matching what
+    the command printed, and a *z* table otherwise.
     """
     if b_values is None:
         b_values = _values(b, resolve)
@@ -305,6 +424,10 @@ def _from_b_v(
     else:
         v_diag = [None] * len(terms)
 
+    df = float(df_resid) if df_resid is not None and df_resid > 0.0 else None
+    stat_kind = "t" if df is not None else "z"
+    crit = _t_crit(df, level) if df is not None else _z_crit(level)
+
     coeffs: list[Coefficient] = []
     for j, term in enumerate(terms):
         b_val = _cell(b_row, j)
@@ -316,9 +439,9 @@ def _from_b_v(
         ci_high: float | None = None
         if b_val is not None and se is not None and se > 0.0:
             stat = b_val / se
-            p_val = _two_sided_normal_p(stat)
-            ci_low = b_val - _Z_CRIT_95 * se
-            ci_high = b_val + _Z_CRIT_95 * se
+            p_val = _two_sided_t_p(stat, df) if df is not None else _two_sided_normal_p(stat)
+            ci_low = b_val - crit * se
+            ci_high = b_val + crit * se
         coeffs.append(
             Coefficient(
                 term=term,
@@ -330,7 +453,7 @@ def _from_b_v(
                 ci_high=ci_high,
             )
         )
-    return coeffs
+    return coeffs, stat_kind
 
 
 def _model_stats(scalars: dict[str, float | None]) -> dict[str, float | None]:
@@ -406,14 +529,30 @@ def build_estimation_from_returns(
     statistic_kind: str
     source: str
 
+    df_resid = e.scalars.get("df_r")
+    # e(level) is the CI level the command actually displayed; absent means the
+    # Stata default of 95. Both the critical value and the reported ci_level
+    # follow it, so `regress, level(90)` does not come back labelled 95.
+    level_raw = e.scalars.get("level")
+    ci_level = float(level_raw) if level_raw is not None else 95.0
+
     table = r.matrices.get("table")
     parsed = _from_r_table(table, resolve_matrix) if table is not None else None
     if parsed is not None and table is not None and _r_table_matches_b(table, b, resolve_matrix):
         coeffs, statistic_kind = parsed
         source = "r_table"
     else:
-        coeffs = _from_b_v(b, v, resolve_matrix, b_values)
-        statistic_kind = "z"
+        # r(table) is gone — cleared by whatever command ran after the
+        # estimation. Rebuild the table from e(b)/e(V) on the same
+        # distribution Stata used, so the numbers still match the log.
+        coeffs, statistic_kind = _from_b_v(
+            b,
+            v,
+            resolve_matrix,
+            b_values,
+            df_resid=float(df_resid) if df_resid is not None else None,
+            level=ci_level,
+        )
         source = "e_b_v"
 
     n_obs: int | None = None
@@ -430,9 +569,10 @@ def build_estimation_from_returns(
         depvar=depvar,
         n_obs=n_obs,
         df_model=e.scalars.get("df_m"),
-        df_resid=e.scalars.get("df_r"),
+        df_resid=df_resid,
         statistic_kind=statistic_kind,  # type: ignore[arg-type]
         source=source,  # type: ignore[arg-type]
+        ci_level=ci_level,
         coefficients=coeffs,
         model_stats=_model_stats(e.scalars),
         diagnostics=_command_diagnostics(command, e.scalars),

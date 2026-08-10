@@ -343,7 +343,7 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | Sub-field | Type | Notes |
 | --- | --- | --- |
 | `scalars` | `dict<str, number \| null>` | Native floats / ints. Stata's system missing (`.`) → JSON `null`. Extended missings (`.a`–`.z`) → `null` with information loss. |
-| `macros` | `dict<str, string>` | Stata macro values verbatim. |
+| `macros` | `dict<str, string>` | Stata macro values verbatim, except that a value longer than 256 characters is truncated and suffixed with `… (N more chars elided)`. The cap exists for macros like `e(rngstate)`, which is ~2 KB of hex on every `bootstrap` / `permute` / `simulate` run and carries nothing a consumer can act on. The name is always kept, and `results.estimation` is derived from the uncapped values. |
 | `matrices` | `dict<str, Matrix>` | See `Matrix` below. |
 
 **`Matrix` shape:**
@@ -383,9 +383,9 @@ Stata's `r()` and `e()` return dictionaries, structurally separated. Each follow
 | `n_obs` | `int \| null` | Integer form of `e(N)` when available. |
 | `df_model` | `number \| null` | Mirrors `e(df_m)`. |
 | `df_resid` | `number \| null` | Mirrors `e(df_r)`. |
-| `statistic_kind` | `"t" \| "z"` | Which statistic fills each coefficient's `statistic` field. |
-| `source` | `"r_table" \| "e_b_v"` | `r_table` means values were copied from Stata's displayed `r(table)` after verifying its columns and `b` row match `e(b)`; `e_b_v` means point estimates come from `e(b)` and inference, when present, is computed from `e(V)` with a normal approximation. A matrix returned by `ref` is resolved before use, so a deferred `e(V)` still yields standard errors. |
-| `ci_level` | `number` | Confidence level used for `ci_low` / `ci_high`; currently `95.0`. |
+| `statistic_kind` | `"t" \| "z"` | Which statistic fills each coefficient's `statistic` field, and which distribution produced `p_value` / `ci_low` / `ci_high`. On the `e_b_v` path this follows Stata's own rule — `t` on `df_resid` degrees of freedom when `e(df_r)` is set, `z` otherwise — so a rebuilt table agrees with the printed log rather than reporting a normal-approximation interval next to a `P>\|t\|` column. |
+| `source` | `"r_table" \| "e_b_v"` | `r_table` means values were copied from Stata's displayed `r(table)` after verifying its columns and `b` row match `e(b)`; `e_b_v` means point estimates come from `e(b)` and inference, when present, is computed from `e(V)`. A matrix returned by `ref` is resolved before use, so a deferred `e(V)` still yields standard errors. |
+| `ci_level` | `number` | Confidence level used for `ci_low` / `ci_high`. Mirrors `e(level)` when the command stored it, so `regress, level(90)` reports `90.0`; defaults to `95.0` otherwise. |
 | `coefficients` | `array<Coefficient>` | One row per term in `e(b)`, subject to the caller's `include_estimation` / `max_coefficients` budget. |
 | `n_coefficients` | `int` | The model's true term count. Equals `coefficients.length` unless the caller trimmed the table, so `12` rows out of `n_coefficients: 141` is never mistaken for a 12-term model. |
 | `coefficients_truncated` | `bool` | `true` when rows were dropped to satisfy the budget. |
@@ -564,10 +564,20 @@ The rc-to-kind table is approximate and lives in code (`stata_code.core.errors`)
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `kind` | `string` | Open enum. Common values: `convergence`, `singular`, `boundary`, `omitted_collinear`, `non_finite`, `dataset_variables_truncated`, `unknown`. |
+| `kind` | `string` | Open enum. Common values: `convergence`, `singular`, `boundary`, `omitted_collinear`, `non_finite`, `dataset_variables_truncated`, `log_closed`, `output_tracking_skipped`, `estimation_from_e_b_v`, `unknown`. |
 | `message` | `string` | Human-readable, single line. Truncated to 1,024 characters. |
 
 Warnings are de-duplicated by `(kind, message)`.
+
+`estimation_from_e_b_v` reports that this run performed an estimation whose
+`r(table)` was already gone by the time results were read — a later command in
+the same submission cleared it — so `results.estimation` was rebuilt from
+`e(b)` / `e(V)`. The rebuilt numbers still match the printed log (see
+`statistic_kind` in §3.5), so this is provenance rather than a correctness
+alarm; putting the estimation last in the block restores the `r_table` path.
+It is emitted only when the estimation was produced by *this* run: `e()` is
+session-global, so a later `summarize` in the same session keeps reporting the
+inherited table through the same fallback without re-warning.
 
 ### 3.9 `origin`
 
@@ -607,7 +617,7 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | `include_graphs` | `"ref" \| "inline" \| "none"` | `"ref"` | `"none"` skips graph capture entirely (cheapest); `"ref"` captures and returns refs; `"inline"` base64-encodes bytes into `inline`. |
 | `graph_format` | `"png" \| "svg" \| "pdf"` | `"png"` | Render format. |
 | `include_dataset_variables` | `bool` | `true` | Set `false` to omit `dataset.variables`. |
-| `include_results` | `"none" \| "scalars" \| "full"` | `"scalars"` | Payload budget for `results.r` / `results.e`. `"scalars"` inlines scalars and macros and emits every matrix as a stub (§3.4); `"full"` inlines matrix values up to the ~10,000-cell cap; `"none"` omits `r()` / `e()` entirely. Never affects `results.estimation`. |
+| `include_results` | `"none" \| "scalars" \| "full"` | `"scalars"` | Payload budget for `results.r` / `results.e`. `"scalars"` inlines scalars and macros and emits every matrix as a stub (§3.4); `"full"` inlines matrix values up to the ~10,000-cell cap; `"none"` omits `r()` / `e()` entirely. Never affects `results.estimation`: the model-level fields (`n_obs`, `df_model`, `df_resid`, `model_stats`, `depvar`) are read from `e()` regardless of this setting and merely withheld from the wire, so `"none"` does not hollow out the estimation contract. Use `include_estimation` to trim that block. |
 | `include_estimation` | `"none" \| "summary" \| "full"` | `"full"` | Payload budget for `results.estimation`. `"summary"` keeps the model-level block and drops per-term rows. |
 | `max_coefficients` | `int \| null` | `null` | Cap on `estimation.coefficients` rows. `n_coefficients` still reports the true count. |
 | `timeout_ms` | `int \| null` | `600000` (10 min) | Hard timeout. `null` disables. On expiry, returns `ok: false`, `error.kind: "timeout"`, `rc: -2`. The budget covers **queueing**: a call waiting on a session whose Stata process is mid-run returns `rc: -5`, `error.kind: "session_busy"` rather than blocking past its deadline. Frontends MAY override the default if their use case demands. |

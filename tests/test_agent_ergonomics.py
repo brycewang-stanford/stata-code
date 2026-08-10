@@ -374,6 +374,49 @@ class TestJobRegistry:
         assert job.result == "RESULT"
         assert job.finished_at is not None
 
+    def test_elapsed_ms_freezes_when_the_job_finishes(self, monkeypatch):
+        # Recomputing elapsed on every poll made a finished job's duration
+        # grow with the caller's polling delay, so a 2s run polled a minute
+        # later reported a minute of Stata time.
+        from stata_code.core import jobs
+
+        monkeypatch.setattr(jobs, "pool_execute", lambda code, **kw: "RESULT")  # noqa: ARG005
+        registry = jobs.JobRegistry()
+        job = registry.submit("display 1")
+        assert job.wait(5) is True
+
+        first = job.elapsed_ms()
+        time.sleep(0.15)
+        assert job.elapsed_ms() == first
+        assert job.summary()["elapsed_ms"] == first
+
+    def test_elapsed_ms_still_advances_while_running(self, monkeypatch):
+        from stata_code.core import jobs
+
+        gate = threading.Event()
+        monkeypatch.setattr(jobs, "pool_execute", lambda code, **kw: gate.wait(10))  # noqa: ARG005
+        registry = jobs.JobRegistry()
+        job = registry.submit("display 1")
+        first = job.elapsed_ms()
+        time.sleep(0.05)
+        assert job.elapsed_ms() >= first
+        gate.set()
+        job.wait(5)
+
+    def test_elapsed_ms_is_frozen_on_the_error_path_too(self, monkeypatch):
+        from stata_code.core import jobs
+
+        def _boom(code, **kwargs):  # noqa: ARG001
+            raise ValueError("bad option")
+
+        monkeypatch.setattr(jobs, "pool_execute", _boom)
+        registry = jobs.JobRegistry()
+        job = registry.submit("display 1")
+        assert job.wait(5) is True
+        first = job.elapsed_ms()
+        time.sleep(0.15)
+        assert job.elapsed_ms() == first
+
     def test_failure_is_recorded_not_swallowed(self, monkeypatch):
         from stata_code.core import jobs
 

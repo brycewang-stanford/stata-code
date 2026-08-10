@@ -140,6 +140,13 @@ _DATASET_VAR_CAP = 200
 # a matrix would inline more than ~10,000 cells."
 MATRIX_INLINE_CELL_CAP = 10_000
 
+# Longest macro value put on the wire verbatim. Stata macros are mostly short
+# (`e(cmd)`, `e(depvar)`, `e(vcetype)`), but a few are enormous and carry
+# nothing an agent can act on — `e(rngstate)` alone is ~2 KB of hex on every
+# bootstrap / permute / simulate run. Anything longer is elided with an
+# explicit marker rather than dropped, so the name still shows up.
+MACRO_INLINE_CHAR_CAP = 256
+
 # Stata's system missing `.` is exactly maxdouble (2**1023); the 26 extended
 # missings `.a`–`.z` occupy the next representable doubles above it. `sfi`
 # hands all of them back as ordinary Python floats, so any value at or above
@@ -659,7 +666,23 @@ def _project_returns(
             n_rows=n_rows,
             n_cols=n_cols,
         )
-    return StataReturns(scalars=rv.scalars, macros=rv.macros, matrices=matrices)
+    return StataReturns(
+        scalars=rv.scalars,
+        macros={name: _cap_macro(v) for name, v in rv.macros.items()},
+        matrices=matrices,
+    )
+
+
+def _cap_macro(value: str) -> str:
+    """Elide a macro value too long to be worth its tokens on the wire.
+
+    Applied only at projection time — the estimation contract is built from the
+    uncapped values, so nothing downstream loses precision.
+    """
+    if len(value) <= MACRO_INLINE_CHAR_CAP:
+        return value
+    dropped = len(value) - MACRO_INLINE_CHAR_CAP
+    return f"{value[:MACRO_INLINE_CHAR_CAP]}… ({dropped} more chars elided)"
 
 
 def _collect_dataset(rt: Any, include_variables: bool) -> DatasetInfo:
@@ -1329,6 +1352,17 @@ def execute(
         # Snapshot existing graph names before user code so we can take a delta
         # afterward.
         pre_graphs = _list_graph_names(rt) if include_graphs != "none" else []
+
+        # e() is session-global and outlives the run that set it, so
+        # `results.estimation` may describe an estimation from an earlier call.
+        # Fingerprint it now to tell "this run estimated something" from "this
+        # run inherited an estimation" — the difference decides whether an
+        # e(b)/e(V) rebuild is worth reporting.
+        pre_estimation = (
+            _estimation_fingerprint(rt)
+            if estimation_mode != IncludeEstimation.NONE
+            else None
+        )
     graph_source_hints, unnamed_graph_source_hints = (
         _graph_source_hints(code) if include_graphs != "none" else ({}, [])
     )
@@ -1436,6 +1470,34 @@ def execute(
     top_rc = rc if error is not None else 0
     ok = error is None and rc == 0
     warnings = _extract_warnings(log_text)
+
+    # r(table) is cleared by the next command, so a block that runs anything
+    # after its estimation gets a table rebuilt from e(b)/e(V). The numbers
+    # follow Stata's own t-vs-z rule and so still match the log, but the
+    # provenance is worth stating: a caller comparing against `r(table)` rows
+    # it did not capture should know which path produced these.
+    #
+    # Gated on the estimation being *this run's*. e() outlives the call that
+    # set it, so every later `summarize` in the session re-reports the same
+    # inherited table through the same fallback — warning on those would be
+    # pure noise about a rebuild the caller did not ask for and cannot act on.
+    estimated_here = (
+        pre_estimation is not None and _estimation_fingerprint(rt) != pre_estimation
+    )
+    if estimated_here and estimation is not None and estimation.source == "e_b_v":
+        warnings.append(
+            StataWarning(
+                kind="estimation_from_e_b_v",
+                message=(
+                    "results.estimation was rebuilt from e(b)/e(V) because r(table) "
+                    "no longer described the current estimation — a later command "
+                    "cleared it. Inference uses "
+                    f"{estimation.statistic_kind!r} as Stata would "
+                    f"(df_r={estimation.df_resid!r}). Put the estimation last in the "
+                    "block, or re-run it alone, to get the r(table) values verbatim."
+                ),
+            )
+        )
 
     # A failed run may have left `log using` handles open. Close only the ones
     # this run opened: a log the caller opened in an earlier successful run is
@@ -1599,6 +1661,14 @@ def _collect_results(
     # With results suppressed but estimation wanted, read only the matrices the
     # contract is derived from rather than every matrix in scope.
     named = results_mode != IncludeResults.NONE
+    # e() scalars and macros are inputs to the estimation contract, not just
+    # payload: n_obs, df_model, df_resid, model_stats, the t-vs-z choice and
+    # depvar all come from them. Suppressing them for `include_results="none"`
+    # silently hollowed out `estimation` — a caller who asked only to stop
+    # *echoing* r()/e() lost the model-level numbers that `include_estimation`
+    # is the knob for. Read them whenever estimation is wanted; the wire
+    # projection below still drops them when the caller said "none".
+    e_named = named or want_estimation
     raw = ResultsInfo(
         r=_collect_returns(
             rt,
@@ -1609,7 +1679,7 @@ def _collect_results(
         e=_collect_returns(
             rt,
             "e",
-            want_named=named,
+            want_named=e_named,
             matrix_names=None if named else _ESTIMATION_MATRICES["e"],
         ),
         last_estimation_cmd=_last_estimation_cmd(rt),
@@ -1653,6 +1723,27 @@ def _last_estimation_cmd(rt: Any) -> str | None:
         return v or None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _estimation_fingerprint(rt: Any) -> tuple[str | None, str | None, float | None]:
+    """Cheap identity for the estimation currently in e-scope.
+
+    Three reads, no matrices: enough to tell one estimation from the next
+    without paying to fetch e(b). Used only to compare before/after a run.
+    """
+    sfi = rt.sfi
+
+    def _macro(name: str) -> str | None:
+        try:
+            return sfi.Macro.getGlobal(name) or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    try:
+        n = sfi.Scalar.getValue("e(N)")
+    except Exception:  # noqa: BLE001
+        n = None
+    return (_macro("e(cmd)"), _macro("e(cmdline)"), _norm_stata_number(n))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

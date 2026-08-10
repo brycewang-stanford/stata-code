@@ -60,6 +60,7 @@ class Job:
         "error",
         "_done",
         "_started",
+        "_elapsed_ms",
     )
 
     def __init__(self, job_id: str, session_id: str, code: str) -> None:
@@ -73,6 +74,7 @@ class Job:
         self.error: str | None = None
         self._done = threading.Event()
         self._started = time.monotonic()
+        self._elapsed_ms: int | None = None
 
     @property
     def done(self) -> bool:
@@ -83,6 +85,15 @@ class Job:
         return self._done.wait(timeout=timeout_s)
 
     def elapsed_ms(self) -> int:
+        """How long the run took, or has been running so far.
+
+        Frozen once the job reaches a terminal state. Recomputing it on every
+        poll made a finished job's reported duration grow without bound — a
+        1.7s bootstrap polled ten minutes later reported ten minutes — so
+        callers attributing wall time to Stata were reading their own latency.
+        """
+        if self._elapsed_ms is not None:
+            return self._elapsed_ms
         return max(0, int((time.monotonic() - self._started) * 1000))
 
     def summary(self) -> dict[str, Any]:
@@ -140,6 +151,11 @@ class JobRegistry:
             # sees a terminal status is guaranteed to see the payload with it.
             job.result = result
             job.error = error
+            # Freeze the clock before publishing a terminal status, so no
+            # reader can observe "done" alongside a still-advancing duration.
+            job._elapsed_ms = max(  # noqa: SLF001 - same-module private handshake
+                0, int((time.monotonic() - job._started) * 1000)  # noqa: SLF001
+            )
             job.finished_at = _utc_iso_ms()
             job.status = status
             job._done.set()  # noqa: SLF001 - same-module private handshake

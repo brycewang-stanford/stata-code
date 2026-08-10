@@ -6,6 +6,57 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`results.estimation` reported normal-approximation inference for `t` models
+  whenever `r(table)` had been cleared.** `r(table)` only survives until the
+  next command, so any block that runs something after its estimation —
+  `graph export`, `esttab`, a final `summarize` — fell back to rebuilding the
+  table from `e(b)` / `e(V)`, and that path hardcoded a normal approximation.
+  The result was a payload that quietly disagreed with the log beside it:
+
+  ```text
+  regress price_k mpg weight foreign
+  scatter price_k mpg          // clears r(table)
+
+  log:                mpg   95% CI  [-.1261758,  .169883]   P>|t| 0.769
+  results.estimation: mpg   95% CI  [-0.12362,   0.16732]   p     0.7684
+  ```
+
+  The fallback now follows Stata's own rule — a *t* table on `e(df_r)` degrees
+  of freedom when that scalar is set, *z* otherwise — so the rebuilt table
+  matches the printed one to the last digit. `ci_level` also honours `e(level)`
+  instead of assuming 95, so `regress, level(90)` is no longer mislabelled.
+  Agents told to prefer `structuredContent` over the log were the ones exposed
+  to this; the `r(table)` path was always correct.
+
+  A new `estimation_from_e_b_v` warning records when the rebuild happened. It
+  fires only for an estimation produced by the current run, since `e()` is
+  session-global and would otherwise re-warn on every later call.
+
+- **`include_results: "none"` hollowed out `results.estimation`.** `n_obs`,
+  `df_model`, `df_resid` and `model_stats` are all read from `e()` scalars, so
+  suppressing the `r()` / `e()` *echo* also removed the model-level numbers —
+  even though `include_estimation` is the documented knob for that block, and
+  SCHEMA.md §4 already promised `include_results` "never affects
+  `results.estimation`". The scalars are now always read when estimation is
+  wanted, and only withheld from the wire.
+
+- **A finished background run reported a duration that kept growing.**
+  `Job.elapsed_ms` recomputed `now - submitted` on every poll instead of
+  freezing at completion, so a 1.7 s bootstrap polled ten minutes later
+  reported ten minutes. Callers attributing wall-clock time to Stata were
+  reading their own polling delay. The value is now frozen before the terminal
+  status is published, on both the success and error paths.
+
+### Changed
+
+- **Macro values longer than 256 characters are elided on the wire** with an
+  explicit `… (N more chars elided)` marker. This is aimed at `e(rngstate)`,
+  roughly 2 KB of hex emitted on every `bootstrap` / `permute` / `simulate`
+  run that no consumer can act on. Names are always kept, and the estimation
+  contract is still built from the uncapped values.
+
 ## 0.12.1 — 2026-07-28
 
 ### Fixed

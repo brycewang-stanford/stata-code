@@ -123,6 +123,80 @@ class TestEstimationContractReal:
         assert r.ok, r.error
         assert r.results.estimation is None
 
+    def test_fallback_table_agrees_with_r_table_to_the_last_digit(self):
+        # r(table) is cleared by whatever runs after the estimation, so a block
+        # ending in `graph export` / `esttab` / `summarize` lands on the
+        # e(b)/e(V) path. Both paths must describe the same regression: this
+        # once returned normal-approximation intervals against a log printing
+        # `P>|t|`, so structuredContent silently disagreed with the log.
+        setup = "sysuse auto, clear\ngen price_k = price/1000\n"
+        clean = _run(setup + "regress price_k mpg weight foreign", "rs_rt")
+        stale = _run(setup + "regress price_k mpg weight foreign\nsummarize mpg", "rs_bv")
+        assert clean.ok and stale.ok, (clean.error, stale.error)
+
+        assert clean.results.estimation.source == "r_table"
+        assert stale.results.estimation.source == "e_b_v"
+        assert stale.results.estimation.statistic_kind == "t"
+        assert stale.results.estimation.df_resid == 70
+
+        by_term = {c.term: c for c in clean.results.estimation.coefficients}
+        for c in stale.results.estimation.coefficients:
+            ref = by_term[c.term]
+            assert c.b == pytest.approx(ref.b, rel=1e-12)
+            assert c.se == pytest.approx(ref.se, rel=1e-12)
+            assert c.statistic == pytest.approx(ref.statistic, rel=1e-9)
+            assert c.p_value == pytest.approx(ref.p_value, rel=1e-6, abs=1e-12)
+            assert c.ci_low == pytest.approx(ref.ci_low, rel=1e-9)
+            assert c.ci_high == pytest.approx(ref.ci_high, rel=1e-9)
+
+    def test_rebuilt_table_is_flagged_in_warnings(self):
+        r = _run("sysuse auto, clear\nregress price mpg\nsummarize mpg", "rs_bvwarn")
+        assert r.ok, r.error
+        assert r.results.estimation.source == "e_b_v"
+        kinds = {w.kind for w in r.warnings}
+        assert "estimation_from_e_b_v" in kinds
+
+    def test_inherited_estimation_does_not_warn_on_later_runs(self):
+        # e() is session-global, so `estimation` keeps describing this regress
+        # on every subsequent call. Those runs rebuild from e(b)/e(V) too, but
+        # they estimated nothing — warning on them would be noise.
+        first = _run("sysuse auto, clear\nregress price mpg", "rs_bvquiet")
+        assert first.ok, first.error
+        later = _run("summarize mpg", "rs_bvquiet")
+        assert later.ok, later.error
+        assert later.results.estimation is not None  # inherited from e()
+        assert later.results.estimation.source == "e_b_v"
+        assert [w.kind for w in later.warnings] == []
+
+    def test_estimation_survives_include_results_none(self):
+        # include_results governs how much r()/e() is *echoed*; the model-level
+        # numbers in `estimation` are include_estimation's business. Reading
+        # e() scalars is what makes n_obs / df_resid / model_stats available.
+        r = run(
+            "sysuse auto, clear\nregress price mpg weight",
+            session_id="rs_noresults",
+            include_results="none",
+            include_full_log=False,
+        )
+        assert r.ok, r.error
+        # Nothing echoed on the wire...
+        assert r.results.e.scalars == {} and r.results.e.macros == {}
+        # ...but the contract is intact.
+        est = r.results.estimation
+        assert est is not None
+        assert est.n_obs == 74
+        assert est.df_resid == 71
+        assert est.model_stats.get("r2") == pytest.approx(0.2934, abs=1e-3)
+        assert len(est.coefficients) == 3
+
+    def test_rngstate_macro_is_elided_not_shipped_whole(self):
+        r = _run("sysuse auto, clear\nbootstrap r(mean), reps(20): summarize price", "rs_rng")
+        assert r.ok, r.error
+        rngstate = r.results.e.macros.get("rngstate")
+        assert rngstate is not None, "bootstrap should still report the macro name"
+        assert len(rngstate) < 400
+        assert "chars elided" in rngstate
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Error taxonomy — real rc codes, labels, recovery, suggestions
