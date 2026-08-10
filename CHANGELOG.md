@@ -6,6 +6,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.12.2 — 2026-08-11
+
+Correctness release. `results.estimation` could report confidence intervals
+and p-values that disagreed with the Stata log printed beside them; if you
+read coefficients out of `results.estimation` rather than the log, upgrade.
+
 ### Fixed
 
 - **`results.estimation` reported normal-approximation inference for `t` models
