@@ -6,6 +6,32 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Fixed
+
+- **VS Code: "View data preview" failed on every dataset with fewer than 100
+  observations.** The preview listed rows with `list in 1/100`, and an `in`
+  range whose upper bound exceeds `_N` is an error in Stata, so the command
+  returned `r(198) observation numbers out of range` for `auto.dta` (74 obs)
+  and most other teaching datasets — while the document header still claimed
+  `showing: 0 of 74 observations`. The preview now selects rows with
+  `if _n <= N`, which lists whatever is there (including nothing at all), and
+  a failed preview reports its `rc` and message instead of a row count.
+
+### Changed
+
+- **VS Code: the data preview document is shorter and no longer line-wrapped.**
+  `list` is run with a widened `linesize` (restored afterwards) so wide
+  datasets stop folding into `>` continuation lines; the command echo is
+  stripped from the body; the header collapses to a session line plus a
+  `74 obs x 12 vars - showing all 74` summary and the dataset path; and the
+  variable list is column-aligned instead of tab-separated.
+- **VS Code: utility runs (data preview, `pwd`, `cd`) no longer hijack the
+  Output panel.** They used to force it visible and echo their whole log into
+  it — for the preview, the entire listing a second time. They now log one
+  status line on success and only surface the panel on failure.
+- **VS Code: new `stataCode.dataPreviewObs` setting** (default `50`, range
+  1-10000) controls how many rows the preview lists.
+
 ## 0.12.2 — 2026-08-11
 
 Correctness release. `results.estimation` could report confidence intervals

@@ -1,12 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import {
-  formatDataPreviewDocument,
-  formatLogDocument,
-  inlineLogText,
-  matrixToTsv,
-} from "./formatters";
+import { formatLogDocument, inlineLogText, matrixToTsv } from "./formatters";
 import type { Matrix, RunResult } from "./types/runResult";
 
 function result(overrides: Partial<RunResult> = {}): RunResult {
@@ -78,14 +73,6 @@ describe("formatLogDocument", () => {
     assert.match(text, /session: main/);
     assert.match(text, /request: run123456789/);
     assert.match(text, /display 1/);
-  });
-});
-
-describe("formatDataPreviewDocument", () => {
-  test("shows capped row count and variables", () => {
-    const text = formatDataPreviewDocument(result(), "1. 22", 1);
-    assert.match(text, /showing: 1 of 2 observations/);
-    assert.match(text, /mpg\tint\tMileage/);
   });
 });
 

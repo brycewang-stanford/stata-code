@@ -78,7 +78,7 @@ actions:
 
 - New Stata tab… / Switch tab… (live sessions + locally-known
   "not started" tabs, plus *New tab…*)
-- View data preview
+- View data preview (first `stataCode.dataPreviewObs` rows + variable list)
 - Export latest run / Open latest log / Show latest graphs
 - Working directory… / Show output channel
 - Cancel `<sid>` / Reset `<sid>` / Close tab `<sid>`
@@ -218,6 +218,7 @@ stata_code.mcp` fallback is safest for GUI clients.
 | `stataCode.serverArgs` | `[]` | Extra args passed to the server process |
 | `stataCode.pythonPath` | `""` | Fallback Python interpreter for `-m stata_code.mcp` |
 | `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*). Must match `[A-Za-z0-9_-]+`. |
+| `stataCode.dataPreviewObs` | `50` | Rows listed by *View data preview* (1–10000). Shorter datasets are listed in full. |
 | `stataCode.includeFullLog` | `false` | Inline full log instead of fetching via `get_log(ref)` |
 | `stataCode.persistLogFiles` | `true` | Save file-backed runs as immutable log bundles next to the source file |
 | `stataCode.persistGeneratedFiles` | `true` | Copy newly-created tables/exports and captured graphs into the run bundle |

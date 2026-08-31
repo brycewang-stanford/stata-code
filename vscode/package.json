@@ -710,6 +710,13 @@
           "default": "main",
           "description": "Session id passed to stata_run. Must match [A-Za-z0-9_-]+. 'main' is the default Stata session; other values create or route to persistent sessions."
         },
+        "stataCode.dataPreviewObs": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Rows shown by the \"View data preview\" command. Datasets shorter than this are listed in full."
+        },
         "stataCode.includeFullLog": {
           "type": "boolean",
           "default": false,

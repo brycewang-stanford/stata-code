@@ -41,37 +41,6 @@ export function formatLogDocument(result: RunResult, text: string): string {
   ].join("\n");
 }
 
-export function formatDataPreviewDocument(
-  result: RunResult,
-  text: string,
-  previewObs: number,
-): string {
-  const ds = result.dataset;
-  const status = result.ok ? "OK" : `FAIL rc=${result.rc}`;
-  const rowsShown = result.ok ? Math.min(ds.n_obs, previewObs) : 0;
-  const body = text.trim() || (ds.n_vars === 0 ? "(no variables in memory)" : "(no preview output)");
-  const variableLines = (ds.variables ?? []).map(
-    (v) => `  ${v.name}\t${v.type}${v.label ? `\t${v.label}` : ""}`,
-  );
-
-  return [
-    "stata-code data preview",
-    `status: ${status}`,
-    `session: ${result.session_id}`,
-    `request: ${result.request_id}`,
-    `dataset: ${ds.n_obs} obs · ${ds.n_vars} vars · frame ${ds.frame}`,
-    ds.filename ? `file: ${ds.filename}` : "file: (memory)",
-    `showing: ${rowsShown} of ${ds.n_obs} observations`,
-    "",
-    "-".repeat(72),
-    body,
-    "",
-    "-".repeat(72),
-    "variables",
-    variableLines.length ? variableLines.join("\n") : "  (none)",
-  ].join("\n");
-}
-
 export function matrixToTsv(name: string, matrix: Matrix): string {
   const rows = matrix.rows ?? [];
   const cols = matrix.cols ?? [];

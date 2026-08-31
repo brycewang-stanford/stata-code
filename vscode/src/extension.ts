@@ -14,11 +14,11 @@ import { version as extensionVersion } from "../package.json";
 import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import {
+  buildDataPreviewCode,
+  DEFAULT_DATA_PREVIEW_OBS,
   formatDataPreviewDocument,
-  formatLogDocument,
-  inlineLogText,
-  matrixToTsv,
-} from "./formatters";
+} from "./dataPreview";
+import { formatLogDocument, inlineLogText, matrixToTsv } from "./formatters";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
 import { buildProvisionPlan } from "./provision";
@@ -53,7 +53,6 @@ import {
 import type { GraphFormat, GraphInfo, Matrix, RunResult } from "./types/runResult";
 
 const HISTORY_CAP = 64;
-const DATA_PREVIEW_OBS = 100;
 const SESSION_IDS_KEY = "stataCode.sessionIds";
 const INSTALL_HINT_DISMISSED_KEY = "stataCode.installHintDismissedFor";
 const INSTALL_COMMAND = 'pip install "stata-code[mcp]"';
@@ -712,15 +711,15 @@ async function openMatrix(target?: unknown): Promise<void> {
 }
 
 async function viewDataPreview(): Promise<void> {
-  const result = await runUtilityCode(
-    `list in 1/${DATA_PREVIEW_OBS}, clean noobs abbreviate(24)`,
-    "view data preview",
-  );
+  const previewObs = vscode.workspace
+    .getConfiguration("stataCode")
+    .get<number>("dataPreviewObs", DEFAULT_DATA_PREVIEW_OBS);
+  const result = await runUtilityCode(buildDataPreviewCode(previewObs), "view data preview");
   if (!result) return;
 
   const doc = await vscode.workspace.openTextDocument({
     language: "plaintext",
-    content: formatDataPreviewDocument(result, inlineLogText(result), DATA_PREVIEW_OBS),
+    content: formatDataPreviewDocument(result, inlineLogText(result), previewObs),
   });
   await vscode.window.showTextDocument(doc, {
     preview: false,
@@ -1045,7 +1044,6 @@ async function cdToDirectory(uri: vscode.Uri): Promise<void> {
 
 async function runUtilityCode(code: string, label: string): Promise<RunResult | undefined> {
   const sessionId = currentSessionId();
-  output?.show(true);
   output?.appendLine(`[stata-code] ${label} (session=${sessionId})`);
   statusBar?.setRunning(true);
   try {
@@ -1054,11 +1052,20 @@ async function runUtilityCode(code: string, label: string): Promise<RunResult | 
       includeFullLog: true,
       includeGraphs: "none",
     });
-    renderResult(result);
+    // Utility runs present their result somewhere the user is already looking
+    // (a preview document, a toast), so only a failure earns the output
+    // channel's attention — echoing a 50-row listing there is pure noise.
+    if (result.ok) {
+      output?.appendLine(`[stata-code] ${label}: ok (${result.elapsed_ms}ms)`);
+    } else {
+      output?.show(true);
+      renderResult(result);
+    }
     sessionsProvider?.refresh();
     return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    output?.show(true);
     output?.appendLine(`[stata-code] ${label} failed: ${msg}`);
     vscode.window.showErrorMessage(`stata-code: ${msg}`);
     return undefined;
