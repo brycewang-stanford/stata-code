@@ -97,6 +97,10 @@ export interface VariableInfo {
   name: string;
   type: string;
   label: string;
+  /** Display format; present only when it is not the storage type's default. */
+  format?: string | null;
+  /** Name of the attached value label; present only when one is attached. */
+  value_label?: string | null;
 }
 
 export interface DatasetInfo {

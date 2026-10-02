@@ -48,7 +48,48 @@ you actually want to open.
 | Completion | Built-in commands, configured community commands, functions, variables from the last result, and variables inferred from the open document |
 | F2 rename on recognized variables | Rename variables across the current document while skipping comments and Stata commands |
 | Red squiggle on the failing line | After a failed run; hover to see the typed-error message and suggestions |
-| *Stata: View Data Preview* | Opens the first 100 observations from the active session as a side text document, plus dataset metadata and variables |
+| *Stata: View Data Preview* | Opens the data in the active session's memory in the **data viewer** (first `stataCode.dataPreviewObs` rows), with labels, formats and notes intact |
+| Opening any `*.dta` file | Shows it in the **data viewer** — no Stata needed (see below) |
+
+### Data viewer for `.dta` files
+
+Double-click a `.dta` file in the Explorer and it opens in a read-only grid,
+the way Stata's Data Browser would show it. The file is read directly, from
+StataCorp's published format specification, so this works **without Stata or
+Python installed** and without the MCP server running.
+
+Nothing in the file is lost on the way to the screen:
+
+- **Variable labels** sit under each column name, and in the variables panel.
+- **Value labels** replace the codes they stand for (`1` → `Married`), in a
+  distinct colour; untick *Value labels* to see the underlying numbers.
+- **Display formats** are honoured: `%td` / `%tc` / `%tm` / `%tq` dates
+  (including custom ones such as `%tdCCYY-NN-DD`), `%9.2f`, `%12.0gc`, and so on
+  print as Stata prints them.
+- **Missing values** stay distinct — `.`, `.a` … `.z` — and a value label on
+  an extended missing value is applied.
+- **Notes**, the dataset label, the sort order and the save timestamp appear
+  in the panel on the right; click a variable there to jump to its column and
+  see its type, format, notes and full value-label mapping.
+- **strL** variables and non-ASCII text (UTF-8 in format 118+; auto-detected
+  UTF-8 / GB18030 / Windows-1252 in older files) are decoded.
+
+Observations are fixed-width records, so only the rows on screen are read:
+a multi-gigabyte file opens as fast as a small one. *Go to row* jumps
+anywhere; arrow keys, Page Up/Down and Home/End move the selection;
+`Cmd/Ctrl+C` copies the selected cell. If Stata re-saves the file while it is
+open, the viewer reloads.
+
+Supported formats: 113, 114, 115 (Stata 8–12), 117 (Stata 13), 118 and 119
+(Stata 14+), 120 and 121 (Stata 18 alias variables). Formats older than 113
+need a round trip through Stata. To open a `.dta` as raw bytes instead, use
+*Reopen Editor With…*.
+
+*View Data Preview* uses the same viewer for data that is only in memory: it
+copies the first rows through a scratch frame into a temporary `.dta` (your
+frame, its sort order, `c(filename)` and `c(changed)` are untouched) and opens
+that. On Stata 15 or older, and with the console backend, it falls back to a
+text listing.
 
 **Custom keyboard shortcuts.** All shortcuts can be changed with VS Code's
 *Preferences: Open Keyboard Shortcuts* command. Search for
@@ -78,7 +119,7 @@ actions:
 
 - New Stata tab… / Switch tab… (live sessions + locally-known
   "not started" tabs, plus *New tab…*)
-- View data preview (first `stataCode.dataPreviewObs` rows + variable list)
+- View data preview (first `stataCode.dataPreviewObs` rows, in the data viewer)
 - Export latest run / Open latest log / Show latest graphs
 - Working directory… / Show output channel
 - Cancel `<sid>` / Reset `<sid>` / Close tab `<sid>`
@@ -105,7 +146,9 @@ A new entry on the activity bar opens a sidebar with seven sections:
   memory: a summary row (`N obs × K vars`, frame, and a "modified" flag)
   followed by one row per variable, each with a type-aware icon
   (numeric vs string), its variable label as the description, and a
-  tooltip with the full `name · type · label`. Click a variable to copy
+  tooltip with the full `name · type · label`. A display format that is not
+  the storage type's default (`%td`, `%9.2f`) and an attached value label
+  (`[origin]`) are shown too. Click a variable to copy
   its name; use the title-bar buttons to open the full data preview or
   refresh. The view tracks the last run, so it updates as the data
   changes — the agent-native equivalent of Stata's Variables window.
@@ -218,7 +261,8 @@ stata_code.mcp` fallback is safest for GUI clients.
 | `stataCode.serverArgs` | `[]` | Extra args passed to the server process |
 | `stataCode.pythonPath` | `""` | Fallback Python interpreter for `-m stata_code.mcp` |
 | `stataCode.sessionId` | `"main"` | Session id passed to `stata_run` (also driven by the status bar's *Switch session…*). Must match `[A-Za-z0-9_-]+`. |
-| `stataCode.dataPreviewObs` | `50` | Rows listed by *View data preview* (1–10000). Shorter datasets are listed in full. |
+| `stataCode.dataPreviewObs` | `1000` | Rows *View data preview* copies from memory into the data viewer (1–100000). Shorter datasets are shown in full. The text fallback is capped at 200 rows. |
+| `stataCode.dtaLegacyEncoding` | `"auto"` | Text encoding for `.dta` formats older than 118, which predate UTF-8. `auto` tries UTF-8, then GB18030, then Windows-1252; set e.g. `gbk`, `big5`, `shift_jis` or `windows-1252` to force one. |
 | `stataCode.includeFullLog` | `false` | Inline full log instead of fetching via `get_log(ref)` |
 | `stataCode.persistLogFiles` | `true` | Save file-backed runs as immutable log bundles next to the source file |
 | `stataCode.persistGeneratedFiles` | `true` | Copy newly-created tables/exports and captured graphs into the run bundle |
@@ -263,6 +307,11 @@ UI modules:
 | `src/treeProviders.ts` | sessions / last-result / data / run-history / logs / graphs / outputs sidebar trees |
 | `src/dataBrowser.ts` | variables-window data nodes for the **Data** view |
 | `src/outputs.ts` | table/export artifact nodes for the **Outputs** view |
+| `src/dtaReader.ts` | Stata-free `.dta` parser (formats 113–115, 117–121), random-access row reads |
+| `src/dtaFormat.ts` | Stata display formats (`%td`, `%9.2f`, `%12.0gc`, …) |
+| `src/dtaViewModel.ts` | shapes metadata and formatted row blocks for the viewer |
+| `src/dtaEditor.ts` | custom editor + in-memory snapshot panel |
+| `media/dtaViewer.{js,css}` | the viewer's virtual grid and variables panel |
 | `src/cellLens.ts` | `* %%` code-lens provider |
 | `src/diagnostics.ts` | inline error squigglies |
 | `src/graphPanel.ts` | graph webview (Save / Open / Refresh) |

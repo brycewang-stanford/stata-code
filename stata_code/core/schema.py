@@ -6,7 +6,15 @@ import re
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Enums (closed at v1.0; new values are minor-version additive)
@@ -247,10 +255,49 @@ class ResultsInfo(_Base):
     estimation: EstimationResult | None = None
 
 
+def default_display_format(storage_type: str) -> str | None:
+    """The display format Stata assigns a new variable of ``storage_type``.
+
+    ``None`` for a type with no fixed default (an alias variable, or a string
+    the caller did not recognise).
+    """
+    numeric = {
+        "byte": "%8.0g",
+        "int": "%8.0g",
+        "long": "%12.0g",
+        "float": "%9.0g",
+        "double": "%10.0g",
+    }
+    if storage_type in numeric:
+        return numeric[storage_type]
+    if storage_type == "strL":
+        return "%9s"
+    m = re.fullmatch(r"str(\d+)", storage_type)
+    if m:
+        return f"%{max(9, int(m.group(1)))}s"
+    return None
+
+
 class VariableInfo(_Base):
     name: str
     type: str  # Stata storage type: byte/int/long/float/double/str#/strL
     label: str = ""
+    # Both are omitted from the wire when ``None`` (see ``_drop_unset``): the
+    # variable list rides along on every run, so a field that is null for most
+    # variables would cost tokens to say nothing.
+    format: str | None = None
+    """Display format, only when it differs from the storage type's default
+    (so ``%td`` / ``%tc`` / ``%9.2f`` appear, ``%9.0g`` on a float does not)."""
+    value_label: str | None = None
+    """Name of the attached value label, only when one is attached."""
+
+    @model_serializer(mode="wrap")
+    def _drop_unset(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        data: dict[str, object] = handler(self)
+        for key in ("format", "value_label"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class DatasetInfo(_Base):

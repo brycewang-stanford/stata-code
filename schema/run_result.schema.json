@@ -1145,6 +1145,18 @@
     "VariableInfo": {
       "additionalProperties": true,
       "properties": {
+        "format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Format"
+        },
         "label": {
           "default": "",
           "title": "Label",
@@ -1157,6 +1169,18 @@
         "type": {
           "title": "Type",
           "type": "string"
+        },
+        "value_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Label"
         }
       },
       "required": [

@@ -13,3 +13,4 @@ out/**/*.js
 scripts/**
 *.vsix
 .npmignore
+test-fixtures/**

@@ -1,7 +1,7 @@
 {
   "name": "stata-code-vscode",
   "displayName": "stata-code",
-  "description": "Run Stata in VS Code via the agent-native stata-code MCP server: run cells & hierarchical sections, an agent-native Variables window, a sidebar for sessions/data/outputs/logs/graphs, typed-error diagnostics, and reproducible run-bundle export.",
+  "description": "Run Stata in VS Code via the agent-native stata-code MCP server: run cells & hierarchical sections, a Stata-free .dta data viewer that keeps variable labels, value labels, formats and notes, an agent-native Variables window, a sidebar for sessions/data/outputs/logs/graphs, typed-error diagnostics, and reproducible run-bundle export.",
   "version": "0.12.2",
   "publisher": "brycewang-stanford",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Programming Languages", "Data Science", "Notebooks"],
-  "keywords": ["stata", "pystata", "mcp", "causal-inference"],
+  "keywords": ["stata", "dta", "data viewer", "pystata", "mcp", "causal-inference"],
   "main": "./out/extension.js",
   "activationEvents": ["onLanguage:stata"],
   "contributes": {
@@ -25,6 +25,14 @@
         "aliases": ["Stata", "stata"],
         "extensions": [".do", ".ado", ".mata"],
         "configuration": "./language-configuration.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "stataCode.dtaViewer",
+        "displayName": "Stata Data Viewer",
+        "selector": [{ "filenamePattern": "*.dta" }],
+        "priority": "default"
       }
     ],
     "grammars": [
@@ -712,10 +720,15 @@
         },
         "stataCode.dataPreviewObs": {
           "type": "number",
-          "default": 50,
+          "default": 1000,
           "minimum": 1,
-          "maximum": 10000,
-          "description": "Rows shown by the \"View data preview\" command. Datasets shorter than this are listed in full."
+          "maximum": 100000,
+          "description": "Rows the \"View data preview\" command copies out of the session's in-memory data into the data viewer. Datasets shorter than this are shown in full. On Stata 15 or older, and with the console backend, the preview falls back to a text listing capped at 200 rows."
+        },
+        "stataCode.dtaLegacyEncoding": {
+          "type": "string",
+          "default": "auto",
+          "description": "Text encoding for .dta files in formats older than 118 (written by Stata 13 or earlier, or by saveold), which predate Stata's switch to UTF-8. \"auto\" tries UTF-8, then GB18030, then Windows-1252. Set an explicit encoding label (for example \"gbk\", \"big5\", \"shift_jis\", \"windows-1252\") when auto-detection picks the wrong one."
         },
         "stataCode.includeFullLog": {
           "type": "boolean",

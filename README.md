@@ -456,7 +456,7 @@ jupyter kernelspec list
 
 ### 作为 VS Code 扩展
 
-配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。扩展还注册了一个**不依赖 Stata 的 `.dta` 数据浏览器**：双击任意 `.dta` 文件即可在表格中浏览，变量标签、值标签、显示格式、notes 和缺失值代码全部保留；只读取屏幕上可见的行，几个 GB 的文件也能瞬间打开。
 
 ```bash
 # 从 VS Code 命令行

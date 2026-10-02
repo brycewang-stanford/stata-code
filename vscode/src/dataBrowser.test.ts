@@ -103,6 +103,25 @@ describe("buildDataNodes", () => {
     assert.equal(make.description, "str18");
   });
 
+  test("shows a non-default format and an attached value label", () => {
+    const nodes = buildDataNodes(
+      result({
+        n_vars: 3,
+        variables: [
+          { name: "day", type: "long", label: "Sale date", format: "%td" },
+          { name: "foreign", type: "byte", label: "Car origin", value_label: "origin" },
+          { name: "old", type: "int", label: "", format: null, value_label: null },
+        ],
+      }),
+    );
+    const [day, foreign, old] = nodes.filter((n) => n.kind === "variable");
+    assert.equal(day.description, "long %td · Sale date");
+    assert.equal(foreign.description, "byte · [origin] · Car origin");
+    assert.equal(foreign.tooltip, "foreign · byte · [origin] · Car origin");
+    // Results from a pre-0.13 server (no such fields, or nulls) render as before.
+    assert.equal(old.description, "int");
+  });
+
   test("summary marks a modified dataset and surfaces the filename tooltip", () => {
     const nodes = buildDataNodes(
       result({ changed: true, filename: "/data/auto.dta" }),

@@ -110,6 +110,16 @@ __STATACODE__|VAR|mpg|int|Mileage (mpg)
 __STATACODE__|END
 """
 
+VARFMT_LOG = REGRESS_LOG.replace(
+    "__STATACODE__|VAR|mpg|int|Mileage (mpg)\n",
+    "__STATACODE__|VAR|mpg|int|Mileage (mpg)\n"
+    "__STATACODE__|VARFMT|mpg|%8.0g|\n"
+    "__STATACODE__|VAR|foreign|byte|Car origin\n"
+    "__STATACODE__|VARFMT|foreign|%8.0g|origin\n"
+    "__STATACODE__|VAR|day|long|Sale date | first\n"
+    "__STATACODE__|VARFMT|day|%td|\n",
+)
+
 ERROR_LOG = r"""
 . capture noisily {
 .     regress mpg wgt
@@ -232,6 +242,23 @@ class TestSuccessParse:
         make = next(v for v in r.dataset.variables if v.name == "make")
         assert make.type == "str18"
         assert make.label == "Make and model"
+
+    def test_variable_format_and_value_label(self):
+        r = _build(VARFMT_LOG)
+        by_name = {v.name: v for v in r.dataset.variables}
+        # A log from before the VARFMT line existed still parses.
+        assert by_name["make"].format is None and by_name["make"].value_label is None
+        # The storage type's default format is not reported.
+        assert by_name["mpg"].format is None
+        assert by_name["foreign"].value_label == "origin"
+        assert by_name["foreign"].format is None
+        assert by_name["day"].format == "%td"
+        # A "|" inside a variable label does not derail the parse.
+        assert by_name["day"].label == "Sale date | first"
+
+    def test_wrapper_asks_for_format_and_value_label(self):
+        wrapper = console.build_wrapper_do("describe")
+        assert "__STATACODE__|VARFMT|`__v'|`: format `__v''|`: value label `__v''" in wrapper
 
     def test_no_marker_leakage_in_log(self):
         r = _build(REGRESS_LOG)

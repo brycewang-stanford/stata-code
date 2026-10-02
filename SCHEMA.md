@@ -425,9 +425,19 @@ A summary of the active Stata frame *after* the command ran. Always populated.
 
 ```json
 { "name": "mpg", "type": "int", "label": "Mileage (mpg)" }
+{ "name": "foreign", "type": "byte", "label": "Car origin", "value_label": "origin" }
+{ "name": "saledate", "type": "long", "label": "Sale date", "format": "%td" }
 ```
 
-`type` is Stata's storage type (`byte`, `int`, `long`, `float`, `double`, `str#`, `strL`). `label` is the variable label string, or `""` if none.
+| Field | Type | Notes |
+| --- | --- | --- |
+| `name` | `string` | Variable name. |
+| `type` | `string` | Stata's storage type (`byte`, `int`, `long`, `float`, `double`, `str#`, `strL`). |
+| `label` | `string` | The variable label, or `""` if none. |
+| `format` | `string`, optional | The display format, **only when it differs from the storage type's default** (`%8.0g` for `byte`/`int`, `%12.0g` for `long`, `%9.0g` for `float`, `%10.0g` for `double`, `%{max(9,#)}s` for `str#`, `%9s` for `strL`). Absent means "the default". This is how a consumer learns that an integer is a date (`%td`, `%tc`, `%tm`, …). |
+| `value_label` | `string`, optional | Name of the value label attached to the variable. Absent when none is attached. The mapping itself is not shipped; run `label list <name>`. |
+
+`format` and `value_label` are **omitted, not `null`**, when they have nothing to say: the variable list rides along on every run, so a null on most variables would cost tokens to carry no information. Added in 0.13 (additive; `schema_version` stays `"1.0"`). Consumers must treat a missing key and `null` alike.
 
 When `n_vars` is large (default cap: 200), the producer truncates `variables` to the first 200 entries and emits a warning of kind `dataset_variables_truncated`. Agents wanting all variables should call `describe` directly.
 

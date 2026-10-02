@@ -60,11 +60,15 @@ export function buildDataNodes(result: RunResult | undefined): DataNode[] {
 
 function variableNode(v: VariableInfo): DataNode {
   const label = v.label?.trim();
+  // `format` / `value_label` arrive only when they say something (a date or
+  // custom format, an attached value label), so showing them is never noise.
+  const storage = [v.type, v.format].filter(Boolean).join(" ");
+  const valueLabel = v.value_label ? `[${v.value_label}]` : "";
   return {
     kind: "variable",
     label: v.name,
-    description: label ? `${v.type} · ${label}` : v.type,
-    tooltip: [v.name, v.type, label].filter(Boolean).join(" · "),
+    description: [storage, valueLabel, label].filter(Boolean).join(" · "),
+    tooltip: [v.name, storage, valueLabel, label].filter(Boolean).join(" · "),
     icon: variableIcon(v.type),
     varName: v.name,
   };

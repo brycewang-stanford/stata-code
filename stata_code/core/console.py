@@ -57,6 +57,7 @@ from stata_code.core.schema import (
     StataInfo,
     StataReturns,
     VariableInfo,
+    default_display_format,
 )
 
 
@@ -217,6 +218,7 @@ MARK_SECTION = f"{_M}|SECTION|"
 MARK_MATRIX = f"{_M}|MATRIX|"
 MARK_DS = f"{_M}|DS|"
 MARK_VAR = f"{_M}|VAR|"
+MARK_VARFMT = f"{_M}|VARFMT|"
 MARK_BEGIN = f"{_M}|BEGIN"
 MARK_END = f"{_M}|END"
 
@@ -274,6 +276,9 @@ def build_wrapper_do(code: str, *, working_dir: str | None = None) -> str:
         # Stata: display "<MARK>`__v'|`: type `__v''|`: variable label `__v''"
         # Built by concatenation to avoid f-string quote/backtick collisions.
         "        display \"" + MARK_VAR + "`__v'|`: type `__v''|`: variable label `__v''\"",
+        # A second line rather than two more fields on the first: a variable
+        # label may itself contain "|", so it has to stay the last field.
+        "        display \"" + MARK_VARFMT + "`__v'|`: format `__v''|`: value label `__v''\"",
         "    }",
         "}",
         f'display "{MARK_END}"',
@@ -298,6 +303,7 @@ _SCALAR_RE = re.compile(r"^\s*[re]\(([A-Za-z_][A-Za-z0-9_]*)\)\s*=\s*(.+?)\s*$")
 _MACRO_RE = re.compile(r'^\s*[re]\(([A-Za-z_][A-Za-z0-9_]*)\)\s*:\s*"?(.*?)"?\s*$')
 _DS_RE = re.compile(r"^\s*" + re.escape(MARK_DS) + r"(\w+)\|(.*)$")
 _VAR_RE = re.compile(r"^\s*" + re.escape(MARK_VAR) + r"(.+?)\|(.*?)\|(.*)$")
+_VARFMT_RE = re.compile(r"^\s*" + re.escape(MARK_VARFMT) + r"(.+?)\|(.*?)\|(.*)$")
 # `matrix list` dimension header:  e(b)[1,2]  or  symmetric e(V)[2,2]
 _MATRIX_HEADER_RE = re.compile(r"^\s*(symmetric\s+)?[A-Za-z_][A-Za-z0-9_]*\([^)]*\)\[\d+,\d+\]")
 
@@ -536,6 +542,16 @@ def _parse_dataset(block: str) -> DatasetInfo:
                     label=v.group(3).strip(),
                 )
             )
+            continue
+        x = _VARFMT_RE.search(raw)
+        if x and variables and variables[-1].name == x.group(1).strip():
+            # Same contract as the pystata backend: report a format only when
+            # it is not the storage type's default, a value label only when set.
+            var = variables[-1]
+            fmt = x.group(2).strip()
+            if fmt and fmt != default_display_format(var.type):
+                var.format = fmt
+            var.value_label = x.group(3).strip() or None
     return DatasetInfo(
         frame="default",
         n_obs=n_obs,

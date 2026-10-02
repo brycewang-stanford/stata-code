@@ -596,3 +596,47 @@ class TestSuggestions:
 
     def test_unknown_has_no_canonical_suggestion(self):
         assert suggestions_for(ErrorKind.UNKNOWN) == []
+
+
+class TestVariableInfo:
+    def test_unset_format_and_value_label_are_absent_from_the_wire(self):
+        from stata_code.core.schema import VariableInfo
+
+        v = VariableInfo(name="mpg", type="int", label="Mileage (mpg)")
+        assert v.format is None and v.value_label is None
+        assert v.model_dump() == {"name": "mpg", "type": "int", "label": "Mileage (mpg)"}
+        assert json.loads(v.model_dump_json()) == v.model_dump()
+
+    def test_set_fields_roundtrip(self):
+        from stata_code.core.schema import VariableInfo
+
+        v = VariableInfo(name="day", type="long", format="%td", value_label="daylbl")
+        dumped = json.loads(v.model_dump_json())
+        assert dumped == {
+            "name": "day",
+            "type": "long",
+            "label": "",
+            "format": "%td",
+            "value_label": "daylbl",
+        }
+        assert VariableInfo.model_validate(dumped) == v
+
+    def test_pre_0_13_payload_still_validates(self):
+        from stata_code.core.schema import VariableInfo
+
+        v = VariableInfo.model_validate({"name": "make", "type": "str18", "label": "Make"})
+        assert v.format is None
+
+    def test_default_display_format_matches_stata(self):
+        from stata_code.core.schema import default_display_format
+
+        assert default_display_format("byte") == "%8.0g"
+        assert default_display_format("int") == "%8.0g"
+        assert default_display_format("long") == "%12.0g"
+        assert default_display_format("float") == "%9.0g"
+        assert default_display_format("double") == "%10.0g"
+        assert default_display_format("str5") == "%9s"
+        assert default_display_format("str80") == "%80s"
+        assert default_display_format("str2045") == "%2045s"
+        assert default_display_format("strL") == "%9s"
+        assert default_display_format("alias") is None

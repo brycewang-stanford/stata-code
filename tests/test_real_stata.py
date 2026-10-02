@@ -293,3 +293,37 @@ class TestHandoffReal:
         bad = verify_dataset(r.dataset, n_obs=100, required_vars=["nope"])
         assert bad.ok is False
         assert len(bad.issues) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable metadata: display format and value label
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestVariableMetadataReal:
+    def test_format_and_value_label_only_when_informative(self):
+        r = _run(
+            "sysuse auto, clear\n"
+            "generate long day = 22000 + _n\n"
+            "format day %td\n"
+            "format price %9.0fc",
+            "rs_varmeta",
+        )
+        assert r.ok, r.error
+        by_name = {v.name: v for v in r.dataset.variables}
+
+        # Non-default formats are reported; they are what tells an agent that
+        # 22001 is a date and that price prints with thousands separators.
+        assert by_name["day"].format == "%td"
+        assert by_name["price"].format == "%9.0fc"
+        # auto.dta's `foreign` carries the `origin` value label.
+        assert by_name["foreign"].value_label == "origin"
+        # A storage type's default format carries no information.
+        assert by_name["trunk"].format is None
+        assert by_name["trunk"].value_label is None
+
+        wire = {v["name"]: v for v in json.loads(r.model_dump_json())["dataset"]["variables"]}
+        assert wire["day"] == {"name": "day", "type": "long", "label": "", "format": "%td"}
+        assert wire["foreign"]["value_label"] == "origin"
+        # Unset fields are absent from the wire, not null.
+        assert set(wire["trunk"]) == {"name", "type", "label"}

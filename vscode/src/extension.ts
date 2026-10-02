@@ -4,6 +4,7 @@
 // it submits code, tracks lightweight local history, and fetches heavy logs
 // or graphs lazily when the user asks for them.
 
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
@@ -15,9 +16,18 @@ import { CellCodeLensProvider, cellRangeAtMarker } from "./cellLens";
 import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import {
   buildDataPreviewCode,
+  buildDataSnapshotCode,
+  clampPreviewObs,
   DEFAULT_DATA_PREVIEW_OBS,
   formatDataPreviewDocument,
+  textPreviewObs,
 } from "./dataPreview";
+import {
+  disposeDtaSnapshotPanels,
+  DTA_VIEW_TYPE,
+  DtaViewerProvider,
+  openDtaSnapshotPanel,
+} from "./dtaEditor";
 import { formatLogDocument, inlineLogText, matrixToTsv } from "./formatters";
 import { GraphPanel } from "./graphPanel";
 import { StataMcpClient } from "./mcpClient";
@@ -165,6 +175,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider("stataCode.outputs", outputsProvider),
   );
 
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      DTA_VIEW_TYPE,
+      new DtaViewerProvider(context.extensionUri, (line) => output?.appendLine(line)),
+      { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: true },
+    ),
+  );
+
   void maybePromptForServerInstall(context);
 
   context.subscriptions.push(
@@ -228,6 +246,7 @@ function setupServerCommand(): void {
 }
 
 export function deactivate(): void {
+  disposeDtaSnapshotPanels();
   client?.dispose();
   client = undefined;
 }
@@ -711,20 +730,70 @@ async function openMatrix(target?: unknown): Promise<void> {
 }
 
 async function viewDataPreview(): Promise<void> {
-  const previewObs = vscode.workspace
-    .getConfiguration("stataCode")
-    .get<number>("dataPreviewObs", DEFAULT_DATA_PREVIEW_OBS);
-  const result = await runUtilityCode(buildDataPreviewCode(previewObs), "view data preview");
+  const previewObs = clampPreviewObs(
+    vscode.workspace
+      .getConfiguration("stataCode")
+      .get<number>("dataPreviewObs", DEFAULT_DATA_PREVIEW_OBS),
+  );
+  if (await viewDataSnapshot(previewObs)) return;
+
+  // Fallback for Stata < 16 (no frames) and the console backend: a plain-text
+  // listing. Labels and formats survive only as far as `list` prints them.
+  const rows = textPreviewObs(previewObs);
+  const result = await runUtilityCode(buildDataPreviewCode(rows), "view data preview");
   if (!result) return;
 
   const doc = await vscode.workspace.openTextDocument({
     language: "plaintext",
-    content: formatDataPreviewDocument(result, inlineLogText(result), previewObs),
+    content: formatDataPreviewDocument(result, inlineLogText(result), rows),
   });
   await vscode.window.showTextDocument(doc, {
     preview: false,
     viewColumn: vscode.ViewColumn.Beside,
   });
+}
+
+/**
+ * Save the head of the session's in-memory data to a temp .dta and open it in
+ * the dta viewer. Returns false when the snapshot could not be taken, so the
+ * caller can fall back to the text listing.
+ */
+async function viewDataSnapshot(previewObs: number): Promise<boolean> {
+  if (!extensionContext) return false;
+  const sessionId = currentSessionId();
+  const file = path.join(
+    os.tmpdir(),
+    `stata-code-data-${sessionId}-${process.pid}-${Date.now()}.dta`,
+  );
+  const code = buildDataSnapshotCode(file, previewObs);
+  if (!code) return false;
+
+  const result = await runUtilityCode(code, "view data", { quietFailure: true });
+  if (!result?.ok) {
+    output?.appendLine(
+      `[stata-code] view data: snapshot unavailable (rc=${result?.rc ?? "n/a"}); using the text listing`,
+    );
+    return false;
+  }
+  try {
+    await vscode.workspace.fs.stat(vscode.Uri.file(file));
+  } catch {
+    // The server runs somewhere this window cannot read (e.g. a remote host).
+    output?.appendLine(`[stata-code] view data: ${file} is not readable here; using the text listing`);
+    return false;
+  }
+
+  const total = result.dataset.n_obs;
+  const subtitle =
+    total > previewObs
+      ? `first ${previewObs.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} obs in memory`
+      : "in memory";
+  openDtaSnapshotPanel(extensionContext.extensionUri, (line) => output?.appendLine(line), {
+    sessionId,
+    file,
+    subtitle,
+  });
+  return true;
 }
 
 async function copyVariableName(varName?: unknown): Promise<void> {
@@ -1042,7 +1111,11 @@ async function cdToDirectory(uri: vscode.Uri): Promise<void> {
   }
 }
 
-async function runUtilityCode(code: string, label: string): Promise<RunResult | undefined> {
+async function runUtilityCode(
+  code: string,
+  label: string,
+  options: { quietFailure?: boolean } = {},
+): Promise<RunResult | undefined> {
   const sessionId = currentSessionId();
   output?.appendLine(`[stata-code] ${label} (session=${sessionId})`);
   statusBar?.setRunning(true);
@@ -1057,7 +1130,7 @@ async function runUtilityCode(code: string, label: string): Promise<RunResult | 
     // channel's attention — echoing a 50-row listing there is pure noise.
     if (result.ok) {
       output?.appendLine(`[stata-code] ${label}: ok (${result.elapsed_ms}ms)`);
-    } else {
+    } else if (!options.quietFailure) {
       output?.show(true);
       renderResult(result);
     }

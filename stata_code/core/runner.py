@@ -75,6 +75,7 @@ from stata_code.core.schema import (
     StataReturns,
     StataWarning,
     VariableInfo,
+    default_display_format,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -685,6 +686,34 @@ def _cap_macro(value: str) -> str:
     return f"{value[:MACRO_INLINE_CHAR_CAP]}… ({dropped} more chars elided)"
 
 
+def _variable_info(sfi: Any, index: int) -> VariableInfo:
+    """Describe variable ``index``: name, storage type, label, and — only when
+    they carry information — its display format and attached value label."""
+    Data = sfi.Data
+    storage_type = Data.getVarType(index)
+    fmt: str | None = None
+    value_label: str | None = None
+    # Both lookups are best-effort: an sfi build without them must not cost
+    # the caller the variable list.
+    try:
+        raw = Data.getVarFormat(index) or ""
+        if raw and raw != default_display_format(storage_type):
+            fmt = raw
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        value_label = sfi.ValueLabel.getVarValueLabel(index) or None
+    except Exception:  # noqa: BLE001
+        pass
+    return VariableInfo(
+        name=Data.getVarName(index),
+        type=storage_type,
+        label=Data.getVarLabel(index) or "",
+        format=fmt,
+        value_label=value_label,
+    )
+
+
 def _collect_dataset(rt: Any, include_variables: bool) -> DatasetInfo:
     sfi = rt.sfi
     Data = sfi.Data
@@ -716,14 +745,7 @@ def _collect_dataset(rt: Any, include_variables: bool) -> DatasetInfo:
     variables: list[VariableInfo] | None
     if include_variables and n_vars > 0:
         cap = min(n_vars, _DATASET_VAR_CAP)
-        variables = [
-            VariableInfo(
-                name=Data.getVarName(i),
-                type=Data.getVarType(i),
-                label=Data.getVarLabel(i) or "",
-            )
-            for i in range(cap)
-        ]
+        variables = [_variable_info(sfi, i) for i in range(cap)]
     else:
         variables = None
 

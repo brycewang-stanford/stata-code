@@ -3,10 +3,12 @@ import { describe, test } from "node:test";
 
 import {
   buildDataPreviewCode,
+  buildDataSnapshotCode,
   clampPreviewObs,
   DEFAULT_DATA_PREVIEW_OBS,
   formatDataPreviewDocument,
   stripCommandEcho,
+  textPreviewObs,
 } from "./dataPreview";
 import type { RunResult } from "./types/runResult";
 
@@ -69,9 +71,58 @@ describe("buildDataPreviewCode", () => {
 
   test("clamps out-of-range row counts", () => {
     assert.match(buildDataPreviewCode(0), /_n <= 1,/);
-    assert.match(buildDataPreviewCode(1e9), /_n <= 10000,/);
+    assert.match(buildDataPreviewCode(1e9), /_n <= 100000,/);
     assert.equal(clampPreviewObs(undefined), DEFAULT_DATA_PREVIEW_OBS);
     assert.equal(clampPreviewObs(12.7), 12);
+  });
+});
+
+describe("buildDataSnapshotCode", () => {
+  test("copies through a scratch frame and never saves the user's own frame", () => {
+    const code = buildDataSnapshotCode("/tmp/snap.dta", 500);
+    assert.ok(code);
+    const lines = code.split("\n");
+    assert.equal(lines[0], "capture frame drop _sc_snapshot");
+    assert.equal(lines[1], "frame put * if _n <= 500, into(_sc_snapshot)");
+    assert.equal(
+      lines[2],
+      'capture noisily frame _sc_snapshot: quietly save "/tmp/snap.dta", replace',
+    );
+    // Every `save` is prefixed by the scratch frame.
+    for (const line of lines) {
+      if (/\bsave\b/.test(line)) assert.match(line, /frame _sc_snapshot: quietly save/);
+    }
+  });
+
+  test("drops the scratch frame before re-raising a failed save", () => {
+    const lines = (buildDataSnapshotCode("/tmp/snap.dta", 10) ?? "").split("\n");
+    const drop = lines.lastIndexOf("frame drop _sc_snapshot");
+    const raise = lines.indexOf("if `_sc_rc' error `_sc_rc'");
+    assert.ok(drop > 0 && raise > drop);
+  });
+
+  test("writes Windows paths with forward slashes", () => {
+    const code = buildDataSnapshotCode("C:\\Users\\me\\AppData\\Local\\Temp\\snap.dta", 10);
+    assert.match(code ?? "", /save "C:\/Users\/me\/AppData\/Local\/Temp\/snap\.dta", replace/);
+  });
+
+  test("refuses paths Stata would macro-expand or that break the quoting", () => {
+    assert.equal(buildDataSnapshotCode("/tmp/$HOME/snap.dta", 10), undefined);
+    assert.equal(buildDataSnapshotCode("/tmp/`x'/snap.dta", 10), undefined);
+    assert.equal(buildDataSnapshotCode('/tmp/a"b/snap.dta', 10), undefined);
+  });
+
+  test("clamps the row count", () => {
+    assert.match(buildDataSnapshotCode("/tmp/s.dta", 0) ?? "", /_n <= 1,/);
+    assert.match(buildDataSnapshotCode("/tmp/s.dta", 1e9) ?? "", /_n <= 100000,/);
+  });
+});
+
+describe("textPreviewObs", () => {
+  test("caps the text fallback well below the grid's row limit", () => {
+    assert.equal(textPreviewObs(50), 50);
+    assert.equal(textPreviewObs(1000), 200);
+    assert.equal(textPreviewObs(undefined), 200);
   });
 });
 

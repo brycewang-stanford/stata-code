@@ -1,0 +1,471 @@
+/* Stata .dta viewer. Colours come from the active VS Code theme. */
+
+:root {
+  --row-h: 24px;
+  --head-h: 42px;
+  --gutter-w: 64px;
+  --border: var(--vscode-editorGroup-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.35)));
+  --muted: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.9));
+  --head-bg: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background));
+  --hover-bg: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+  --select-bg: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.22));
+  --focus: var(--vscode-focusBorder, #007acc);
+  --grid-font: var(--vscode-editor-font-family, ui-monospace, Menlo, Consolas, monospace);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  overflow: hidden;
+}
+
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  min-width: 0;
+}
+
+#summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#summary .name {
+  font-weight: 600;
+}
+
+#summary .dim {
+  color: var(--muted);
+}
+
+#tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+#tools label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+input[type="number"],
+input[type="search"] {
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 2px;
+  padding: 3px 6px;
+  font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible,
+#scroller:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+
+#goto {
+  width: 9em;
+}
+
+button {
+  color: var(--vscode-button-secondaryForeground, inherit);
+  background: var(--vscode-button-secondaryBackground, transparent);
+  border: 1px solid var(--vscode-button-border, var(--border));
+  border-radius: 2px;
+  padding: 3px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--hover-bg));
+}
+
+button[aria-pressed="true"] {
+  background: var(--select-bg);
+}
+
+#warnings {
+  flex: none;
+}
+
+#warnings div {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--vscode-inputValidation-warningBackground, rgba(200, 150, 0, 0.15));
+}
+
+#main {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* ── grid ─────────────────────────────────────────────────────────────── */
+
+#grid {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: var(--gutter-w) minmax(0, 1fr);
+  grid-template-rows: var(--head-h) minmax(0, 1fr);
+  font-family: var(--grid-font);
+  font-size: var(--vscode-editor-font-size, 12px);
+}
+
+#corner,
+#head,
+#gutter {
+  position: relative;
+  overflow: hidden;
+  background: var(--head-bg);
+}
+
+#corner {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+#head {
+  border-bottom: 1px solid var(--border);
+}
+
+#gutter {
+  border-right: 1px solid var(--border);
+}
+
+#scroller {
+  position: relative;
+  overflow: auto;
+}
+
+/* #sizer gives the scroller its extent; #cells is a viewport-sized layer that
+   sticks to the scroller's top-left corner and holds only the visible cells. */
+#sizer {
+  position: relative;
+  width: 1px;
+  height: 1px;
+}
+
+#cells {
+  position: sticky;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.h,
+.c,
+.g {
+  position: absolute;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.h {
+  top: 0;
+  height: var(--head-h);
+  padding: 4px 8px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  line-height: 17px;
+}
+
+.h:hover {
+  background: var(--hover-bg);
+}
+
+.h.sel {
+  background: var(--select-bg);
+}
+
+.h .n {
+  display: block;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.h .l {
+  display: block;
+  color: var(--muted);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 0.92em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.h.num {
+  text-align: right;
+}
+
+.g {
+  left: 0;
+  width: var(--gutter-w);
+  height: var(--row-h);
+  line-height: var(--row-h);
+  padding: 0 8px;
+  text-align: right;
+  color: var(--muted);
+}
+
+.c {
+  height: var(--row-h);
+  line-height: calc(var(--row-h) - 1px);
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.c.num {
+  text-align: right;
+}
+
+.c.miss {
+  color: var(--muted);
+}
+
+.c.lab {
+  color: var(--vscode-symbolIcon-enumeratorMemberForeground, var(--vscode-textLink-foreground));
+}
+
+.c.wait {
+  color: transparent;
+}
+
+.c.colsel {
+  background: var(--hover-bg);
+}
+
+.c.sel {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+  background: var(--select-bg);
+}
+
+#empty {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+/* ── variables panel ──────────────────────────────────────────────────── */
+
+#side {
+  flex: none;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--vscode-sideBar-background, transparent);
+  min-height: 0;
+}
+
+#side-head {
+  flex: none;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+#filter {
+  width: 100%;
+}
+
+#varlist {
+  flex: 1 1 50%;
+  overflow: auto;
+  min-height: 60px;
+}
+
+.v {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+}
+
+.v:hover {
+  background: var(--hover-bg);
+}
+
+.v.sel {
+  background: var(--vscode-list-activeSelectionBackground, var(--select-bg));
+  color: var(--vscode-list-activeSelectionForeground, inherit);
+}
+
+.v .n {
+  font-family: var(--grid-font);
+  font-weight: 600;
+}
+
+.v .t {
+  color: var(--muted);
+  font-family: var(--grid-font);
+  font-size: 0.9em;
+  margin-left: 6px;
+}
+
+.v.sel .t,
+.v.sel .l {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.v .l {
+  display: block;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#detail {
+  flex: 0 1 auto;
+  max-height: 50%;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding: 8px;
+}
+
+#detail:empty {
+  display: none;
+}
+
+#detail h3 {
+  margin: 0 0 6px;
+  font-size: 1em;
+  font-family: var(--grid-font);
+}
+
+#detail h4 {
+  margin: 10px 0 4px;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+#detail dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+#detail dt {
+  color: var(--muted);
+}
+
+#detail dd {
+  margin: 0;
+  font-family: var(--grid-font);
+  overflow-wrap: anywhere;
+}
+
+#detail table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--grid-font);
+}
+
+#detail td {
+  padding: 1px 8px 1px 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+#detail td:first-child {
+  text-align: right;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+#detail p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+/* ── status line ──────────────────────────────────────────────────────── */
+
+#status {
+  flex: none;
+  display: flex;
+  gap: 12px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--grid-font);
+  font-size: var(--vscode-editor-font-size, 12px);
+  min-height: 22px;
+}
+
+#status .where {
+  flex: none;
+  color: var(--vscode-editor-foreground);
+}
+
+#status .value {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vscode-editor-foreground);
+}
+
+#fatal {
+  padding: 24px;
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+
+#fatal h2 {
+  margin: 0 0 8px;
+  font-size: 1.1em;
+}
+
+@media (max-width: 720px) {
+  #side {
+    width: 220px;
+  }
+}
