@@ -6,6 +6,80 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.13.0 — 2026-10-03
+
+A data viewer for `.dta` files. Opening a dataset in VS Code used to mean
+either launching Stata or converting to CSV and losing the variable labels,
+value labels, formats and notes on the way. The extension now reads `.dta`
+directly and shows all of it.
+
+### Added
+
+- **VS Code: a Stata-free `.dta` data viewer.** Double-click any `.dta` file
+  and it opens in a read-only grid, registered as the default editor for
+  `*.dta`. The file is parsed in the extension itself, from StataCorp's
+  published format documentation, so it needs neither Stata, Python, nor the
+  MCP server. What the viewer keeps that a CSV round trip drops:
+  - variable labels (under each column name and in the variables panel);
+  - value labels, shown in place of their codes, with a *Value labels* toggle
+    to see the underlying numbers;
+  - display formats — `%td` / `%tc` / `%tm` / `%tq` / `%th` / `%tw` / `%ty`
+    dates including custom detail codes (`%tdCCYY-NN-DD`), `%w.df`, `%w.de`,
+    `%w.dg`, comma variants — printed as Stata prints them;
+  - the 27 missing values as `.`, `.a` … `.z`, including value labels attached
+    to extended missing values;
+  - dataset and variable notes, the dataset label, sort order and timestamp;
+  - `strL` variables and non-ASCII text.
+
+  Observations are fixed-width records, so the viewer reads only the rows on
+  screen; a 3-million-row file opens and jumps to its last row as fast as a
+  5-row one. A variables panel filters by name or label and jumps to a column;
+  *Go to row*, arrow / Page / Home / End keys and `Cmd/Ctrl+C` work as
+  expected; the viewer reloads when Stata re-saves the file.
+
+  Formats covered: 113–115 (Stata 8–12), 117 (Stata 13), 118 / 119
+  (Stata 14+), 120 / 121 (Stata 18 alias variables), in either byte order.
+  The parser is tested against fixtures written by a real Stata, and its
+  formatted cells are asserted equal to Stata's own `list` output.
+- **VS Code: `stataCode.dtaLegacyEncoding` setting** (default `auto`) for
+  `.dta` formats older than 118, which predate UTF-8. `auto` tries UTF-8,
+  then GB18030, then Windows-1252.
+- **`dataset.variables[*].format` and `.value_label`.** Each variable now
+  reports its display format when that differs from the storage type's
+  default, and the name of its value label when one is attached — so a
+  consumer can tell that an integer is a `%td` date or that `foreign` is
+  labelled by `origin` without running `describe`. Both keys are *omitted*
+  (not `null`) when they have nothing to say, so the common variable costs no
+  extra tokens. Additive; `schema_version` stays `1.0`. Reported by both the
+  pystata and the console backend.
+- **VS Code: the Data sidebar shows those two fields** next to each variable
+  (`long %td · Sale date`, `byte · [origin] · Car origin`).
+
+### Changed
+
+- **VS Code: "View data preview" opens the data viewer instead of a text
+  listing.** The first `stataCode.dataPreviewObs` observations in memory are
+  copied through a scratch frame into a temporary `.dta` and shown in the same
+  grid as a file on disk, so in-memory data gets labels, formats and notes
+  too. The user's frame is not touched — not its data, sort order,
+  `c(filename)`, `c(changed)`, nor `r()` — and the temporary file is deleted
+  when the panel closes. One panel per session; previewing again refreshes it.
+  On Stata 15 or older (no frames) and with the console backend the command
+  falls back to the text listing below.
+- **VS Code: `stataCode.dataPreviewObs` now defaults to `1000`** (was `50`)
+  and accepts up to `100000` (was `10000`): the grid scrolls, a text document
+  does not. The text fallback is capped at 200 rows regardless.
+- **VS Code: the fallback text listing is shorter and no longer line-wrapped.**
+  `list` is run with a widened `linesize` (restored afterwards) so wide
+  datasets stop folding into `>` continuation lines; the command echo is
+  stripped from the body; the header collapses to a session line plus a
+  `74 obs x 12 vars - showing all 74` summary and the dataset path; and the
+  variable list is column-aligned instead of tab-separated.
+- **VS Code: utility runs (data preview, `pwd`, `cd`) no longer hijack the
+  Output panel.** They used to force it visible and echo their whole log into
+  it. They now log one status line on success and only surface the panel on
+  failure.
+
 ### Fixed
 
 - **VS Code: "View data preview" failed on every dataset with fewer than 100
@@ -16,21 +90,6 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
   `showing: 0 of 74 observations`. The preview now selects rows with
   `if _n <= N`, which lists whatever is there (including nothing at all), and
   a failed preview reports its `rc` and message instead of a row count.
-
-### Changed
-
-- **VS Code: the data preview document is shorter and no longer line-wrapped.**
-  `list` is run with a widened `linesize` (restored afterwards) so wide
-  datasets stop folding into `>` continuation lines; the command echo is
-  stripped from the body; the header collapses to a session line plus a
-  `74 obs x 12 vars - showing all 74` summary and the dataset path; and the
-  variable list is column-aligned instead of tab-separated.
-- **VS Code: utility runs (data preview, `pwd`, `cd`) no longer hijack the
-  Output panel.** They used to force it visible and echo their whole log into
-  it — for the preview, the entire listing a second time. They now log one
-  status line on success and only surface the panel on failure.
-- **VS Code: new `stataCode.dataPreviewObs` setting** (default `50`, range
-  1-10000) controls how many rows the preview lists.
 
 ## 0.12.2 — 2026-08-11
 

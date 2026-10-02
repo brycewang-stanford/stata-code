@@ -260,7 +260,7 @@ def is_available() -> bool:
     return True
 
 
-__version__ = "0.12.2"
+__version__ = "0.13.0"
 
 __all__ = [
     # Primary entry points
