@@ -112,6 +112,17 @@ code --install-extension stata-code-vscode-X.Y.Z.vsix --force
 The Marketplace publish runs on the `vscode-vX.Y.Z` tag, independent of the PyPI
 release.
 
+The same workflow then publishes to **Open VSX** (Cursor, VSCodium, Windsurf)
+when the `OVSX_PAT` secret is set; that step is `continue-on-error`. If a
+version reached the Marketplace but not Open VSX, do **not** re-run
+`vscode-release` — it would fail re-publishing to the Marketplace first. Use
+the recovery workflow, which publishes the VSIX already attached to the
+release:
+
+```bash
+gh workflow run openvsx-publish.yml -f tag=vscode-vX.Y.Z
+```
+
 ## MCP launch resilience (VS Code extension)
 
 The extension auto-discovers a Python interpreter for the MCP server in this order

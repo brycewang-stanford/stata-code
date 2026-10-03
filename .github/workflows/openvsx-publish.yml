@@ -1,0 +1,72 @@
+name: openvsx-publish
+
+# Publishes an already-built VSIX from a GitHub Release to Open VSX.
+#
+# The normal path is the "Publish to Open VSX" step at the end of
+# vscode-release.yml. This workflow is the recovery path for a version that
+# reached the VS Code Marketplace but not Open VSX (OVSX_PAT missing or
+# expired at the time): re-running vscode-release for that tag would try to
+# publish to the Marketplace again and fail there, before reaching Open VSX.
+#
+# It needs the OVSX_PAT repository secret. The token never leaves Actions.
+#
+#   gh workflow run openvsx-publish.yml -f tag=vscode-v0.14.0
+#
+# First publish ever: add -f create_namespace=true to claim the
+# `brycewang-stanford` namespace (the token's owner must have signed the
+# Eclipse publisher agreement at https://open-vsx.org/user-settings/profile).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose stata-code.vsix to publish (e.g. vscode-v0.14.0)"
+        required: true
+        type: string
+      create_namespace:
+        description: "Create the brycewang-stanford namespace first"
+        type: boolean
+        default: false
+
+concurrency:
+  group: openvsx-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish vsix to Open VSX
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Passed through the environment, never interpolated into a script.
+      TAG: ${{ inputs.tag }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Validate inputs
+        run: |
+          if [[ ! "$TAG" =~ ^vscode-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag must look like vscode-vX.Y.Z"
+            exit 1
+          fi
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::OVSX_PAT secret is not set"
+            exit 1
+          fi
+
+      - name: Download the VSIX attached to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh release download "$TAG" --repo "$REPO" --pattern stata-code.vsix
+
+      - name: Create namespace
+        if: inputs.create_namespace
+        run: npx --yes ovsx create-namespace brycewang-stanford --pat "$OVSX_PAT"
+
+      - name: Publish to Open VSX
+        run: npx --yes ovsx publish stata-code.vsix --pat "$OVSX_PAT"
