@@ -1,0 +1,697 @@
+// A small evaluator for Stata `if` expressions, used to filter rows in the
+// dta viewer: `age > 60 & !missing(income)`, `region == "South":regionlbl`,
+// `inlist(city, "Boston", "北京")`.
+//
+// It follows Stata's semantics rather than JavaScript's, because a filter
+// that silently disagrees with `count if …` would be worse than no filter:
+//   - missing values are larger than every number, and . < .a < … < .z, so
+//     `age > 60` is true for a missing age, exactly as in Stata;
+//   - arithmetic on a missing value yields `.`;
+//   - any nonzero result, including missing, is "true";
+//   - comparing a string with a number is a "type mismatch" error.
+// The test suite checks 48 expressions against Stata 18's own `count if`.
+//
+// Supported: numeric and string literals, `.` / `.a`–`.z`, variable names,
+// `_n` / `_N`, `"text":labelname`, the operators ! ~ ^ - * / + == != ~= < <=
+// > >= & |, and a working set of functions (see FUNCTIONS). Not supported:
+// variable abbreviations, time-series operators, macros, `in` ranges.
+//
+// Kept free of any `vscode` import so it runs under `node --test`.
+
+import { TextEncoder } from "node:util";
+
+import { DtaCell, DtaMeta, missingIndex } from "./dtaReader";
+
+/** Numbers at or above this are Stata missing values in this module's encoding. */
+const MISSING_FLOOR = 8.99e307;
+const MISSING_BASE = 9e307;
+const MISSING_STEP = 1e306;
+/** Stata's system missing value `.`. */
+export const SYSMISS = MISSING_BASE;
+
+/**
+ * Map a numeric cell onto one number line: ordinary values as themselves,
+ * `.` and `.a`–`.z` as 27 distinct values above every ordinary one, in
+ * Stata's order. Comparisons and sorting then need no special cases.
+ */
+export function numericKey(cell: DtaCell): number {
+  if (typeof cell === "number") return cell;
+  const index = missingIndex(cell);
+  return MISSING_BASE + Math.max(0, index) * MISSING_STEP;
+}
+
+export function isMissingKey(x: number): boolean {
+  return !(x < MISSING_FLOOR);
+}
+
+/** 0 for `.`, 1–26 for `.a`–`.z`; only meaningful when {@link isMissingKey}. */
+export function missingKeyIndex(x: number): number {
+  return Math.min(26, Math.max(0, Math.round((x - MISSING_BASE) / MISSING_STEP)));
+}
+
+export class DtaFilterError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DtaFilterError";
+  }
+}
+
+export interface CompiledFilter {
+  /** Variable indices the expression reads, in slot order. */
+  columns: number[];
+  /**
+   * `cells` are the values of `columns` for one observation; `obs` is its
+   * 1-based position in the dataset (`_n`).
+   */
+  test(cells: DtaCell[], obs: number): boolean;
+}
+
+// ── tokens ──────────────────────────────────────────────────────────────────
+
+type Token =
+  | { kind: "num"; value: number }
+  | { kind: "str"; value: string }
+  | { kind: "name"; value: string }
+  | { kind: "op"; value: string }
+  | { kind: "end" };
+
+const OPERATORS = ["==", "!=", "~=", ">=", "<=", "&", "|", "!", "~", "^", "*", "/", "+", "-", ">", "<", "(", ")", ",", ":", "="];
+const NAME_START = /[\p{L}_]/u;
+const NAME_CHAR = /[\p{L}\p{N}_]/u;
+
+function tokenize(source: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (/\s/.test(ch)) {
+      i += 1;
+      continue;
+    }
+    // Compound double quotes: `"…"'
+    if (ch === "`" && source[i + 1] === '"') {
+      const end = source.indexOf("\"'", i + 2);
+      if (end < 0) throw new DtaFilterError("unterminated string");
+      tokens.push({ kind: "str", value: source.slice(i + 2, end) });
+      i = end + 2;
+      continue;
+    }
+    if (ch === '"') {
+      const end = source.indexOf('"', i + 1);
+      if (end < 0) throw new DtaFilterError("unterminated string");
+      tokens.push({ kind: "str", value: source.slice(i + 1, end) });
+      i = end + 1;
+      continue;
+    }
+    const number = /^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(source.slice(i));
+    if (number) {
+      tokens.push({ kind: "num", value: Number(number[0]) });
+      i += number[0].length;
+      continue;
+    }
+    if (ch === ".") {
+      // `.` or an extended missing value `.a` … `.z`
+      const next = source[i + 1] ?? "";
+      const after = source[i + 2] ?? "";
+      if (next >= "a" && next <= "z" && !NAME_CHAR.test(after)) {
+        tokens.push({ kind: "num", value: MISSING_BASE + (next.charCodeAt(0) - 96) * MISSING_STEP });
+        i += 2;
+      } else {
+        tokens.push({ kind: "num", value: SYSMISS });
+        i += 1;
+      }
+      continue;
+    }
+    if (NAME_START.test(ch)) {
+      let j = i + 1;
+      while (j < source.length && NAME_CHAR.test(source[j])) j += 1;
+      const name = source.slice(i, j);
+      // td(01jan2020): the argument is not an expression, so lex it whole.
+      if (name === "td" && /^\s*\(/.test(source.slice(j))) {
+        const close = source.indexOf(")", j);
+        if (close < 0) throw new DtaFilterError("invalid syntax");
+        const open = source.indexOf("(", j);
+        tokens.push({ kind: "num", value: parseDateLiteral(source.slice(open + 1, close)) });
+        i = close + 1;
+        continue;
+      }
+      tokens.push({ kind: "name", value: name });
+      i = j;
+      continue;
+    }
+    const op = OPERATORS.find((candidate) => source.startsWith(candidate, i));
+    if (!op) throw new DtaFilterError(`invalid syntax near ${JSON.stringify(ch)}`);
+    tokens.push({ kind: "op", value: op });
+    i += op.length;
+  }
+  tokens.push({ kind: "end" });
+  return tokens;
+}
+
+const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MS_PER_DAY = 86400000;
+const EPOCH = Date.UTC(1960, 0, 1);
+
+function daysFromCivil(year: number, month: number, day: number): number {
+  const date = new Date(Date.UTC(2000, month - 1, day));
+  date.setUTCFullYear(year);
+  // Reject day/month overflow (31 feb), which Date would silently roll over.
+  if (date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return SYSMISS;
+  return Math.round((date.getTime() - EPOCH) / MS_PER_DAY);
+}
+
+function parseDateLiteral(text: string): number {
+  const m = /^\s*(\d{1,2})\s*([A-Za-z]{3})[A-Za-z]*\s*(\d{4})\s*$/.exec(text);
+  const month = m ? MONTH_NAMES.indexOf(m[2].toLowerCase()) : -1;
+  if (!m || month < 0) throw new DtaFilterError(`td(): ${text.trim()} is not a date like 01jan2020`);
+  return daysFromCivil(Number(m[3]), month + 1, Number(m[1]));
+}
+
+// ── compiled nodes ──────────────────────────────────────────────────────────
+
+type Row = DtaCell[];
+type NumFn = (row: Row, obs: number) => number;
+type StrFn = (row: Row, obs: number) => string;
+type Node = { type: "num"; fn: NumFn } | { type: "str"; fn: StrFn };
+
+function num(fn: NumFn): Node {
+  return { type: "num", fn };
+}
+function str(fn: StrFn): Node {
+  return { type: "str", fn };
+}
+
+function wantNum(node: Node): NumFn {
+  if (node.type !== "num") throw new DtaFilterError("type mismatch");
+  return node.fn;
+}
+function wantStr(node: Node): StrFn {
+  if (node.type !== "str") throw new DtaFilterError("type mismatch");
+  return node.fn;
+}
+
+/** Arithmetic result → Stata value: non-finite or out of range becomes `.`. */
+function arith(x: number): number {
+  return Number.isFinite(x) && x < MISSING_FLOOR ? x : SYSMISS;
+}
+
+function bool(x: boolean): number {
+  return x ? 1 : 0;
+}
+
+const utf8 = new TextEncoder();
+
+function globToRegExp(pattern: string): RegExp {
+  let out = "^";
+  for (const ch of pattern) {
+    if (ch === "*") out += "[\\s\\S]*";
+    else if (ch === "?") out += "[\\s\\S]";
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`${out}$`, "u");
+}
+
+type FunctionBuilder = (args: Node[]) => Node;
+
+function arity(name: string, args: Node[], min: number, max = min): void {
+  if (args.length < min || args.length > max) {
+    throw new DtaFilterError(`${name}(): wrong number of arguments`);
+  }
+}
+
+function numeric1(name: string, f: (x: number) => number): FunctionBuilder {
+  return (args) => {
+    arity(name, args, 1);
+    const a = wantNum(args[0]);
+    return num((r, n) => {
+      const x = a(r, n);
+      return isMissingKey(x) ? SYSMISS : arith(f(x));
+    });
+  };
+}
+
+function string1(name: string, f: (s: string) => string): FunctionBuilder {
+  return (args) => {
+    arity(name, args, 1);
+    const a = wantStr(args[0]);
+    return str((r, n) => f(a(r, n)));
+  };
+}
+
+function isMissingNode(node: Node): NumFn {
+  if (node.type === "num") {
+    const f = node.fn;
+    return (r, n) => bool(isMissingKey(f(r, n)));
+  }
+  const f = node.fn;
+  return (r, n) => bool(f(r, n) === "");
+}
+
+function missingBuilder(name: string): FunctionBuilder {
+  return (args) => {
+    if (args.length === 0) throw new DtaFilterError(`${name}(): wrong number of arguments`);
+    const tests = args.map(isMissingNode);
+    return num((r, n) => bool(tests.some((t) => t(r, n) === 1)));
+  };
+}
+
+function extremum(name: string, pick: (a: number, b: number) => number): FunctionBuilder {
+  return (args) => {
+    if (args.length === 0) throw new DtaFilterError(`${name}(): wrong number of arguments`);
+    const fns = args.map(wantNum);
+    // Stata's min()/max() skip missing arguments; all missing gives missing.
+    return num((r, n) => {
+      let acc = SYSMISS;
+      for (const f of fns) {
+        const x = f(r, n);
+        if (isMissingKey(x)) continue;
+        acc = isMissingKey(acc) ? x : pick(acc, x);
+      }
+      return acc;
+    });
+  };
+}
+
+const FUNCTIONS: Record<string, FunctionBuilder> = {
+  missing: missingBuilder("missing"),
+  mi: missingBuilder("mi"),
+  inlist: (args) => {
+    if (args.length < 2) throw new DtaFilterError("inlist(): wrong number of arguments");
+    if (args[0].type === "num") {
+      const fns = args.map(wantNum);
+      return num((r, n) => {
+        const x = fns[0](r, n);
+        for (let i = 1; i < fns.length; i++) if (fns[i](r, n) === x) return 1;
+        return 0;
+      });
+    }
+    const fns = args.map(wantStr);
+    return num((r, n) => {
+      const x = fns[0](r, n);
+      for (let i = 1; i < fns.length; i++) if (fns[i](r, n) === x) return 1;
+      return 0;
+    });
+  },
+  inrange: (args) => {
+    arity("inrange", args, 3);
+    if (args[0].type === "str") {
+      const [z, a, b] = args.map(wantStr);
+      return num((r, n) => bool(a(r, n) <= z(r, n) && z(r, n) <= b(r, n)));
+    }
+    const [z, a, b] = args.map(wantNum);
+    // Stata: a missing bound is open on that side; a missing z is never in range.
+    return num((r, n) => {
+      const x = z(r, n);
+      if (isMissingKey(x)) return 0;
+      const lo = a(r, n);
+      const hi = b(r, n);
+      return bool((isMissingKey(lo) || lo <= x) && (isMissingKey(hi) || x <= hi));
+    });
+  },
+  strpos: (args) => {
+    arity("strpos", args, 2);
+    const [s, sub] = args.map(wantStr);
+    return num((r, n) => {
+      const needle = sub(r, n);
+      return needle === "" ? 0 : s(r, n).indexOf(needle) + 1;
+    });
+  },
+  regexm: (args) => {
+    arity("regexm", args, 2);
+    const [s, re] = args.map(wantStr);
+    const cache = new Map<string, RegExp>();
+    return num((r, n) => {
+      const pattern = re(r, n);
+      let compiled = cache.get(pattern);
+      if (!compiled) {
+        try {
+          compiled = new RegExp(pattern, "u");
+        } catch {
+          throw new DtaFilterError(`regexm(): invalid regular expression ${JSON.stringify(pattern)}`);
+        }
+        cache.set(pattern, compiled);
+      }
+      return bool(compiled.test(s(r, n)));
+    });
+  },
+  strmatch: (args) => {
+    arity("strmatch", args, 2);
+    const [s, pattern] = args.map(wantStr);
+    const cache = new Map<string, RegExp>();
+    return num((r, n) => {
+      const p = pattern(r, n);
+      let compiled = cache.get(p);
+      if (!compiled) {
+        compiled = globToRegExp(p);
+        cache.set(p, compiled);
+      }
+      return bool(compiled.test(s(r, n)));
+    });
+  },
+  lower: string1("lower", (s) => s.toLowerCase()),
+  upper: string1("upper", (s) => s.toUpperCase()),
+  strlower: string1("strlower", (s) => s.toLowerCase()),
+  strupper: string1("strupper", (s) => s.toUpperCase()),
+  trim: string1("trim", (s) => s.replace(/^ +| +$/g, "")),
+  strtrim: string1("strtrim", (s) => s.replace(/^ +| +$/g, "")),
+  // Stata's strlen() counts bytes; ustrlen() counts characters.
+  strlen: (args) => {
+    arity("strlen", args, 1);
+    const s = wantStr(args[0]);
+    return num((r, n) => utf8.encode(s(r, n)).length);
+  },
+  length: (args) => FUNCTIONS.strlen(args),
+  ustrlen: (args) => {
+    arity("ustrlen", args, 1);
+    const s = wantStr(args[0]);
+    return num((r, n) => [...s(r, n)].length);
+  },
+  substr: (args) => {
+    arity("substr", args, 3);
+    const s = wantStr(args[0]);
+    const from = wantNum(args[1]);
+    const count = wantNum(args[2]);
+    return str((r, n) => {
+      const chars = [...s(r, n)];
+      let start = from(r, n);
+      const len = count(r, n);
+      if (isMissingKey(start) || start === 0) return "";
+      if (start < 0) start = chars.length + start + 1;
+      if (start < 1) return "";
+      const end = isMissingKey(len) ? chars.length : start - 1 + Math.max(0, len);
+      return chars.slice(start - 1, end).join("");
+    });
+  },
+  usubstr: (args) => FUNCTIONS.substr(args),
+  abs: numeric1("abs", Math.abs),
+  floor: numeric1("floor", Math.floor),
+  ceil: numeric1("ceil", Math.ceil),
+  int: numeric1("int", Math.trunc),
+  sqrt: numeric1("sqrt", Math.sqrt),
+  exp: numeric1("exp", Math.exp),
+  ln: numeric1("ln", Math.log),
+  log: numeric1("log", Math.log),
+  log10: numeric1("log10", Math.log10),
+  round: (args) => {
+    arity("round", args, 1, 2);
+    const x = wantNum(args[0]);
+    const unit = args[1] ? wantNum(args[1]) : undefined;
+    // Stata rounds halves away from zero.
+    const nearest = (v: number): number => Math.sign(v) * Math.floor(Math.abs(v) + 0.5);
+    return num((r, n) => {
+      const v = x(r, n);
+      if (isMissingKey(v)) return SYSMISS;
+      const u = unit ? unit(r, n) : 1;
+      if (isMissingKey(u)) return SYSMISS;
+      return u === 0 ? v : arith(nearest(v / u) * u);
+    });
+  },
+  mod: (args) => {
+    arity("mod", args, 2);
+    const [x, y] = args.map(wantNum);
+    return num((r, n) => {
+      const a = x(r, n);
+      const b = y(r, n);
+      if (isMissingKey(a) || isMissingKey(b) || b === 0) return SYSMISS;
+      return arith(a - b * Math.floor(a / b));
+    });
+  },
+  min: extremum("min", Math.min),
+  max: extremum("max", Math.max),
+  mdy: (args) => {
+    arity("mdy", args, 3);
+    const [m, d, y] = args.map(wantNum);
+    return num((r, n) => {
+      const mm = m(r, n);
+      const dd = d(r, n);
+      const yy = y(r, n);
+      if (![mm, dd, yy].every((v) => Number.isInteger(v))) return SYSMISS;
+      if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yy < 100 || yy > 9999) return SYSMISS;
+      return daysFromCivil(yy, mm, dd);
+    });
+  },
+};
+
+// ── parser ──────────────────────────────────────────────────────────────────
+
+class Parser {
+  private pos = 0;
+  readonly columns: number[] = [];
+  private readonly slots = new Map<number, number>();
+  private readonly byName: Map<string, number>;
+
+  constructor(
+    private readonly tokens: Token[],
+    private readonly meta: DtaMeta,
+  ) {
+    this.byName = new Map(meta.variables.map((v) => [v.name, v.index]));
+  }
+
+  private peek(): Token {
+    return this.tokens[this.pos];
+  }
+
+  private isOp(...values: string[]): boolean {
+    const t = this.peek();
+    return t.kind === "op" && values.includes(t.value);
+  }
+
+  private takeOp(...values: string[]): string | undefined {
+    const t = this.peek();
+    if (t.kind === "op" && values.includes(t.value)) {
+      this.pos += 1;
+      return t.value;
+    }
+    return undefined;
+  }
+
+  private expectOp(value: string): void {
+    if (!this.takeOp(value)) throw new DtaFilterError("invalid syntax");
+  }
+
+  parse(): Node {
+    const node = this.or();
+    if (this.peek().kind !== "end") throw new DtaFilterError("invalid syntax");
+    return node;
+  }
+
+  private or(): Node {
+    let left = this.and();
+    while (this.takeOp("|")) {
+      const a = wantNum(left);
+      const b = wantNum(this.and());
+      left = num((r, n) => bool(a(r, n) !== 0 || b(r, n) !== 0));
+    }
+    return left;
+  }
+
+  private and(): Node {
+    let left = this.relational();
+    while (this.takeOp("&")) {
+      const a = wantNum(left);
+      const b = wantNum(this.relational());
+      left = num((r, n) => bool(a(r, n) !== 0 && b(r, n) !== 0));
+    }
+    return left;
+  }
+
+  private relational(): Node {
+    let left = this.additive();
+    for (;;) {
+      const op = this.takeOp("==", "!=", "~=", ">=", "<=", ">", "<", "=");
+      if (!op) return left;
+      const right = this.additive();
+      if (left.type !== right.type) throw new DtaFilterError("type mismatch");
+      left = compare(op, left, right);
+    }
+  }
+
+  private additive(): Node {
+    let left = this.multiplicative();
+    for (;;) {
+      const op = this.takeOp("+", "-");
+      if (!op) return left;
+      const right = this.multiplicative();
+      if (op === "+" && left.type === "str") {
+        const a = left.fn;
+        const b = wantStr(right);
+        left = str((r, n) => a(r, n) + b(r, n));
+        continue;
+      }
+      const a = wantNum(left);
+      const b = wantNum(right);
+      left = binaryArith(a, b, op === "+" ? (x, y) => x + y : (x, y) => x - y);
+    }
+  }
+
+  private multiplicative(): Node {
+    let left = this.negation();
+    for (;;) {
+      const op = this.takeOp("*", "/");
+      if (!op) return left;
+      const a = wantNum(left);
+      const b = wantNum(this.negation());
+      left = binaryArith(a, b, op === "*" ? (x, y) => x * y : (x, y) => x / y);
+    }
+  }
+
+  private negation(): Node {
+    if (this.takeOp("-")) {
+      const a = wantNum(this.negation());
+      return num((r, n) => {
+        const x = a(r, n);
+        return isMissingKey(x) ? SYSMISS : -x;
+      });
+    }
+    if (this.takeOp("+")) return this.negation();
+    return this.power();
+  }
+
+  private power(): Node {
+    let left = this.not();
+    while (this.takeOp("^")) {
+      const a = wantNum(left);
+      const b = wantNum(this.isOp("-", "+") ? this.negation() : this.not());
+      left = binaryArith(a, b, (x, y) => x ** y);
+    }
+    return left;
+  }
+
+  private not(): Node {
+    if (this.takeOp("!", "~")) {
+      const a = wantNum(this.not());
+      return num((r, n) => bool(a(r, n) === 0));
+    }
+    return this.primary();
+  }
+
+  private primary(): Node {
+    const t = this.peek();
+    if (t.kind === "num") {
+      this.pos += 1;
+      const value = t.value;
+      return num(() => value);
+    }
+    if (t.kind === "str") {
+      this.pos += 1;
+      const text = t.value;
+      if (this.takeOp(":")) return this.labelledValue(text);
+      return str(() => text);
+    }
+    if (t.kind === "op" && t.value === "(") {
+      this.pos += 1;
+      const inner = this.or();
+      this.expectOp(")");
+      return inner;
+    }
+    if (t.kind === "name") {
+      this.pos += 1;
+      if (this.takeOp("(")) return this.call(t.value);
+      return this.variable(t.value);
+    }
+    throw new DtaFilterError("invalid syntax");
+  }
+
+  /** `"South":regionlbl` — the number that value label maps to that text. */
+  private labelledValue(text: string): Node {
+    const t = this.peek();
+    if (t.kind !== "name") throw new DtaFilterError("invalid syntax");
+    this.pos += 1;
+    const table = this.meta.valueLabels.get(t.value);
+    if (!table) throw new DtaFilterError(`value label ${t.value} not found`);
+    let value = SYSMISS;
+    for (const [key, label] of table) {
+      if (label === text) {
+        // Extended missing values are stored above the largest long.
+        value = key >= 2147483621 ? MISSING_BASE + (key - 2147483621) * MISSING_STEP : key;
+        break;
+      }
+    }
+    return num(() => value);
+  }
+
+  private call(name: string): Node {
+    const args: Node[] = [];
+    if (!this.takeOp(")")) {
+      do {
+        args.push(this.or());
+      } while (this.takeOp(","));
+      this.expectOp(")");
+    }
+    const builder = Object.prototype.hasOwnProperty.call(FUNCTIONS, name)
+      ? FUNCTIONS[name]
+      : undefined;
+    if (!builder) throw new DtaFilterError(`unknown function ${name}()`);
+    return builder(args);
+  }
+
+  private variable(name: string): Node {
+    if (name === "_n") return num((_r, n) => n);
+    if (name === "_N") {
+      const total = this.meta.nObs;
+      return num(() => total);
+    }
+    const index = this.byName.get(name);
+    if (index === undefined) throw new DtaFilterError(`${name} not found`);
+    let slot = this.slots.get(index);
+    if (slot === undefined) {
+      slot = this.columns.length;
+      this.columns.push(index);
+      this.slots.set(index, slot);
+    }
+    const at = slot;
+    const kind = this.meta.variables[index].kind;
+    if (kind === "str" || kind === "strL") return str((r) => r[at] as string);
+    if (kind === "alias") throw new DtaFilterError(`${name} is an alias variable and holds no data`);
+    return num((r) => numericKey(r[at]));
+  }
+}
+
+function binaryArith(a: NumFn, b: NumFn, f: (x: number, y: number) => number): Node {
+  return num((r, n) => {
+    const x = a(r, n);
+    const y = b(r, n);
+    return isMissingKey(x) || isMissingKey(y) ? SYSMISS : arith(f(x, y));
+  });
+}
+
+function compare(op: string, left: Node, right: Node): Node {
+  // Both sides have the same type; JS relational operators give Stata's
+  // ordering for the missing-value encoding and for strings alike.
+  const a = left.fn as (r: Row, n: number) => number | string;
+  const b = right.fn as (r: Row, n: number) => number | string;
+  switch (op) {
+    case "==":
+    case "=":
+      return num((r, n) => bool(a(r, n) === b(r, n)));
+    case "!=":
+    case "~=":
+      return num((r, n) => bool(a(r, n) !== b(r, n)));
+    case ">":
+      return num((r, n) => bool(a(r, n) > b(r, n)));
+    case ">=":
+      return num((r, n) => bool(a(r, n) >= b(r, n)));
+    case "<":
+      return num((r, n) => bool(a(r, n) < b(r, n)));
+    default:
+      return num((r, n) => bool(a(r, n) <= b(r, n)));
+  }
+}
+
+/**
+ * Compile a Stata `if` expression against a dataset's variables. Throws
+ * {@link DtaFilterError} with a Stata-style message when the expression is
+ * malformed, names an unknown variable, or mixes strings and numbers.
+ */
+export function compileFilter(expression: string, meta: DtaMeta): CompiledFilter {
+  // Accept a pasted `if age > 60` as well as the bare expression.
+  const source = expression.replace(/^\s*if\b/, "");
+  if (source.trim() === "") throw new DtaFilterError("empty expression");
+  const parser = new Parser(tokenize(source), meta);
+  const root = parser.parse();
+  const fn = wantNum(root);
+  return {
+    columns: parser.columns,
+    test: (cells, obs) => fn(cells, obs) !== 0,
+  };
+}

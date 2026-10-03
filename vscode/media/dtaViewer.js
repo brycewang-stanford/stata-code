@@ -1,9 +1,9 @@
 // Webview side of the Stata .dta viewer: a virtual grid plus a variables panel.
 //
-// The extension host owns the file and all value formatting. This script only
-// asks for blocks of already-formatted cells ("rows" messages) and draws the
-// part of the dataset that is on screen, so a file with millions of
-// observations costs the same as a small one.
+// The extension host owns the file, the filter/sort row order, and all value
+// formatting. This script asks for blocks of already-formatted cells ("rows"
+// messages) for the part of the view that is on screen and draws them, so a
+// file with millions of observations costs the same as a small one.
 (function () {
   "use strict";
 
@@ -17,6 +17,9 @@
   const MAX_CACHED_BLOCKS = 400;
   const MAX_LISTED_VARS = 2000;
   const CELL_PAD = 17; // horizontal padding + border of a cell, in px
+  const MIN_COL_W = 36;
+  /** Above this many observations a summary is computed on request, not on select. */
+  const AUTO_SUMMARY_ROWS = 500000;
   const MISSING = /^\.[a-z]?$/;
 
   const $ = (id) => document.getElementById(id);
@@ -25,6 +28,15 @@
     labels: $("labels"),
     goto: $("goto"),
     toggleSide: $("toggle-side"),
+    menuButton: $("menu-button"),
+    menu: $("menu"),
+    exportCsv: $("export-csv"),
+    exportCodebook: $("export-codebook"),
+    loadStata: $("load-stata"),
+    filter: $("filter-expr"),
+    filterClear: $("filter-clear"),
+    queryStatus: $("query-status"),
+    sortChips: $("sort-chips"),
     warnings: $("warnings"),
     main: $("main"),
     head: $("head"),
@@ -34,11 +46,12 @@
     cells: $("cells"),
     empty: $("empty"),
     side: $("side"),
-    filter: $("filter"),
+    varFilter: $("filter"),
     varlist: $("varlist"),
     detail: $("detail"),
     where: $("where"),
     value: $("value"),
+    notice: $("notice"),
     fatal: $("fatal"),
   };
 
@@ -49,16 +62,39 @@
   let colWidth = [];
   let totalWidth = 0;
   let colChunk = 1;
+  let charWidth = 7.2;
   /** Per value-label name: the set of label texts, to tell labels from numbers. */
   let labelTexts = {};
-  let sel = { row: -1, col: -1 };
-  /** Bumped on every (re)load so replies to an older file are dropped. */
+
+  /** Rows in the current view (after the filter); equals init.nObs when unfiltered. */
+  let viewRows = 0;
+  /** True when the view is filtered or sorted, so rows carry their own obs numbers. */
+  let reordered = false;
+  let sortKeys = [];
+  /**
+   * The sort most recently asked for. Differs from `sortKeys` only while a
+   * query is in flight, so a second click builds on the first, not on the
+   * stale applied state.
+   */
+  let wantedSort = [];
+  let appliedFilter = "";
+  let queryPending = false;
+
+  /** Selection: `anchor` is where it started, `focus` where it ends. row -1 = whole column. */
+  let anchor = { row: -1, col: -1 };
+  let focus = { row: -1, col: -1 };
+  let dragging = false;
+
+  /** Bumped whenever cached cells stop being valid (reload, new view). */
   let generation = 0;
   let nextRequestId = 1;
-  const cache = new Map();
-  const pending = new Map(); // request id → cache key
-  const inFlight = new Set(); // cache keys
+  const cache = new Map(); // key → { rows, obs }
+  const pending = new Map(); // request id → { key, generation }
+  const inFlight = new Set();
   let renderQueued = false;
+  /** Column summaries for the current view, by column index. */
+  const summaries = new Map();
+  let noticeTimer;
 
   el.labels.checked = useLabels;
   if (saved.sideHidden) el.side.hidden = true;
@@ -92,29 +128,40 @@
     return width > 0 ? width : 7.2;
   }
 
-  // ── load ────────────────────────────────────────────────────────────────
-
-  function load(message) {
-    init = message;
+  function invalidateCells() {
     generation += 1;
     cache.clear();
     pending.clear();
     inFlight.clear();
+  }
 
-    const charWidth = measureCharWidth();
+  function recomputeColumns() {
     colLeft = [];
-    colWidth = [];
     let x = 0;
-    for (const v of init.variables) {
-      const w = Math.ceil(v.width * charWidth) + CELL_PAD;
+    for (const w of colWidth) {
       colLeft.push(x);
-      colWidth.push(w);
       x += w;
     }
     totalWidth = x;
-    // Row numbers print with thousands separators; size the gutter to the last one.
-    const gutter = Math.max(44, Math.ceil(group(init.nObs).length * charWidth) + 18);
-    document.documentElement.style.setProperty("--gutter-w", gutter + "px");
+  }
+
+  // ── load ────────────────────────────────────────────────────────────────
+
+  function load(message) {
+    const sameShape =
+      init !== null &&
+      init.nVars === message.nVars &&
+      init.variables.every((v, i) => v.name === message.variables[i].name);
+    init = message;
+    invalidateCells();
+    summaries.clear();
+
+    charWidth = measureCharWidth();
+    // Keep hand-resized column widths across a reload of the same dataset.
+    if (!sameShape) {
+      colWidth = init.variables.map((v) => Math.ceil(v.width * charWidth) + CELL_PAD);
+    }
+    recomputeColumns();
     colChunk = init.nVars <= 64 ? Math.max(1, init.nVars) : 32;
 
     labelTexts = {};
@@ -122,14 +169,20 @@
       labelTexts[name] = new Set(init.valueLabels[name].map((entry) => entry[1]));
     }
 
-    if (sel.row >= init.nObs) sel.row = -1;
-    if (sel.col >= init.nVars) sel.col = -1;
+    viewRows = init.nObs;
+    reordered = false;
+    if (!sameShape) {
+      anchor = { row: -1, col: -1 };
+      focus = { row: -1, col: -1 };
+      sortKeys = [];
+      wantedSort = [];
+    }
+    clampSelection();
 
     el.fatal.hidden = true;
     el.main.hidden = false;
-    el.goto.max = String(init.nObs);
-    el.goto.disabled = init.nObs === 0;
     el.labels.disabled = Object.keys(init.valueLabels).length === 0;
+    el.loadStata.hidden = !init.canLoadInStata;
 
     renderSummary();
     renderWarnings();
@@ -138,6 +191,37 @@
     layout();
     render();
     updateStatus();
+  }
+
+  /** The host finished a filter/sort (or a reload): `message.rows` rows are in view. */
+  function applyView(message) {
+    queryPending = false;
+    invalidateCells();
+    summaries.clear();
+    viewRows = message.rows;
+    appliedFilter = message.filter || "";
+    sortKeys = Array.isArray(message.sort) ? message.sort : [];
+    wantedSort = sortKeys;
+    reordered = appliedFilter !== "" || sortKeys.length > 0;
+    if (el.filter.value.trim() === "" || document.activeElement !== el.filter) {
+      el.filter.value = appliedFilter;
+    }
+    el.filter.classList.remove("bad");
+    clampSelection();
+    renderQueryStatus();
+    renderSortChips();
+    layout();
+    el.scroller.scrollTop = 0;
+    render();
+    renderDetail();
+    updateStatus();
+  }
+
+  function clampSelection() {
+    for (const p of [anchor, focus]) {
+      if (p.row >= viewRows) p.row = viewRows - 1;
+      if (init && p.col >= init.nVars) p.col = init.nVars - 1;
+    }
   }
 
   function renderSummary() {
@@ -156,20 +240,89 @@
     el.warnings.innerHTML = init.warnings.map((w) => "<div>" + esc(w) + "</div>").join("");
   }
 
+  function renderQueryStatus(error) {
+    el.goto.max = String(viewRows);
+    el.goto.disabled = viewRows === 0;
+    el.filterClear.hidden = appliedFilter === "" && el.filter.value.trim() === "";
+    if (error) {
+      el.queryStatus.textContent = error;
+      el.queryStatus.className = "bad";
+      return;
+    }
+    el.queryStatus.className = "";
+    if (queryPending) {
+      el.queryStatus.textContent = "Working…";
+    } else if (appliedFilter !== "") {
+      el.queryStatus.textContent = group(viewRows) + " of " + group(init.nObs) + " obs";
+    } else {
+      el.queryStatus.textContent = "";
+    }
+  }
+
+  function renderSortChips() {
+    if (sortKeys.length === 0) {
+      el.sortChips.innerHTML = "";
+      return;
+    }
+    const names = sortKeys
+      .map((k) => esc(init.variables[k.column].name) + (k.descending ? " ↓" : " ↑"))
+      .join(", ");
+    el.sortChips.innerHTML =
+      '<span class="chip">sorted by ' +
+      names +
+      ' <button type="button" id="sort-clear" title="Clear sort" aria-label="Clear sort">×</button></span>';
+  }
+
+  // ── queries ─────────────────────────────────────────────────────────────
+
+  function sendQuery(filter, sort) {
+    wantedSort = sort;
+    queryPending = true;
+    renderQueryStatus();
+    vscode.postMessage({ type: "query", filter, sort });
+  }
+
+  function applyFilterInput() {
+    sendQuery(el.filter.value.trim(), wantedSort);
+  }
+
+  function cycleSort(col, additive) {
+    const current = wantedSort;
+    const existing = current.find((k) => k.column === col);
+    let next;
+    if (!existing) {
+      const key = { column: col, descending: false };
+      next = additive ? current.concat([key]) : [key];
+    } else if (!existing.descending) {
+      const flipped = { column: col, descending: true };
+      next = additive ? current.map((k) => (k.column === col ? flipped : k)) : [flipped];
+    } else {
+      next = additive ? current.filter((k) => k.column !== col) : [];
+    }
+    sendQuery(appliedFilter, next);
+  }
+
   // ── grid ────────────────────────────────────────────────────────────────
 
   function totalRowsPx() {
-    return init.nObs * ROW_H;
+    return viewRows * ROW_H;
   }
 
   function layout() {
     const height = Math.min(totalRowsPx(), MAX_SCROLL_PX);
     el.sizer.style.width = Math.max(1, totalWidth) + "px";
     el.sizer.style.height = Math.max(1, height) + "px";
-    const blank = init.nObs === 0 || init.nVars === 0;
+    // Row numbers print with thousands separators; size the gutter to the largest.
+    const gutter = Math.max(44, Math.ceil(group(init.nObs).length * charWidth) + 18);
+    document.documentElement.style.setProperty("--gutter-w", gutter + "px");
+    const blank = viewRows === 0 || init.nVars === 0;
     el.empty.style.display = blank ? "flex" : "none";
     el.empty.textContent =
-      init.nVars === 0 ? "This dataset has no variables." : "This dataset has no observations.";
+      init.nVars === 0
+        ? "This dataset has no variables."
+        : init.nObs === 0
+          ? "This dataset has no observations."
+          : "No observations match the filter.";
   }
 
   /** First visible row and the pixel offset of its top edge above the viewport. */
@@ -182,13 +335,13 @@
       return { first, offset: scrollTop - first * ROW_H, viewH };
     }
     // Proportional mapping: the scrollbar spans the whole dataset even though
-    // the scrollable element is far shorter than nObs * ROW_H. Rows snap to
+    // the scrollable element is far shorter than viewRows * ROW_H. Rows snap to
     // whole-row positions; at the very end the last row is bottom-aligned.
     const maxScroll = Math.max(1, MAX_SCROLL_PX - viewH);
     const fraction = Math.min(1, Math.max(0, scrollTop / maxScroll));
-    const maxFirst = Math.max(0, init.nObs - Math.floor(viewH / ROW_H));
+    const maxFirst = Math.max(0, viewRows - Math.floor(viewH / ROW_H));
     const first = Math.round(fraction * maxFirst);
-    const offset = first === maxFirst ? Math.max(0, (init.nObs - first) * ROW_H - viewH) : 0;
+    const offset = first === maxFirst ? Math.max(0, (viewRows - first) * ROW_H - viewH) : 0;
     return { first, offset, viewH };
   }
 
@@ -207,17 +360,27 @@
     return (useLabels ? "L" : "C") + ":" + block + ":" + chunk;
   }
 
-  function cellText(row, col) {
+  function blockFor(row, col) {
     const block = Math.floor(row / BLOCK);
     const chunk = Math.floor(col / colChunk);
     const key = cacheKey(block, chunk);
     const entry = cache.get(key);
-    if (!entry) {
-      request(key, block, chunk);
-      return undefined;
-    }
-    const r = entry[row - block * BLOCK];
+    if (!entry) request(key, block, chunk);
+    return { entry, block, chunk };
+  }
+
+  function cellText(row, col) {
+    const { entry, block, chunk } = blockFor(row, col);
+    if (!entry) return undefined;
+    const r = entry.rows[row - block * BLOCK];
     return r ? r[col - chunk * colChunk] : undefined;
+  }
+
+  /** The observation number to show in the gutter for view row `row`. */
+  function obsNumber(row) {
+    if (!reordered) return row + 1;
+    const { entry, block } = blockFor(row, 0);
+    return entry && entry.obs ? entry.obs[row - block * BLOCK] : undefined;
   }
 
   function request(key, block, chunk) {
@@ -241,7 +404,7 @@
     pending.delete(message.id);
     if (!req || req.generation !== generation) return;
     inFlight.delete(req.key);
-    cache.set(req.key, message.rows);
+    cache.set(req.key, { rows: message.rows, obs: message.obs });
     if (cache.size > MAX_CACHED_BLOCKS) {
       // Map iterates in insertion order: drop the oldest blocks.
       const excess = cache.size - MAX_CACHED_BLOCKS;
@@ -264,6 +427,18 @@
     });
   }
 
+  function selectionBounds() {
+    if (focus.col < 0) return null;
+    const wholeColumns = anchor.row < 0 || focus.row < 0;
+    return {
+      r0: wholeColumns ? 0 : Math.min(anchor.row, focus.row),
+      r1: wholeColumns ? viewRows - 1 : Math.max(anchor.row, focus.row),
+      c0: Math.min(anchor.col, focus.col),
+      c1: Math.max(anchor.col, focus.col),
+      wholeColumns,
+    };
+  }
+
   function render() {
     if (!init) return;
     const viewW = el.scroller.clientWidth;
@@ -282,16 +457,23 @@
     const c0 = firstVisibleColumn(scrollLeft);
     let c1 = c0;
     while (c1 < init.nVars && colLeft[c1] < scrollLeft + viewW) c1 += 1;
-    const r1 = Math.min(init.nObs, first + Math.ceil((viewH + offset) / ROW_H));
+    const r1 = Math.min(viewRows, first + Math.ceil((viewH + offset) / ROW_H));
+    const bounds = selectionBounds();
 
     let head = "";
     for (let c = c0; c < c1; c++) {
       const v = init.variables[c];
       const tip = [v.name, v.type + " " + v.format, v.label].filter(Boolean).join("\n");
+      const sortAt = sortKeys.findIndex((k) => k.column === c);
+      const arrow =
+        sortAt < 0
+          ? "⇅"
+          : (sortKeys[sortAt].descending ? "↓" : "↑") + (sortKeys.length > 1 ? sortAt + 1 : "");
       head +=
         '<div class="h' +
         (v.numeric ? " num" : "") +
-        (c === sel.col ? " sel" : "") +
+        (bounds && c >= bounds.c0 && c <= bounds.c1 ? " sel" : "") +
+        (sortAt >= 0 ? " sorted" : "") +
         '" data-c="' +
         c +
         '" style="left:' +
@@ -304,7 +486,15 @@
         esc(v.name) +
         '</span><span class="l">' +
         (v.label ? esc(v.label) : "&nbsp;") +
-        "</span></div>";
+        '</span><button type="button" class="s" data-sort="' +
+        c +
+        '" title="Sort (Shift-click to add a key)" aria-label="Sort by ' +
+        esc(v.name) +
+        '">' +
+        arrow +
+        '</button><span class="rz" data-resize="' +
+        c +
+        '"></span></div>';
     }
     el.head.innerHTML = head;
 
@@ -312,7 +502,15 @@
     let cells = "";
     for (let r = first; r < r1; r++) {
       const top = (r - first) * ROW_H - offset;
-      gutter += '<div class="g" style="top:' + top + 'px">' + group(r + 1) + "</div>";
+      const obs = obsNumber(r);
+      gutter +=
+        '<div class="g' +
+        (bounds && !bounds.wholeColumns && r >= bounds.r0 && r <= bounds.r1 ? " sel" : "") +
+        '" style="top:' +
+        top +
+        'px">' +
+        (obs === undefined ? "" : group(obs)) +
+        "</div>";
       for (let c = c0; c < c1; c++) {
         const v = init.variables[c];
         const text = cellText(r, c);
@@ -321,8 +519,11 @@
         if (text === undefined) cls += " wait";
         else if (v.numeric && MISSING.test(text)) cls += " miss";
         else if (useLabels && v.valueLabel && labelTexts[v.valueLabel]?.has(text)) cls += " lab";
-        if (r === sel.row && c === sel.col) cls += " sel";
-        else if (c === sel.col) cls += " colsel";
+        if (bounds && c >= bounds.c0 && c <= bounds.c1) {
+          if (r === focus.row && c === focus.col) cls += " sel";
+          else if (bounds.wholeColumns) cls += " colsel";
+          else if (r >= bounds.r0 && r <= bounds.r1) cls += " range";
+        }
         cells +=
           '<div class="' +
           cls +
@@ -378,13 +579,17 @@
     }
     const viewH = s.clientHeight;
     const maxScroll = Math.max(1, MAX_SCROLL_PX - viewH);
-    const maxFirst = Math.max(1, init.nObs - Math.floor(viewH / ROW_H));
+    const maxFirst = Math.max(1, viewRows - Math.floor(viewH / ROW_H));
     s.scrollTop = Math.ceil((Math.min(row, maxFirst) / maxFirst) * maxScroll);
   }
 
-  function select(row, col, reveal) {
-    const colChanged = col !== sel.col;
-    sel = { row, col };
+  /** Move the selection. With `extend`, the anchor stays and a range forms. */
+  function select(row, col, options) {
+    const reveal = options && options.reveal;
+    const extend = options && options.extend && anchor.col >= 0;
+    const colChanged = col !== focus.col;
+    focus = { row, col };
+    if (!extend) anchor = { row, col };
     if (reveal) ensureVisible(row, col);
     if (colChanged) {
       markSelectedVariable();
@@ -395,27 +600,71 @@
   }
 
   function updateStatus() {
-    if (!init || sel.col < 0) {
+    if (!init || focus.col < 0) {
       el.where.textContent = "";
       el.value.textContent = "";
       return;
     }
-    const v = init.variables[sel.col];
-    if (sel.row < 0) {
+    const v = init.variables[focus.col];
+    const bounds = selectionBounds();
+    if (focus.row < 0) {
       el.where.textContent = v.name;
       el.value.textContent = v.label;
       return;
     }
-    el.where.textContent = v.name + "[" + group(sel.row + 1) + "]";
-    const text = cellText(sel.row, sel.col);
+    const obs = obsNumber(focus.row);
+    el.where.textContent = v.name + "[" + (obs === undefined ? "…" : group(obs)) + "]";
+    const many = bounds && (bounds.r1 > bounds.r0 || bounds.c1 > bounds.c0);
+    if (many) {
+      el.value.textContent =
+        group(bounds.r1 - bounds.r0 + 1) + " × " + group(bounds.c1 - bounds.c0 + 1) + " cells selected";
+      el.value.title = "";
+      return;
+    }
+    const text = cellText(focus.row, focus.col);
     el.value.textContent = text === undefined ? "" : text;
     el.value.title = text === undefined ? "" : text;
+  }
+
+  function copySelection(headers) {
+    const bounds = selectionBounds();
+    if (!bounds || viewRows === 0) return;
+    const single = !bounds.wholeColumns && bounds.r0 === bounds.r1 && bounds.c0 === bounds.c1;
+    if (single && !headers) {
+      const text = cellText(bounds.r0, bounds.c0);
+      if (text !== undefined) {
+        vscode.postMessage({ type: "copy", text });
+        showNotice("Copied");
+      }
+      return;
+    }
+    vscode.postMessage({
+      type: "copyRange",
+      firstRow: bounds.r0,
+      lastRow: bounds.r1,
+      firstColumn: bounds.c0,
+      lastColumn: bounds.c1,
+      useLabels,
+      headers,
+    });
+  }
+
+  function showNotice(text, isError) {
+    el.notice.textContent = text;
+    el.notice.className = isError ? "bad" : "";
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(
+      () => {
+        el.notice.textContent = "";
+      },
+      isError ? 8000 : 3000,
+    );
   }
 
   // ── variables panel ─────────────────────────────────────────────────────
 
   function renderVarList() {
-    const needle = el.filter.value.trim().toLowerCase();
+    const needle = el.varFilter.value.trim().toLowerCase();
     let html = "";
     let shown = 0;
     let matched = 0;
@@ -433,7 +682,7 @@
       shown += 1;
       html +=
         '<div class="v' +
-        (c === sel.col ? " sel" : "") +
+        (c === focus.col ? " sel" : "") +
         '" data-c="' +
         c +
         '"><span class="n">' +
@@ -457,8 +706,8 @@
 
   function markSelectedVariable() {
     for (const node of el.varlist.querySelectorAll(".v.sel")) node.classList.remove("sel");
-    if (sel.col < 0) return;
-    const node = el.varlist.querySelector('.v[data-c="' + sel.col + '"]');
+    if (focus.col < 0) return;
+    const node = el.varlist.querySelector('.v[data-c="' + focus.col + '"]');
     if (node) {
       node.classList.add("sel");
       node.scrollIntoView({ block: "nearest" });
@@ -469,8 +718,58 @@
     return text ? "<dt>" + esc(term) + "</dt><dd>" + esc(text) + "</dd>" : "";
   }
 
+  function summaryHtml(col) {
+    const state = summaries.get(col);
+    const scope = appliedFilter !== "" ? " (filtered rows)" : "";
+    if (!state) {
+      if (init.nObs > AUTO_SUMMARY_ROWS) {
+        return (
+          "<h4>Summary</h4><p><button type=\"button\" id=\"summarize\">Summarize " +
+          group(viewRows) +
+          " rows</button></p>"
+        );
+      }
+      requestSummary(col);
+      return "<h4>Summary" + scope + "</h4><p class=\"dim\">Computing…</p>";
+    }
+    if (state === "pending") return "<h4>Summary" + scope + "</h4><p class=\"dim\">Computing…</p>";
+    if (state.error) return "<h4>Summary</h4><p class=\"bad\">" + esc(state.error) + "</p>";
+    let html = "<h4>Summary" + scope + "</h4><dl>";
+    for (const pair of state.stats) html += row(pair[0], pair[1]);
+    html += "</dl>";
+    if (state.frequencies.length) {
+      html += "<h4>Most frequent</h4><table class=\"freq\">";
+      for (const f of state.frequencies) {
+        const shown = f.label || (f.value === "" ? "(empty)" : f.value);
+        html +=
+          '<tr data-filter="' +
+          esc(f.filter) +
+          '" title="Filter to ' +
+          esc(f.filter) +
+          '"><td>' +
+          esc(f.count) +
+          "</td><td>" +
+          esc(f.share) +
+          "</td><td>" +
+          esc(shown) +
+          (f.label ? ' <span class="dim">' + esc(f.value) + "</span>" : "") +
+          "</td></tr>";
+      }
+      html += "</table>";
+      if (state.frequenciesOmitted > 0) {
+        html += '<p class="dim">' + group(state.frequenciesOmitted) + " more values</p>";
+      }
+    }
+    return html;
+  }
+
+  function requestSummary(col) {
+    summaries.set(col, "pending");
+    vscode.postMessage({ type: "summary", column: col });
+  }
+
   function renderDetail() {
-    if (sel.col < 0) {
+    if (focus.col < 0) {
       let html = "<h3>" + esc(init.title) + "</h3><dl>";
       html += row("Label", init.dataLabel);
       html += row("Saved", init.timestamp);
@@ -483,7 +782,7 @@
       el.detail.innerHTML = html;
       return;
     }
-    const v = init.variables[sel.col];
+    const v = init.variables[focus.col];
     let html = "<h3>" + esc(v.name) + "</h3><dl>";
     html += row("Label", v.label);
     html += row("Type", v.type);
@@ -493,9 +792,10 @@
     if (v.notes.length) {
       html += "<h4>Notes</h4>" + v.notes.map((n) => "<p>" + esc(n) + "</p>").join("");
     }
+    if (v.type !== "alias" && viewRows > 0) html += summaryHtml(focus.col);
     const entries = v.valueLabel ? init.valueLabels[v.valueLabel] : undefined;
     if (entries) {
-      html += "<h4>Values</h4><table>";
+      html += "<h4>Value label</h4><table>";
       for (const entry of entries) {
         html += "<tr><td>" + esc(entry[0]) + "</td><td>" + esc(entry[1]) + "</td></tr>";
       }
@@ -504,7 +804,7 @@
         html += "<p>(list cut at " + group(entries.length) + " entries)</p>";
       }
     } else if (v.valueLabel) {
-      html += "<h4>Values</h4><p>The file does not define this value label.</p>";
+      html += "<h4>Value label</h4><p>The file does not define this value label.</p>";
     }
     el.detail.innerHTML = html;
   }
@@ -515,15 +815,71 @@
   new ResizeObserver(queueRender).observe(el.scroller);
 
   el.cells.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
     const cell = event.target.closest(".c");
     if (!cell) return;
-    select(Number(cell.dataset.r), Number(cell.dataset.c), false);
+    dragging = true;
+    select(Number(cell.dataset.r), Number(cell.dataset.c), { extend: event.shiftKey });
+  });
+  el.cells.addEventListener("mouseover", (event) => {
+    if (!dragging) return;
+    const cell = event.target.closest(".c");
+    if (!cell) return;
+    const r = Number(cell.dataset.r);
+    const c = Number(cell.dataset.c);
+    if (r !== focus.row || c !== focus.col) select(r, c, { extend: true });
+  });
+  window.addEventListener("mouseup", () => {
+    dragging = false;
+  });
+
+  // Column resize: drag the right edge of a header.
+  let resizing = null;
+  el.head.addEventListener("mousedown", (event) => {
+    const handle = event.target.closest("[data-resize]");
+    if (!handle) return;
+    const col = Number(handle.dataset.resize);
+    resizing = { col, startX: event.clientX, startW: colWidth[col] };
+    document.body.classList.add("resizing");
+    event.preventDefault();
+  });
+  window.addEventListener("mousemove", (event) => {
+    if (!resizing) return;
+    colWidth[resizing.col] = Math.max(MIN_COL_W, resizing.startW + event.clientX - resizing.startX);
+    recomputeColumns();
+    el.sizer.style.width = Math.max(1, totalWidth) + "px";
+    queueRender();
+  });
+  window.addEventListener("mouseup", () => {
+    if (!resizing) return;
+    resizing = null;
+    document.body.classList.remove("resizing");
+  });
+  // Double-click the edge to fit the column to the cells on screen.
+  el.head.addEventListener("dblclick", (event) => {
+    const handle = event.target.closest("[data-resize]");
+    if (!handle) return;
+    const col = Number(handle.dataset.resize);
+    let chars = init.variables[col].name.length;
+    for (const cell of el.cells.querySelectorAll('.c[data-c="' + col + '"]')) {
+      chars = Math.max(chars, cell.textContent.length);
+    }
+    colWidth[col] = Math.max(MIN_COL_W, Math.ceil(Math.min(chars, 80) * charWidth) + CELL_PAD + 14);
+    recomputeColumns();
+    el.sizer.style.width = Math.max(1, totalWidth) + "px";
+    queueRender();
   });
 
   el.head.addEventListener("click", (event) => {
+    if (event.target.closest("[data-resize]")) return;
+    const sort = event.target.closest("[data-sort]");
+    if (sort) {
+      cycleSort(Number(sort.dataset.sort), event.shiftKey);
+      return;
+    }
     const header = event.target.closest(".h");
     if (!header) return;
-    select(-1, Number(header.dataset.c), false);
+    select(-1, Number(header.dataset.c), { extend: event.shiftKey });
   });
 
   // The header strip is not itself scrollable; pass horizontal wheel through.
@@ -546,11 +902,24 @@
     const item = event.target.closest(".v[data-c]");
     if (!item) return;
     const col = Number(item.dataset.c);
-    select(sel.row, col, false);
+    select(focus.row, col);
     ensureVisible(-1, col);
   });
 
-  el.filter.addEventListener("input", renderVarList);
+  el.varFilter.addEventListener("input", renderVarList);
+
+  el.detail.addEventListener("click", (event) => {
+    if (event.target.id === "summarize" && focus.col >= 0) {
+      requestSummary(focus.col);
+      renderDetail();
+      return;
+    }
+    const freq = event.target.closest("tr[data-filter]");
+    if (freq) {
+      el.filter.value = freq.dataset.filter;
+      applyFilterInput();
+    }
+  });
 
   el.labels.addEventListener("change", () => {
     useLabels = el.labels.checked;
@@ -566,13 +935,57 @@
     queueRender();
   });
 
+  // Filter bar.
+  el.filter.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") applyFilterInput();
+    else if (event.key === "Escape") {
+      el.filter.value = appliedFilter;
+      el.filter.classList.remove("bad");
+      renderQueryStatus();
+    }
+  });
+  el.filter.addEventListener("input", () => {
+    el.filterClear.hidden = appliedFilter === "" && el.filter.value.trim() === "";
+  });
+  el.filterClear.addEventListener("click", () => {
+    el.filter.value = "";
+    sendQuery("", wantedSort);
+  });
+  el.sortChips.addEventListener("click", (event) => {
+    if (event.target.id === "sort-clear") sendQuery(appliedFilter, []);
+  });
+
+  // "More" menu.
+  function closeMenu() {
+    el.menu.hidden = true;
+    el.menuButton.setAttribute("aria-expanded", "false");
+  }
+  el.menuButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    el.menu.hidden = !el.menu.hidden;
+    el.menuButton.setAttribute("aria-expanded", String(!el.menu.hidden));
+  });
+  document.addEventListener("click", closeMenu);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMenu();
+  });
+  el.exportCsv.addEventListener("click", () => {
+    vscode.postMessage({ type: "export", kind: "csv", useLabels });
+  });
+  el.exportCodebook.addEventListener("click", () => {
+    vscode.postMessage({ type: "export", kind: "codebook" });
+  });
+  el.loadStata.addEventListener("click", () => {
+    vscode.postMessage({ type: "loadInStata" });
+  });
+
   function goToRow() {
-    if (!init || init.nObs === 0) return;
+    if (!init || viewRows === 0) return;
     const wanted = Math.floor(Number(el.goto.value));
     if (!Number.isFinite(wanted) || wanted < 1) return;
-    const target = Math.min(init.nObs, wanted) - 1;
+    const target = Math.min(viewRows, wanted) - 1;
     scrollRowToTop(target);
-    select(target, sel.col >= 0 ? sel.col : 0, false);
+    select(target, focus.col >= 0 ? focus.col : 0);
     el.scroller.focus();
   }
   el.goto.addEventListener("change", goToRow);
@@ -581,18 +994,24 @@
   });
 
   el.scroller.addEventListener("keydown", (event) => {
-    if (!init || init.nObs === 0 || init.nVars === 0) return;
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
-      if (sel.row >= 0 && sel.col >= 0) {
-        const text = cellText(sel.row, sel.col);
-        if (text !== undefined) vscode.postMessage({ type: "copy", text });
-        event.preventDefault();
-      }
+    if (!init || viewRows === 0 || init.nVars === 0) return;
+    const mod = event.metaKey || event.ctrlKey;
+    if (mod && event.key.toLowerCase() === "c") {
+      copySelection(event.shiftKey);
+      event.preventDefault();
+      return;
+    }
+    if (mod && event.key.toLowerCase() === "a") {
+      anchor = { row: 0, col: 0 };
+      focus = { row: viewRows - 1, col: init.nVars - 1 };
+      render();
+      updateStatus();
+      event.preventDefault();
       return;
     }
     const page = Math.max(1, Math.floor(el.scroller.clientHeight / ROW_H) - 1);
-    let r = Math.max(0, sel.row);
-    let c = Math.max(0, sel.col);
+    let r = Math.max(0, focus.row);
+    let c = Math.max(0, focus.col);
     switch (event.key) {
       case "ArrowDown":
         r += 1;
@@ -613,34 +1032,61 @@
         r -= page;
         break;
       case "Home":
-        if (event.metaKey || event.ctrlKey) r = 0;
+        if (mod) r = 0;
         c = 0;
         break;
       case "End":
-        if (event.metaKey || event.ctrlKey) r = init.nObs - 1;
+        if (mod) r = viewRows - 1;
         c = init.nVars - 1;
         break;
       default:
         return;
     }
     event.preventDefault();
-    select(
-      Math.min(init.nObs - 1, Math.max(0, r)),
-      Math.min(init.nVars - 1, Math.max(0, c)),
-      true,
-    );
+    select(Math.min(viewRows - 1, Math.max(0, r)), Math.min(init.nVars - 1, Math.max(0, c)), {
+      reveal: true,
+      extend: event.shiftKey,
+    });
   });
 
   window.addEventListener("message", (event) => {
     const message = event.data;
     if (!message || typeof message.type !== "string") return;
-    if (message.type === "init") load(message);
-    else if (message.type === "rows") receive(message);
-    else if (message.type === "error") {
-      el.main.hidden = true;
-      el.fatal.hidden = false;
-      el.fatal.innerHTML =
-        "<h2>" + esc(message.title || "Cannot open this file") + "</h2><p>" + esc(message.message) + "</p>";
+    switch (message.type) {
+      case "init":
+        load(message);
+        break;
+      case "view":
+        if (init) applyView(message);
+        break;
+      case "queryError":
+        queryPending = false;
+        wantedSort = sortKeys;
+        el.filter.classList.add("bad");
+        renderQueryStatus(message.message);
+        break;
+      case "rows":
+        receive(message);
+        break;
+      case "summary":
+        summaries.set(message.column, message.error ? { error: message.error } : message.summary);
+        if (message.column === focus.col) renderDetail();
+        break;
+      case "notice":
+        showNotice(message.text, message.isError);
+        break;
+      case "error":
+        el.main.hidden = true;
+        el.fatal.hidden = false;
+        el.fatal.innerHTML =
+          "<h2>" +
+          esc(message.title || "Cannot open this file") +
+          "</h2><p>" +
+          esc(message.message) +
+          "</p>";
+        break;
+      default:
+        break;
     }
   });
 

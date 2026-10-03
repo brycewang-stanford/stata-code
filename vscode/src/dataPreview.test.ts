@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import {
   buildDataPreviewCode,
   buildDataSnapshotCode,
+  buildUseCode,
   clampPreviewObs,
   DEFAULT_DATA_PREVIEW_OBS,
   formatDataPreviewDocument,
@@ -115,6 +116,20 @@ describe("buildDataSnapshotCode", () => {
   test("clamps the row count", () => {
     assert.match(buildDataSnapshotCode("/tmp/s.dta", 0) ?? "", /_n <= 1,/);
     assert.match(buildDataSnapshotCode("/tmp/s.dta", 1e9) ?? "", /_n <= 100000,/);
+  });
+});
+
+describe("buildUseCode", () => {
+  test("quotes the path and clears", () => {
+    assert.equal(buildUseCode("/data/my survey.dta"), 'use "/data/my survey.dta", clear');
+    assert.equal(buildUseCode("C:\\data\\a.dta"), 'use "C:/data/a.dta", clear');
+  });
+
+  test("refuses paths Stata would macro-expand or that break the quoting", () => {
+    assert.equal(buildUseCode("/data/$x/a.dta"), undefined);
+    assert.equal(buildUseCode("/data/`x'/a.dta"), undefined);
+    assert.equal(buildUseCode('/data/a"b.dta'), undefined);
+    assert.equal(buildUseCode("/data/a.dta\nclear all"), undefined);
   });
 });
 

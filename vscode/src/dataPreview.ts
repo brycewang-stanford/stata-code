@@ -69,6 +69,15 @@ export function buildDataSnapshotCode(file: string, previewObs: number): string 
 }
 
 /**
+ * `use "<file>", clear` for a path on disk, or `undefined` when the path
+ * cannot sit safely inside a Stata string literal (same rule as the snapshot).
+ */
+export function buildUseCode(file: string): string | undefined {
+  if (/[`$"\r\n]/.test(file)) return undefined;
+  return `use "${file.replace(/\\/g, "/")}", clear`;
+}
+
+/**
  * Stata code for the preview listing.
  *
  * Uses `if _n <= N` rather than `in 1/N`: an `in` range whose upper bound

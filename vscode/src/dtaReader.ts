@@ -101,6 +101,10 @@ const DEFAULT_MAX_STRL_BYTES = 32768;
 /** Guard against a corrupt header asking for an absurd metadata read. */
 const MAX_METADATA_BYTES = 1 << 30;
 const STRL_SCAN_CHUNK = 1 << 20;
+/** Rows of slack within which scattered row reads are merged into one read. */
+const READ_RUN_ROWS = 256;
+const SCAN_CHUNK_ROWS = 20000;
+const SCAN_CHUNK_BYTES = 8 << 20;
 
 /** Raw integer code that a value-label table uses for missing value `.`, `.a`, …. */
 export const VALUE_LABEL_MISSING_BASE = 2147483621;
@@ -764,6 +768,53 @@ export class DtaReader {
       }
     }
     return rows;
+  }
+
+  /**
+   * Read specific observations, in the order given (used for sorted and
+   * filtered views, where the rows on screen are not contiguous in the file).
+   * Indices that sit close together in the file are fetched in one read.
+   */
+  async readRowsAt(indices: ArrayLike<number>, columns?: number[]): Promise<DtaCell[][]> {
+    const n = indices.length;
+    const out: DtaCell[][] = new Array(n);
+    if (n === 0) return out;
+    const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => indices[a] - indices[b]);
+    let i = 0;
+    while (i < n) {
+      const first = indices[order[i]];
+      let j = i;
+      // Extend the run while the next wanted row is at most a few rows away.
+      while (j + 1 < n && indices[order[j + 1]] - first < READ_RUN_ROWS) j += 1;
+      const last = indices[order[j]];
+      const rows = await this.readRows(first, last - first + 1, columns);
+      for (let k = i; k <= j; k++) {
+        const row = rows[indices[order[k]] - first];
+        if (!row) throw new RangeError(`observation ${indices[order[k]]} is out of range`);
+        out[order[k]] = row;
+      }
+      i = j + 1;
+    }
+    return out;
+  }
+
+  /**
+   * Visit every observation in file order, `chunkRows` at a time, decoding
+   * only `columns`. `visit` gets each chunk and its first row index; return
+   * `false` from it to stop early.
+   */
+  async scan(
+    columns: number[],
+    visit: (rows: DtaCell[][], start: number) => boolean | void,
+    chunkRows?: number,
+  ): Promise<void> {
+    const { nObs, rowWidth } = this.meta;
+    // Bound a chunk by bytes as well as rows: observations can be very wide.
+    chunkRows ??= Math.max(1, Math.min(SCAN_CHUNK_ROWS, Math.floor(SCAN_CHUNK_BYTES / Math.max(1, rowWidth))));
+    for (let start = 0; start < nObs; start += chunkRows) {
+      const rows = await this.readRows(start, Math.min(chunkRows, nObs - start), columns);
+      if (visit(rows, start) === false) return;
+    }
   }
 
   /** The (v,o) reference stored in a strL data cell, or "" for an empty string. */

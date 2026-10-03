@@ -109,6 +109,12 @@
         }
       },
       {
+        "command": "stataCode.useDtaFile",
+        "title": "Stata: Load Data File in Session (use, clear)",
+        "category": "stata-code",
+        "icon": "$(database)"
+      },
+      {
         "command": "stataCode.copyVariableName",
         "title": "Stata: Copy Variable Name",
         "category": "stata-code"
@@ -458,6 +464,13 @@
           "command": "stataCode.workingDirectoryMenu",
           "when": "resourceLangId == stata",
           "group": "navigation@1010"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "stataCode.useDtaFile",
+          "when": "resourceExtname == .dta",
+          "group": "stataCode@1"
         }
       ],
       "editor/context": [

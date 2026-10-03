@@ -96,3 +96,40 @@ generate byte own = 7
 frlink 1:1 id, frame(other)
 fralias add val, from(other)
 save "alias120.dta", replace
+
+* --- survey118.dta: 500 synthetic rows for the filter / sort / summary tests -
+* Expected counts and statistics in vscode/src/dtaFilter.test.ts and
+* dtaStats.test.ts are what Stata prints for this file.
+clear all
+set seed 20261003
+set obs 500
+generate long id = _n
+generate byte age = 18 + floor(60 * runiform())
+replace age = . if mod(_n, 41) == 0
+replace age = .a if mod(_n, 97) == 0
+generate double income = round(exp(10 + rnormal()), 0.01)
+replace income = . if mod(_n, 23) == 0
+format income %12.2fc
+generate float wage = round(5 + 20 * runiform(), 0.25)
+generate byte region = 1 + floor(4 * runiform())
+replace region = .a if mod(_n, 53) == 0
+label define regionlbl 1 "North" 2 "South" 3 "East" 4 "West" .a "Refused"
+label values region regionlbl
+generate byte female = runiform() < 0.5
+label define yn 0 "No" 1 "Yes"
+label values female yn
+generate int score = floor(200 * runiform()) - 100
+generate long joined = mdy(1, 1, 2015) + floor(3000 * runiform())
+format joined %td
+generate str12 city = ""
+replace city = "Boston" if mod(_n, 5) == 0
+replace city = "boston" if mod(_n, 5) == 1
+replace city = "New York" if mod(_n, 5) == 2
+replace city = "北京" if mod(_n, 5) == 3
+label variable id "Respondent id"
+label variable age "Age in years"
+label variable income "Annual income"
+label variable region "Census region"
+label variable city "City of residence"
+label data "Synthetic survey"
+save "survey118.dta", replace

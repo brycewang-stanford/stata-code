@@ -5,7 +5,8 @@
 // script stays a dumb grid and this logic stays unit-testable. Kept free of
 // any `vscode` import so it runs under `node --test`.
 
-import { formatStataNumber, formatWidthHint } from "./dtaFormat";
+import { formatStataNumber, formatWidthHint, isDateFormat } from "./dtaFormat";
+import type { ColumnSummary } from "./dtaQuery";
 import {
   DtaCell,
   DtaMeta,
@@ -22,6 +23,8 @@ const MIN_COLUMN_CHARS = 5;
 const MAX_COLUMN_CHARS = 32;
 /** Rows a single request may ask for, whatever the webview sends. */
 export const MAX_ROWS_PER_REQUEST = 1000;
+/** Cells one clipboard copy may hold. */
+export const MAX_COPY_CELLS = 500_000;
 
 export interface ViewerVariable {
   name: string;
@@ -53,6 +56,8 @@ export interface ViewerInit {
   valueLabels: Record<string, Array<[string, string]>>;
   /** Labels with more than MAX_VALUE_LABEL_ENTRIES entries (list was cut). */
   valueLabelsTruncated: string[];
+  /** Whether "Load in Stata" applies (a real file on disk, not a snapshot). */
+  canLoadInStata: boolean;
 }
 
 export interface ViewerRows {
@@ -61,6 +66,11 @@ export interface ViewerRows {
   start: number;
   firstColumn: number;
   rows: string[][];
+  /**
+   * 1-based observation number of each row, sent when the view is filtered
+   * or sorted so the gutter can show where a row sits in the dataset.
+   */
+  obs?: number[];
 }
 
 /** How a value-label table's integer key prints: a number, or `.a` … `.z`. */
@@ -88,7 +98,7 @@ function columnChars(v: DtaVariable, table: Map<number, string> | undefined): nu
 
 export function buildViewerInit(
   meta: DtaMeta,
-  options: { title: string; subtitle?: string; warnings?: string[] },
+  options: { title: string; subtitle?: string; warnings?: string[]; canLoadInStata?: boolean },
 ): ViewerInit {
   const valueLabels: Record<string, Array<[string, string]>> = {};
   const valueLabelsTruncated: string[] = [];
@@ -130,6 +140,7 @@ export function buildViewerInit(
     })),
     valueLabels,
     valueLabelsTruncated,
+    canLoadInStata: options.canLoadInStata ?? false,
   };
 }
 
@@ -168,9 +179,10 @@ function clampInt(value: unknown, low: number, high: number): number {
 }
 
 /**
- * Formatted cells for rows [start, start+count) and columns
- * [firstColumn, endColumn). Arguments come from the webview, so every one is
- * clamped to the dataset rather than trusted.
+ * Formatted cells for view rows [start, start+count) and columns
+ * [firstColumn, endColumn). `order` is the view's row order (null for the
+ * dataset as stored). Arguments come from the webview, so every one is
+ * clamped rather than trusted.
  */
 export async function formatRows(
   reader: DtaReader,
@@ -181,23 +193,149 @@ export async function formatRows(
     endColumn: unknown;
     useLabels: unknown;
   },
-): Promise<{ start: number; firstColumn: number; rows: string[][] }> {
+  order: Uint32Array | null = null,
+): Promise<{ start: number; firstColumn: number; rows: string[][]; obs?: number[] }> {
   const { meta } = reader;
-  const start = clampInt(request.start, 0, Math.max(0, meta.nObs));
-  const count = clampInt(request.count, 0, MAX_ROWS_PER_REQUEST);
+  const total = order ? order.length : meta.nObs;
+  const start = clampInt(request.start, 0, Math.max(0, total));
+  const count = Math.min(clampInt(request.count, 0, MAX_ROWS_PER_REQUEST), total - start);
   const firstColumn = clampInt(request.firstColumn, 0, meta.nVars);
   const endColumn = clampInt(request.endColumn, firstColumn, meta.nVars);
   const useLabels = request.useLabels !== false;
 
   const columns: number[] = [];
   for (let c = firstColumn; c < endColumn; c++) columns.push(c);
-  if (columns.length === 0 || count === 0) return { start, firstColumn, rows: [] };
+  if (columns.length === 0 || count <= 0) return { start, firstColumn, rows: [] };
 
   const vars = columns.map((c) => meta.variables[c]);
   const tables = vars.map((v) => (v.valueLabel ? meta.valueLabels.get(v.valueLabel) : undefined));
-  const raw = await reader.readRows(start, count, columns);
+  const indices = order ? order.subarray(start, start + count) : undefined;
+  const raw = indices
+    ? await reader.readRowsAt(indices, columns)
+    : await reader.readRows(start, count, columns);
   const rows = raw.map((row) =>
     row.map((cell, i) => formatCell(cell, vars[i], tables[i], useLabels)),
   );
-  return { start, firstColumn, rows };
+  return indices
+    ? { start, firstColumn, rows, obs: Array.from(indices, (i) => i + 1) }
+    : { start, firstColumn, rows };
+}
+
+/**
+ * The cells of a rectangular selection, as the grid shows them, for the
+ * clipboard. Throws RangeError when the selection exceeds MAX_COPY_CELLS.
+ */
+export async function formatRange(
+  reader: DtaReader,
+  request: {
+    firstRow: unknown;
+    lastRow: unknown;
+    firstColumn: unknown;
+    lastColumn: unknown;
+    useLabels: unknown;
+    headers: unknown;
+  },
+  order: Uint32Array | null = null,
+): Promise<string[][]> {
+  const { meta } = reader;
+  const total = order ? order.length : meta.nObs;
+  if (total === 0 || meta.nVars === 0) return [];
+  const r0 = clampInt(request.firstRow, 0, total - 1);
+  const r1 = clampInt(request.lastRow, r0, total - 1);
+  const c0 = clampInt(request.firstColumn, 0, meta.nVars - 1);
+  const c1 = clampInt(request.lastColumn, c0, meta.nVars - 1);
+  const cells = (r1 - r0 + 1) * (c1 - c0 + 1);
+  if (cells > MAX_COPY_CELLS) {
+    throw new RangeError(
+      `Selection is ${cells.toLocaleString("en-US")} cells; copy at most ` +
+        `${MAX_COPY_CELLS.toLocaleString("en-US")} at a time, or export to CSV.`,
+    );
+  }
+  const out: string[][] = [];
+  if (request.headers === true) {
+    out.push(meta.variables.slice(c0, c1 + 1).map((v) => v.name));
+  }
+  for (let start = r0; start <= r1; start += MAX_ROWS_PER_REQUEST) {
+    const block = await formatRows(
+      reader,
+      {
+        start,
+        count: Math.min(MAX_ROWS_PER_REQUEST, r1 - start + 1),
+        firstColumn: c0,
+        endColumn: c1 + 1,
+        useLabels: request.useLabels,
+      },
+      order,
+    );
+    out.push(...block.rows);
+  }
+  return out;
+}
+
+export interface ViewerSummary {
+  name: string;
+  /** [statistic, value] pairs, ready to print. */
+  stats: Array<[string, string]>;
+  /** Most frequent values; `filter` is an `if` expression selecting that value. */
+  frequencies: Array<{ value: string; label: string; count: string; share: string; filter: string }>;
+  frequenciesOmitted: number;
+}
+
+function statText(x: number): string {
+  if (Number.isInteger(x) && Math.abs(x) < 1e15) return x.toLocaleString("en-US");
+  const rounded = Number(x.toPrecision(9));
+  if (Math.abs(rounded) >= 1e15 || (rounded !== 0 && Math.abs(rounded) < 1e-4)) {
+    return rounded.toExponential(4);
+  }
+  return rounded.toLocaleString("en-US", { maximumFractionDigits: 6 });
+}
+
+/**
+ * Turn a column summary into display text. Order statistics of a date
+ * variable print as dates (a minimum of 20103 says nothing; 14jan2015 does);
+ * the mean and standard deviation stay numeric.
+ */
+export function formatSummary(summary: ColumnSummary, variable: DtaVariable): ViewerSummary {
+  const count = (n: number): string => n.toLocaleString("en-US");
+  const stats: Array<[string, string]> = [
+    ["Obs", count(summary.n)],
+    [summary.numeric ? "Missing" : "Empty", count(summary.missing)],
+    ["Distinct", `${count(summary.distinct)}${summary.distinctCapped ? "+" : ""}`],
+  ];
+  if (summary.numeric && summary.mean !== undefined) {
+    const dated = isDateFormat(variable.format);
+    const point = (x: number | undefined): string =>
+      x === undefined
+        ? ""
+        : dated && Number.isInteger(x)
+          ? formatStataNumber(x, variable.format, variable.type)
+          : statText(x);
+    stats.push(["Mean", statText(summary.mean)]);
+    if (summary.sd !== undefined) stats.push(["Std. dev.", statText(summary.sd)]);
+    stats.push(
+      ["Min", point(summary.min)],
+      ["p25", point(summary.p25)],
+      ["Median", point(summary.p50)],
+      ["p75", point(summary.p75)],
+      ["Max", point(summary.max)],
+    );
+  }
+  const frequencies = (summary.frequencies ?? []).map((f) => ({
+    value: f.value,
+    label: f.label,
+    count: count(f.count),
+    share: summary.rows > 0 ? `${((100 * f.count) / summary.rows).toFixed(1)}%` : "",
+    filter: summary.numeric
+      ? `${variable.name} == ${f.value}`
+      : // A value with a double quote needs compound quotes to stay one literal.
+        f.value.includes('"')
+        ? `${variable.name} == \`"${f.value}"'`
+        : `${variable.name} == "${f.value}"`,
+  }));
+  return {
+    name: summary.name,
+    stats,
+    frequencies,
+    frequenciesOmitted: summary.frequenciesOmitted ?? 0,
+  };
 }

@@ -8,14 +8,24 @@
 // Parsing and formatting live in dtaReader / dtaFormat / dtaViewModel, which
 // are unit-tested without VS Code; this file only moves messages.
 
-import { promises as fs } from "node:fs";
+import { createWriteStream, promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
+import { codebookCsv, csvChunks, rangeToTsv, valueLabelsCsv } from "./dtaExport";
 import { openFileByteSource } from "./dtaFileSource";
+import { DtaFilterError } from "./dtaFilter";
+import {
+  buildRowOrder,
+  DtaQueryCancelled,
+  DtaQueryError,
+  summarizeColumn,
+  type RowQuery,
+  type SortKey,
+} from "./dtaQuery";
 import { BufferByteSource, DtaFormatError, DtaReader, type ByteSource } from "./dtaReader";
 import { buildDtaViewerHtml } from "./dtaViewerHtml";
-import { buildViewerInit, formatRows } from "./dtaViewModel";
+import { buildViewerInit, formatRange, formatRows, formatSummary } from "./dtaViewModel";
 
 export const DTA_VIEW_TYPE = "stataCode.dtaViewer";
 const RELOAD_DEBOUNCE_MS = 300;
@@ -24,6 +34,8 @@ interface ViewerSource {
   uri: vscode.Uri;
   title: string;
   subtitle?: string;
+  /** False for a snapshot of in-memory data: there is no file to `use`. */
+  canLoadInStata: boolean;
 }
 
 interface WebviewRequest {
@@ -35,6 +47,35 @@ interface WebviewRequest {
   endColumn?: unknown;
   useLabels?: unknown;
   text?: unknown;
+  filter?: unknown;
+  sort?: unknown;
+  column?: unknown;
+  firstRow?: unknown;
+  lastRow?: unknown;
+  lastColumn?: unknown;
+  headers?: unknown;
+  kind?: unknown;
+}
+
+const NO_QUERY: RowQuery = { filter: "", sort: [] };
+
+/** Validate the sort keys a webview sent; anything malformed is dropped. */
+function parseSort(value: unknown, nVars: number): SortKey[] {
+  if (!Array.isArray(value)) return [];
+  const keys: SortKey[] = [];
+  for (const item of value.slice(0, 8)) {
+    const column = (item as { column?: unknown } | null)?.column;
+    if (typeof column !== "number" || !Number.isInteger(column) || column < 0 || column >= nVars) {
+      continue;
+    }
+    if (keys.some((k) => k.column === column)) continue;
+    keys.push({ column, descending: (item as { descending?: unknown }).descending === true });
+  }
+  return keys;
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function makeNonce(): string {
@@ -53,6 +94,10 @@ async function openSource(uri: vscode.Uri): Promise<ByteSource> {
 /** Drives one viewer webview: loads a .dta source and answers row requests. */
 class DtaViewerSession implements vscode.Disposable {
   private reader: DtaReader | undefined;
+  /** Row order of the current view; null is the dataset as stored. */
+  private order: Uint32Array | null = null;
+  private query: RowQuery = NO_QUERY;
+  private querySeq = 0;
   private source: ViewerSource;
   private ready = false;
   private loadSeq = 0;
@@ -87,6 +132,8 @@ class DtaViewerSession implements vscode.Disposable {
   /** Point the viewer at a different file (a fresh snapshot of the session). */
   setSource(source: ViewerSource): void {
     this.source = source;
+    // Keep the filter and sort: re-previewing the same session after another
+    // command is the common case, and load() drops them if they stop applying.
     this.watch();
     if (this.ready) void this.load();
   }
@@ -124,6 +171,23 @@ class DtaViewerSession implements vscode.Disposable {
           await vscode.env.clipboard.writeText(message.text);
         }
         return;
+      case "query":
+        await this.applyQuery(message);
+        return;
+      case "summary":
+        await this.sendSummary(message);
+        return;
+      case "copyRange":
+        await this.copyRange(message);
+        return;
+      case "export":
+        await this.export(message);
+        return;
+      case "loadInStata":
+        if (this.source.canLoadInStata) {
+          await vscode.commands.executeCommand("stataCode.useDtaFile", this.source.uri);
+        }
+        return;
       default:
         return;
     }
@@ -138,13 +202,36 @@ class DtaViewerSession implements vscode.Disposable {
         .get<string>("dtaLegacyEncoding", "auto");
       const reader = await DtaReader.open(await openSource(source.uri), { legacyEncoding });
       if (seq !== this.loadSeq) return; // a newer load superseded this one
+      // Carry the filter and sort across a reload (Stata re-saved the file);
+      // if they no longer apply to the new contents, fall back to plain order.
+      let order: Uint32Array | null = null;
+      let query = this.query;
+      const querySeq = ++this.querySeq;
+      try {
+        order = await buildRowOrder(
+          reader,
+          { filter: query.filter, sort: parseSort(query.sort, reader.meta.nVars) },
+          () => querySeq !== this.querySeq,
+        );
+      } catch {
+        query = NO_QUERY;
+      }
+      if (seq !== this.loadSeq) return;
       this.reader = reader;
+      this.order = order;
+      this.query = query;
       await this.webview.postMessage(
-        buildViewerInit(reader.meta, { title: source.title, subtitle: source.subtitle }),
+        buildViewerInit(reader.meta, {
+          title: source.title,
+          subtitle: source.subtitle,
+          canLoadInStata: source.canLoadInStata,
+        }),
       );
+      await this.postView();
     } catch (err) {
       if (seq !== this.loadSeq) return;
       this.reader = undefined;
+      this.order = null;
       const message = err instanceof Error ? err.message : String(err);
       this.log(`[stata-code] dta viewer: ${source.uri.toString()}: ${message}`);
       await this.webview.postMessage({
@@ -160,14 +247,20 @@ class DtaViewerSession implements vscode.Disposable {
     const reader = this.reader;
     if (!reader || typeof message.id !== "number") return;
     try {
-      const block = await formatRows(reader, {
-        start: message.start,
-        count: message.count,
-        firstColumn: message.firstColumn,
-        endColumn: message.endColumn,
-        useLabels: message.useLabels,
-      });
-      if (reader !== this.reader) return; // the file was reloaded meanwhile
+      const order = this.order;
+      const block = await formatRows(
+        reader,
+        {
+          start: message.start,
+          count: message.count,
+          firstColumn: message.firstColumn,
+          endColumn: message.endColumn,
+          useLabels: message.useLabels,
+        },
+        order,
+      );
+      // Drop the reply if the file was reloaded or the view re-queried meanwhile.
+      if (reader !== this.reader || order !== this.order) return;
       await this.webview.postMessage({ type: "rows", id: message.id, ...block });
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
@@ -177,7 +270,181 @@ class DtaViewerSession implements vscode.Disposable {
     }
   }
 
+  /** Tell the webview which rows the view now holds. */
+  private async postView(): Promise<void> {
+    const reader = this.reader;
+    if (!reader) return;
+    await this.webview.postMessage({
+      type: "view",
+      rows: this.order ? this.order.length : reader.meta.nObs,
+      total: reader.meta.nObs,
+      filter: this.query.filter,
+      sort: this.query.sort,
+    });
+  }
+
+  private async applyQuery(message: WebviewRequest): Promise<void> {
+    const reader = this.reader;
+    if (!reader) return;
+    const query: RowQuery = {
+      filter: typeof message.filter === "string" ? message.filter.slice(0, 4000) : "",
+      sort: parseSort(message.sort, reader.meta.nVars),
+    };
+    const seq = ++this.querySeq;
+    try {
+      const order = await buildRowOrder(reader, query, () => seq !== this.querySeq);
+      if (seq !== this.querySeq || reader !== this.reader) return;
+      this.order = order;
+      this.query = query;
+      await this.postView();
+    } catch (err) {
+      if (err instanceof DtaQueryCancelled || seq !== this.querySeq) return;
+      if (!(err instanceof DtaFilterError) && !(err instanceof DtaQueryError)) {
+        this.log(`[stata-code] dta viewer: query failed: ${errorText(err)}`);
+      }
+      // The previous view stays in place; the webview shows the message.
+      await this.webview.postMessage({ type: "queryError", message: errorText(err) });
+    }
+  }
+
+  private async sendSummary(message: WebviewRequest): Promise<void> {
+    const reader = this.reader;
+    const column = message.column;
+    if (!reader || typeof column !== "number") return;
+    const order = this.order;
+    try {
+      const summary = await summarizeColumn(
+        reader,
+        column,
+        order,
+        () => reader !== this.reader || order !== this.order,
+      );
+      if (reader !== this.reader || order !== this.order) return;
+      await this.webview.postMessage({
+        type: "summary",
+        column,
+        summary: formatSummary(summary, reader.meta.variables[column]),
+      });
+    } catch (err) {
+      if (err instanceof DtaQueryCancelled) return;
+      await this.webview.postMessage({ type: "summary", column, error: errorText(err) });
+    }
+  }
+
+  private async notice(text: string, isError = false): Promise<void> {
+    await this.webview.postMessage({ type: "notice", text, isError });
+  }
+
+  private async copyRange(message: WebviewRequest): Promise<void> {
+    const reader = this.reader;
+    if (!reader) return;
+    try {
+      const rows = await formatRange(
+        reader,
+        {
+          firstRow: message.firstRow,
+          lastRow: message.lastRow,
+          firstColumn: message.firstColumn,
+          lastColumn: message.lastColumn,
+          useLabels: message.useLabels,
+          headers: message.headers,
+        },
+        this.order,
+      );
+      await vscode.env.clipboard.writeText(rangeToTsv(rows));
+      const body = message.headers === true ? rows.length - 1 : rows.length;
+      const columns = rows[0]?.length ?? 0;
+      await this.notice(
+        `Copied ${body.toLocaleString("en-US")} × ${columns.toLocaleString("en-US")} cells`,
+      );
+    } catch (err) {
+      await this.notice(errorText(err), true);
+    }
+  }
+
+  private async export(message: WebviewRequest): Promise<void> {
+    const reader = this.reader;
+    if (!reader) return;
+    // A snapshot's temp-file name means nothing to the user.
+    const stem = this.source.canLoadInStata
+      ? path.basename(this.source.uri.path).replace(/\.dta$/i, "") || "data"
+      : "data";
+    const folder =
+      this.source.canLoadInStata && this.source.uri.scheme === "file"
+        ? path.dirname(this.source.uri.fsPath)
+        : (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "");
+    const suggest = (name: string): vscode.Uri | undefined =>
+      folder ? vscode.Uri.file(path.join(folder, name)) : undefined;
+
+    try {
+      if (message.kind === "codebook") {
+        const target = await vscode.window.showSaveDialog({
+          defaultUri: suggest(`${stem}_codebook.csv`),
+          filters: { CSV: ["csv"] },
+          title: "Export codebook",
+        });
+        if (!target) return;
+        await fs.writeFile(target.fsPath, codebookCsv(reader.meta), "utf8");
+        const labels = valueLabelsCsv(reader.meta);
+        let extra = "";
+        if (labels !== undefined) {
+          const labelsPath = target.fsPath.replace(/(\.csv)?$/i, "_value_labels.csv");
+          await fs.writeFile(labelsPath, labels, "utf8");
+          extra = ` and ${path.basename(labelsPath)}`;
+        }
+        await this.notice(`Wrote ${path.basename(target.fsPath)}${extra}`);
+        return;
+      }
+
+      const target = await vscode.window.showSaveDialog({
+        defaultUri: suggest(`${stem}.csv`),
+        filters: { CSV: ["csv"] },
+        title: "Export data as CSV",
+      });
+      if (!target) return;
+      const order = this.order;
+      const total = order ? order.length : reader.meta.nObs;
+      const cancelled = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Exporting ${total.toLocaleString("en-US")} rows to ${path.basename(target.fsPath)}`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const stream = createWriteStream(target.fsPath, { encoding: "utf8" });
+          const finished = new Promise<void>((resolve, reject) => {
+            stream.on("finish", resolve);
+            stream.on("error", reject);
+          });
+          for await (const chunk of csvChunks(reader, order, {
+            useLabels: message.useLabels !== false,
+            isCancelled: () => token.isCancellationRequested,
+          })) {
+            if (!stream.write(chunk)) {
+              await new Promise<void>((resolve) => stream.once("drain", resolve));
+            }
+          }
+          stream.end();
+          await finished;
+          return token.isCancellationRequested;
+        },
+      );
+      if (cancelled) {
+        await fs.unlink(target.fsPath).catch(() => undefined);
+        await this.notice("Export cancelled");
+        return;
+      }
+      await this.notice(
+        `Wrote ${total.toLocaleString("en-US")} rows to ${path.basename(target.fsPath)}`,
+      );
+    } catch (err) {
+      this.log(`[stata-code] dta viewer: export failed: ${errorText(err)}`);
+      await this.notice(`Export failed: ${errorText(err)}`, true);
+    }
+  }
+
   dispose(): void {
+    this.querySeq += 1; // cancel any pass still running
     if (this.reloadTimer) clearTimeout(this.reloadTimer);
     this.watcher?.dispose();
     for (const d of this.disposables) d.dispose();
@@ -200,7 +467,7 @@ export class DtaViewerProvider implements vscode.CustomReadonlyEditorProvider {
     const session = new DtaViewerSession(
       panel.webview,
       this.extensionUri,
-      { uri: document.uri, title: path.basename(document.uri.path) },
+      { uri: document.uri, title: path.basename(document.uri.path), canLoadInStata: true },
       this.log,
     );
     panel.onDidDispose(() => session.dispose());
@@ -237,6 +504,7 @@ export function openDtaSnapshotPanel(
     uri: vscode.Uri.file(options.file),
     title: `Data — ${options.sessionId}`,
     subtitle: options.subtitle,
+    canLoadInStata: false,
   };
   const existing = snapshotPanels.get(options.sessionId);
   if (existing) {

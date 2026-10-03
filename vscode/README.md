@@ -80,6 +80,55 @@ anywhere; arrow keys, Page Up/Down and Home/End move the selection;
 `Cmd/Ctrl+C` copies the selected cell. If Stata re-saves the file while it is
 open, the viewer reloads.
 
+**Filter, sort, summarize.** The bar under the title takes a Stata `if`
+expression and keeps the rows that satisfy it:
+
+```stata
+age > 60 & !missing(income)
+region == "South":regionlbl
+inlist(city, "Boston", "北京") | joined >= td(01jan2020)
+```
+
+It follows Stata's rules, not JavaScript's — a missing value is larger than
+every number (so `age > 60` keeps missing ages, exactly as `count if` does),
+arithmetic on a missing value is missing, and comparing a string with a number
+is a `type mismatch`. The evaluator is tested against Stata 18's own
+`count if` on 48 expressions. Supported: the operators
+`! ~ ^ - * / + == != ~= < <= > >= & |`, `_n` / `_N`, `"text":labelname`, and
+`missing mi inlist inrange strpos regexm strmatch lower upper trim strlen
+ustrlen substr abs floor ceil int round mod min max sqrt exp ln log10 mdy td`.
+Variable abbreviations, time-series operators and macros are not.
+
+Hover a column header and click its arrow to sort (ascending, descending,
+off); Shift-click adds a secondary key. Sorting is by the underlying values
+with missing values last, as Stata's `sort` does, and ties keep their dataset
+order. The row-number gutter keeps showing each row's observation number in
+the file. Drag a header's right edge to resize the column; double-click it to
+fit.
+
+Selecting a variable shows a summary of it over the rows in view — count,
+missing, distinct, mean, standard deviation, min, quartiles, max (equal to
+`summarize, detail`), and for categorical variables the most frequent values;
+click one to filter to it.
+
+**Copy and export.** Drag, Shift-click or Shift-arrow to select a range;
+`Cmd/Ctrl+C` copies it as tab-separated text and `Cmd/Ctrl+Shift+C` includes
+the variable names. The *Export* menu writes:
+
+- **the current view as CSV** — filtered and sorted as shown, numbers at full
+  precision rather than display precision, dates as dates, and value labels
+  as text when *Value labels* is ticked;
+- **the codebook** — one row per variable with its type, format, value label,
+  variable label and notes, plus a second file with every value-label mapping.
+  This is the half of a dataset a CSV cannot carry.
+
+*Load in Stata* (also on the Explorer context menu of any `.dta`) runs
+`use "<file>", clear` in the current session, asking first if that session has
+unsaved changes.
+
+Filtering, sorting and summaries read the whole column, so they are limited
+to 20 million observations; browsing is not.
+
 Supported formats: 113, 114, 115 (Stata 8–12), 117 (Stata 13), 118 and 119
 (Stata 14+), 120 and 121 (Stata 18 alias variables). Formats older than 113
 need a round trip through Stata. To open a `.dta` as raw bytes instead, use
@@ -309,6 +358,9 @@ UI modules:
 | `src/outputs.ts` | table/export artifact nodes for the **Outputs** view |
 | `src/dtaReader.ts` | Stata-free `.dta` parser (formats 113–115, 117–121), random-access row reads |
 | `src/dtaFormat.ts` | Stata display formats (`%td`, `%9.2f`, `%12.0gc`, …) |
+| `src/dtaFilter.ts` | Stata `if` expression evaluator for the row filter |
+| `src/dtaQuery.ts` | filter + sort row order, per-variable summary statistics |
+| `src/dtaExport.ts` | CSV, codebook and clipboard exports |
 | `src/dtaViewModel.ts` | shapes metadata and formatted row blocks for the viewer |
 | `src/dtaEditor.ts` | custom editor + in-memory snapshot panel |
 | `media/dtaViewer.{js,css}` | the viewer's virtual grid and variables panel |

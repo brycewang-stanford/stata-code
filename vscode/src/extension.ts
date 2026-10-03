@@ -17,6 +17,7 @@ import { StataDiagnostics, type SubmitOrigin } from "./diagnostics";
 import {
   buildDataPreviewCode,
   buildDataSnapshotCode,
+  buildUseCode,
   clampPreviewObs,
   DEFAULT_DATA_PREVIEW_OBS,
   formatDataPreviewDocument,
@@ -198,6 +199,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("stataCode.openRunResult", openRunResult),
     vscode.commands.registerCommand("stataCode.openMatrix", openMatrix),
     vscode.commands.registerCommand("stataCode.viewDataPreview", viewDataPreview),
+    vscode.commands.registerCommand("stataCode.useDtaFile", useDtaFile),
     vscode.commands.registerCommand("stataCode.copyVariableName", copyVariableName),
     vscode.commands.registerCommand("stataCode.refreshData", () => dataProvider?.refresh()),
     vscode.commands.registerCommand("stataCode.openOutputFile", openOutputFile),
@@ -794,6 +796,56 @@ async function viewDataSnapshot(previewObs: number): Promise<boolean> {
     subtitle,
   });
   return true;
+}
+
+/**
+ * `use "<file>", clear` in the current session — from the Explorer context
+ * menu on a .dta file, or the data viewer's "Load in Stata".
+ */
+async function useDtaFile(target?: unknown): Promise<void> {
+  let uri = target instanceof vscode.Uri ? target : undefined;
+  if (!uri) {
+    const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+    if (input instanceof vscode.TabInputCustom && input.viewType === DTA_VIEW_TYPE) uri = input.uri;
+  }
+  if (!uri || uri.scheme !== "file") {
+    vscode.window.showWarningMessage("stata-code: select a .dta file on disk to load");
+    return;
+  }
+  const code = buildUseCode(uri.fsPath);
+  if (!code) {
+    vscode.window.showErrorMessage(
+      "stata-code: this path contains characters Stata would expand as a macro; `use` it by hand.",
+    );
+    return;
+  }
+
+  const sessionId = currentSessionId();
+  const name = path.basename(uri.fsPath);
+  // `clear` discards whatever the session holds. Ask only when the last run
+  // of this session reported unsaved changes — a clean dataset loses nothing.
+  if (lastResult?.session_id === sessionId && lastResult.dataset.changed) {
+    const proceed = "Load and discard changes";
+    const answer = await vscode.window.showWarningMessage(
+      `Session "${sessionId}" has unsaved changes to the data in memory. Loading ${name} will discard them.`,
+      { modal: true },
+      proceed,
+    );
+    if (answer !== proceed) return;
+  }
+
+  const result = await runUtilityCode(code, `use ${name}`);
+  if (!result) return;
+  lastResult = result;
+  rememberSessionId(result.session_id);
+  lastResultProvider?.refresh();
+  dataProvider?.refresh();
+  if (result.ok) {
+    const { n_obs, n_vars } = result.dataset;
+    vscode.window.showInformationMessage(
+      `stata-code: loaded ${name} into session "${sessionId}" (${n_obs.toLocaleString("en-US")} obs × ${n_vars} vars)`,
+    );
+  }
 }
 
 async function copyVariableName(varName?: unknown): Promise<void> {

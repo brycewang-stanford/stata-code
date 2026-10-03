@@ -43,8 +43,25 @@ export function buildDtaViewerHtml(options: DtaViewerHtmlOptions): string {
         <input type="checkbox" id="labels" checked /> Value labels
       </label>
       <input type="number" id="goto" min="1" placeholder="Go to row" aria-label="Go to row" />
+      <div id="menu-wrap">
+        <button id="menu-button" type="button" aria-haspopup="true" aria-expanded="false">Export ▾</button>
+        <div id="menu" role="menu" hidden>
+          <button id="export-csv" type="button" role="menuitem">Export view as CSV…</button>
+          <button id="export-codebook" type="button" role="menuitem">Export codebook (labels, formats, notes)…</button>
+          <button id="load-stata" type="button" role="menuitem">Load in Stata (use, clear)</button>
+        </div>
+      </div>
       <button id="toggle-side" type="button" aria-pressed="true">Variables</button>
     </div>
+  </div>
+  <div id="querybar">
+    <span class="kw">if</span>
+    <input type="text" id="filter-expr" spellcheck="false" autocomplete="off"
+      placeholder='Filter rows with a Stata expression, e.g.  age &gt; 60 &amp; !missing(income)   —   Enter to apply'
+      aria-label="Filter rows with a Stata if expression" />
+    <button id="filter-clear" type="button" title="Clear filter" aria-label="Clear filter" hidden>×</button>
+    <span id="query-status" role="status"></span>
+    <span id="sort-chips"></span>
   </div>
   <div id="warnings"></div>
   <div id="fatal" hidden></div>
@@ -66,7 +83,10 @@ export function buildDtaViewerHtml(options: DtaViewerHtmlOptions): string {
       <div id="detail"></div>
     </aside>
   </div>
-  <div id="status"><span id="where" class="where"></span><span id="value" class="value"></span></div>
+  <div id="status">
+    <span id="where" class="where"></span><span id="value" class="value"></span>
+    <span id="notice" role="status"></span>
+  </div>
   <script nonce="${attr(options.nonce)}" src="${attr(options.scriptUri)}"></script>
 </body>
 </html>`;

@@ -6,6 +6,49 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Added
+
+- **VS Code data viewer: filter rows with a Stata `if` expression.** The bar
+  under the title accepts expressions such as `age > 60 & !missing(income)`,
+  `region == "South":regionlbl` or `inlist(city, "Boston", "北京")`. The
+  evaluator follows Stata's semantics rather than JavaScript's — missing
+  values sort above every number, arithmetic on a missing value is missing,
+  any nonzero value (missing included) is true, and a string compared with a
+  number is a `type mismatch` — and is tested against Stata 18's own
+  `count if` on 48 expressions. It covers the operators
+  `! ~ ^ - * / + == != ~= < <= > >= & |`, `_n` / `_N`, `"text":labelname`,
+  and about 30 functions (`missing`, `inlist`, `inrange`, `strpos`, `regexm`,
+  `strmatch`, `substr`, `round`, `mod`, `mdy`, `td()`, …). Variable
+  abbreviations, time-series operators and macros are not supported.
+- **VS Code data viewer: sort by any column.** Click the arrow in a column
+  header (ascending, descending, off); Shift-click adds further keys. Order
+  matches Stata's `sort` / `gsort`: underlying values rather than label text,
+  missing values last, ties in dataset order. The gutter keeps showing each
+  row's observation number in the file.
+- **VS Code data viewer: per-variable summary.** Selecting a variable shows
+  count, missing, distinct, mean, standard deviation, min, quartiles and max
+  over the rows in view — equal to `summarize, detail` to 12 significant
+  digits on the test dataset — and, for categorical variables, the most
+  frequent values. Clicking a value filters to it. Order statistics of a date
+  variable print as dates.
+- **VS Code data viewer: range selection and copy.** Drag, Shift-click or
+  Shift-arrow selects a rectangle; `Cmd/Ctrl+C` copies it as tab-separated
+  text, `Cmd/Ctrl+Shift+C` with variable names, `Cmd/Ctrl+A` selects the view.
+- **VS Code data viewer: export.** *Export view as CSV* writes the filtered,
+  sorted view with numbers at full precision (not display precision), dates as
+  dates, and value labels as text when the toggle is on. *Export codebook*
+  writes one row per variable (type, format, value label, variable label,
+  notes) and a second file with every value-label mapping — the metadata a CSV
+  cannot carry.
+- **VS Code: `Stata: Load Data File in Session (use, clear)`.** On the
+  Explorer context menu of `.dta` files and in the viewer's menu. Asks before
+  discarding unsaved changes in the session.
+- **VS Code data viewer: resizable columns.** Drag a header's right edge;
+  double-click to fit. Widths survive a reload of the same dataset.
+
+Filtering, sorting and summaries scan the whole column and are limited to
+20 million observations; browsing has no such limit.
+
 ## 0.13.0 — 2026-10-03
 
 A data viewer for `.dta` files. Opening a dataset in VS Code used to mean
