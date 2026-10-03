@@ -6,6 +6,12 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.15.0 — 2026-10-03
+
+Variable labels can now be edited straight in a `.dta` file, by hand in the VS
+Code data viewer or in bulk by an agent, without Stata. Adds one MCP tool; the
+result schema is unchanged.
+
 ### Added
 
 - **Edit variable labels without Stata.** A variable label is a fixed-width

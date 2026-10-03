@@ -107,7 +107,7 @@ from stata_code.core.runner import (
 )
 from stata_code.core.schema import RunResult
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 SERVER_INSTRUCTIONS = (
     "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
