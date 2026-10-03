@@ -34,6 +34,7 @@
     exportCsv: $("export-csv"),
     exportCodebook: $("export-codebook"),
     loadStata: $("load-stata"),
+    importCodebook: $("import-codebook"),
     filter: $("filter-expr"),
     filterClear: $("filter-clear"),
     queryStatus: $("query-status"),
@@ -194,6 +195,7 @@
     el.main.hidden = false;
     el.labels.disabled = Object.keys(init.valueLabels).length === 0;
     el.loadStata.hidden = !init.canLoadInStata;
+    el.importCodebook.hidden = !init.canEditLabels;
 
     renderSummary();
     renderWarnings();
@@ -1280,6 +1282,9 @@
   });
   el.loadStata.addEventListener("click", () => {
     vscode.postMessage({ type: "loadInStata" });
+  });
+  el.importCodebook.addEventListener("click", () => {
+    vscode.postMessage({ type: "importCodebook" });
   });
 
   function goToRow() {

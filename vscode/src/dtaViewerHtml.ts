@@ -48,6 +48,7 @@ export function buildDtaViewerHtml(options: DtaViewerHtmlOptions): string {
         <div id="menu" role="menu" hidden>
           <button id="export-csv" type="button" role="menuitem">Export view as CSV…</button>
           <button id="export-codebook" type="button" role="menuitem">Export codebook (labels, formats, notes)…</button>
+          <button id="import-codebook" type="button" role="menuitem" hidden>Import labels from a codebook CSV…</button>
           <button id="load-stata" type="button" role="menuitem">Load in Stata (use, clear)</button>
         </div>
       </div>

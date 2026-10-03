@@ -497,7 +497,7 @@ It also registers a **Stata-free `.dta` data viewer**. Double-click any `.dta` f
 - **filter rows with a Stata `if` expression** (`age > 60 & !missing(income)`), evaluated with Stata's semantics for missing values;
 - **sort** by one or several columns and get **per-variable summaries** (the statistics of `summarize, detail`, plus the most frequent values);
 - **copy a range** to the clipboard, and **export** the current view as CSV or the codebook (labels, formats, notes) as its own file;
-- **edit labels in the file**: variable labels, value labels (define, change, drop, attach to a variable) and the dataset label are written straight into the `.dta` file, each edit can be undone, and the observations are never re-encoded.
+- **edit labels in the file**: variable labels, value labels (define, change, drop, attach to a variable) and the dataset label are written straight into the `.dta` file, each edit can be undone, and the observations are never re-encoded. For many labels at once, export the codebook, edit it in a spreadsheet and import it back.
 
 Agents get the same edits in bulk through the `set_variable_labels` and `set_value_labels` MCP tools, for example to label an unlabeled dataset after inspecting it. Details are in [vscode/README.md](vscode/README.md).
 

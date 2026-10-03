@@ -25,6 +25,7 @@ import {
 } from "./dtaQuery";
 import { BufferByteSource, DtaFormatError, DtaReader, type ByteSource } from "./dtaReader";
 import { buildDtaViewerHtml } from "./dtaViewerHtml";
+import { CodebookError, editFromCodebook } from "./dtaImport";
 import {
   describeEdit,
   type DtaLabelEdit,
@@ -249,6 +250,9 @@ class DtaViewerSession implements vscode.Disposable {
       case "undoEdit":
         await this.undoEdit();
         return;
+      case "importCodebook":
+        await this.importCodebook();
+        return;
       case "loadInStata":
         if (this.source.canLoadInStata) {
           await vscode.commands.executeCommand("stataCode.useDtaFile", this.source.uri);
@@ -451,6 +455,68 @@ class DtaViewerSession implements vscode.Disposable {
       "Drop",
     );
     if (choice === "Drop") await this.applyEdit({ valueLabels: { [name]: null } });
+  }
+
+  /**
+   * Apply the labels in a codebook CSV (the file *Export codebook* writes,
+   * edited in a spreadsheet) as one edit, after showing what it would change.
+   */
+  private async importCodebook(): Promise<void> {
+    const { uri, canEditLabels } = this.source;
+    if (!canEditLabels || uri.scheme !== "file") return;
+    const picked = await vscode.window.showOpenDialog({
+      defaultUri: vscode.Uri.file(path.dirname(uri.fsPath)),
+      canSelectMany: false,
+      filters: { CSV: ["csv"] },
+      title: "Import labels from a codebook CSV",
+      openLabel: "Import labels",
+    });
+    if (!picked || picked.length === 0) return;
+    try {
+      const codebookPath = picked[0].fsPath;
+      const codebook = await fs.readFile(codebookPath, "utf8");
+      // the value-label mappings are exported next to the codebook
+      const labelsPath = codebookPath.replace(/(\.csv)?$/i, "_value_labels.csv");
+      let valueLabels: string | undefined;
+      try {
+        valueLabels = await fs.readFile(labelsPath, "utf8");
+      } catch {
+        valueLabels = undefined;
+      }
+      const edit = editFromCodebook(codebook, valueLabels);
+      const legacyEncoding = vscode.workspace
+        .getConfiguration("stataCode")
+        .get<string>("dtaLegacyEncoding", "auto");
+      const planned = await editLabels(uri.fsPath, edit, { legacyEncoding, dryRun: true });
+      if (!editChanged(planned)) {
+        await this.notice("The codebook matches the file; nothing to change");
+        return;
+      }
+      const count =
+        planned.variableLabels.length +
+        Object.keys(planned.valueLabels).length +
+        planned.attached.length +
+        (planned.dataLabel ? 1 : 0);
+      const summary = describeEdit(planned);
+      const choice = await vscode.window.showWarningMessage(
+        `Apply ${count} label change${count === 1 ? "" : "s"} to ${path.basename(uri.fsPath)}?`,
+        {
+          modal: true,
+          detail:
+            (summary.length > 600 ? `${summary.slice(0, 600)}…` : summary) +
+            (valueLabels === undefined
+              ? ""
+              : `\n\nValue labels were read from ${path.basename(labelsPath)}.`),
+        },
+        "Apply",
+      );
+      if (choice === "Apply") await this.applyEdit(edit);
+    } catch (err) {
+      if (!(err instanceof DtaEditError) && !(err instanceof CodebookError)) {
+        this.log(`[stata-code] dta viewer: importing a codebook failed: ${errorText(err)}`);
+      }
+      await this.notice(`Not imported: ${errorText(err)}`, true);
+    }
   }
 
   private async undoEdit(): Promise<void> {

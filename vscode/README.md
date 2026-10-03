@@ -139,6 +139,14 @@ variable that uses it. *Drop* removes a value label after asking and detaches
 it from the variables that used it. The dataset label has its own *Edit* in
 the dataset details (shown when no variable is selected).
 
+**Many labels at once go through the codebook.** *Export codebook* writes one
+row per variable; edit the `label` and `value_label` columns in a spreadsheet
+(and the codes in the `_value_labels.csv` beside it), then choose *Import
+labels from a codebook CSV…* in the same menu. The viewer shows how many
+labels would change and applies them as one edit. Only the `name` column is
+required: a column that is absent is left alone, and so is a variable or a
+value label the files do not mention.
+
 Every edit shows what it did in the status bar with an **Undo** button, and
 the viewer keeps the last 50 edits to take back. Attaching a value label
 overwrites one fixed-width field in place. Changing a value label's contents
@@ -388,6 +396,7 @@ UI modules:
 | `src/dtaFilter.ts` | Stata `if` expression evaluator for the row filter |
 | `src/dtaQuery.ts` | filter + sort row order, per-variable summary statistics |
 | `src/dtaExport.ts` | CSV, codebook and clipboard exports |
+| `src/dtaImport.ts` | Label edits read back from an edited codebook CSV |
 | `src/dtaWriter.ts` | in-place variable-label edits |
 | `src/dtaViewModel.ts` | shapes metadata and formatted row blocks for the viewer |
 | `src/dtaEditor.ts` | custom editor + in-memory snapshot panel |

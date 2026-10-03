@@ -27,6 +27,11 @@ unchanged.
     *Edit*.
   - **Undo.** Every label edit in the viewer reports what it did with an
     *Undo* button; the last 50 edits can be taken back.
+  - **Bulk edits through the codebook.** *Import labels from a codebook CSV…*
+    reads back the file *Export codebook* writes (and the `_value_labels.csv`
+    beside it) after it was edited in a spreadsheet, shows how many labels
+    would change, and applies them as one edit. Importing an unedited export
+    changes nothing.
   - **MCP tool `set_value_labels(path, value_labels?, attach?, data_label?,
     dry_run?)`** (23 tools now). With only `path` it reads: every variable's
     type, label, attached value label and notes, every value-label set, the
