@@ -6,6 +6,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.16.0 — 2026-10-04
+
 Value labels and the dataset label can now be edited in a `.dta` file without
 Stata, alongside variable labels. Adds one MCP tool; the result schema is
 unchanged.
