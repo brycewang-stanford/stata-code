@@ -6,6 +6,13 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.14.0 — 2026-10-03
+
+The `.dta` viewer added in 0.13 could only be scrolled. It can now be queried:
+filter with a Stata `if` expression, sort, summarize a variable, copy a range,
+and export the view or the codebook. No changes to the Python package or the
+result schema beyond the version number.
+
 ### Added
 
 - **VS Code data viewer: filter rows with a Stata `if` expression.** The bar
