@@ -489,7 +489,16 @@ Then open Jupyter Notebook / JupyterLab (or a `.ipynb` in VS Code), pick **Stata
 
 ### As a VS Code Extension
 
-The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a **seven-view sidebar** (sessions / last result / **data variables** / run history / logs / graphs / **outputs**) — including an agent-native equivalent of Stata's **Variables window** and an **Outputs** panel that surfaces the `esttab` tables and `export` files each run writes to disk — status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors. It also registers a **Stata-free `.dta` data viewer**: double-click any `.dta` file to browse it in a grid with its variable labels, value labels, display formats, notes and missing-value codes intact, reading only the rows on screen so multi-gigabyte files open instantly.
+The companion extension is on the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode). It spawns `stata-code-mcp` as a child process and adds syntax highlighting, an Outline view for `**#` sections and `program define` blocks, code-lens "Run cell" and "Run section" actions on `.do` files, a **seven-view sidebar** (sessions / last result / **data variables** / run history / logs / graphs / **outputs**) — including an agent-native equivalent of Stata's **Variables window** and an **Outputs** panel that surfaces the `esttab` tables and `export` files each run writes to disk — status-bar indicators, completions, help lookup, conservative variable rename, and inline diagnostics from the v1.0 typed errors.
+
+It also registers a **Stata-free `.dta` data viewer**. Double-click any `.dta` file to open it in a grid with its variable labels, value labels, display formats, notes and missing-value codes intact; only the rows on screen are read, so multi-gigabyte files open instantly. No Stata, Python or MCP server is needed for it. In the viewer you can:
+
+- **filter rows with a Stata `if` expression** (`age > 60 & !missing(income)`), evaluated with Stata's semantics for missing values;
+- **sort** by one or several columns and get **per-variable summaries** (the statistics of `summarize, detail`, plus the most frequent values);
+- **copy a range** to the clipboard, and **export** the current view as CSV or the codebook (labels, formats, notes) as its own file;
+- **edit variable labels in place**: the label is written straight into the file, and the data, value labels and notes keep their bytes.
+
+Agents get the label edit in bulk through the `set_variable_labels` MCP tool, for example to label an unlabeled dataset after inspecting it. Details are in [vscode/README.md](vscode/README.md).
 
 ```bash
 # from the VS Code CLI
@@ -608,7 +617,7 @@ stata_code/
 | Static pre-run lint | ✓ (`lint_do`) | — | — | — | — |
 | Stata 13–16 (no pystata) | ✓ (console backend) | ✓ | — | ✓ (COM/dylib) | — |
 | Zero-Python install | ✓ (standalone binary) | — | — | ✓ (VS Code-native) | — |
-| Human IDE polish (data viewer, inline graphs) | growing | — | ✓ | ✓ (strongest) | ✓ |
+| Human IDE polish (data viewer, inline graphs) | data viewer ✓; graphs growing | — | ✓ | ✓ (strongest) | ✓ |
 | Multi-session | ✓ (Stata frames) | partial | — | — | — |
 | Mature ecosystem | early | ✓ (statamcp.com) | ✓ (11k installs) | ✓ (distributor-backed) | ✓ |
 
@@ -703,6 +712,9 @@ Rule of thumb:
   audits
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, seven-view sidebar (sessions / last result / data variables / run history / logs / graphs / outputs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
+- Stata-free `.dta` data viewer in the VS Code extension (formats 113–115 and 117–121, written from StataCorp's published format documentation): random-access browsing of multi-gigabyte files, Stata `if` row filter, multi-key sort, per-variable summaries, range copy, CSV and codebook export
+- Stata-free variable-label editing: the fixed-width label field is overwritten in place, by hand in the viewer or in bulk through the `set_variable_labels` MCP tool; checked against Stata 18 (`describe` shows the new labels; `notes`, `label list` and `datasignature` unchanged)
+- Extension also published to [Open VSX](https://open-vsx.org/) for Cursor, Windsurf and VSCodium
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### Next Up
@@ -710,7 +722,8 @@ Rule of thumb:
 - Streaming / incremental progress for long runs (`log.complete:false`, partial log lines). v0.11's `run_in_background` already unblocks the caller for 20-minute `boottest` / `csdid` jobs, but a running job still reports nothing until it finishes
 - Hard timeout / cancellation for the Jupyter kernel (move it from the direct in-process runner to the subprocess pool, or an equivalent)
 - Console backend: graph capture and richer matrix coverage (values currently materialized for the estimation matrices; state is per-call)
-- Human IDE polish to match editor-first tools: inline graph rendering + DPI export, a scalable data viewer, and an optional "attach to a running Stata" backend
+- Human IDE polish to match editor-first tools: inline graph rendering + DPI export, and an optional "attach to a running Stata" backend
+- Data viewer: editing the dataset label and value labels (both are variable-length in the file, unlike variable labels), variable abbreviations and time-series operators in the row filter
 - Publish the reliability/token [benchmark](benchmarks/) results (typed contract vs. raw-log tools) as evidence, not a claim
 - **v1.0** — Stable schema, broader Stata edition coverage
 

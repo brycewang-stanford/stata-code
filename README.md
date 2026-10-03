@@ -457,7 +457,16 @@ jupyter kernelspec list
 
 ### 作为 VS Code 扩展
 
-配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。扩展还注册了一个**不依赖 Stata 的 `.dta` 数据浏览器**：双击任意 `.dta` 文件即可在表格中浏览，变量标签、值标签、显示格式、notes 和缺失值代码全部保留；只读取屏幕上可见的行，几个 GB 的文件也能瞬间打开。
+配套扩展已发布到 Marketplace：[`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)。它会以子进程方式启动 `stata-code-mcp`，并提供语法高亮、`**#` section 和 `program define` 的 Outline、`.do` 文件的 code-lens "Run cell" / "Run section"、**七视图侧边栏**（sessions / last result / **data 变量浏览器** / run history / logs / graphs / **outputs**）——其中包含一个 agent-native 版的 Stata **变量窗口**，以及一个把每次运行写到磁盘的 `esttab` 表格和 `export` 文件呈现出来的 **Outputs** 面板——状态栏指示器、补全、帮助跳转、保守变量重命名，以及来自 v1.0 typed errors 的内联诊断。
+
+扩展还注册了一个**不依赖 Stata 的 `.dta` 数据浏览器**。双击任意 `.dta` 文件即可在表格中打开，变量标签、值标签、显示格式、notes 和缺失值代码全部保留；只读取屏幕上可见的行，几个 GB 的文件也能瞬间打开。它不需要 Stata、Python，也不需要 MCP server。在浏览器里可以：
+
+- **用 Stata 的 `if` 表达式筛选行**（如 `age > 60 & !missing(income)`），缺失值的处理遵循 Stata 的语义；
+- 按一列或多列**排序**，查看**单变量汇总**（`summarize, detail` 的统计量，外加出现最多的取值）；
+- **复制选区**到剪贴板，把当前视图**导出**为 CSV，或把 codebook（标签、格式、notes）单独导出；
+- **原地修改变量标签**：标签直接写进文件，数据、值标签和 notes 逐字节不变。
+
+Agent 可以通过 MCP 工具 `set_variable_labels` 批量做同一件事，例如看完数据后给一份没有标签的数据集补上标签。细节见 [vscode/README.md](vscode/README.md)。
 
 ```bash
 # 从 VS Code 命令行
@@ -644,14 +653,19 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 - 经济学实证工作流层：现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP handoff、跨包/跨栈 parity audit 的 skill references 和 cookbook examples
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、七视图侧边栏（sessions / last result / data 变量浏览器 / run history / logs / graphs / outputs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
+- VS Code 扩展里不依赖 Stata 的 `.dta` 数据浏览器（格式 113–115 与 117–121，依据 StataCorp 公开的格式文档实现）：随机读取浏览几个 GB 的文件、Stata `if` 行筛选、多键排序、单变量汇总、选区复制、CSV 与 codebook 导出
+- 不依赖 Stata 的变量标签编辑：原地覆写定长的标签字段，可在浏览器里手动改，也可通过 MCP 工具 `set_variable_labels` 批量改；已用 Stata 18 核对（`describe` 显示新标签，`notes`、`label list` 和 `datasignature` 不变）
+- 扩展同时发布到 [Open VSX](https://open-vsx.org/)，供 Cursor、Windsurf、VSCodium 安装
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 
 ### 下一步
 
 - 长任务的流式 / 增量进度（`log.complete:false`、部分日志行）。v0.11 的 `run_in_background` 已经让 20 分钟的 `boottest` / `csdid` 不再阻塞调用方，但运行中的任务在结束前仍然不汇报任何中间结果
-- Stata 11–16 的 console fallback，按 v1.0 schema 重新实现
-- 决定 Jupyter kernel 是否也迁到 subprocess pool，或者继续清楚记录当前为了交互性保留 in-process runner 的取舍
-- VS Code 体验打磨：Extension Host 端到端测试、首次启动诊断、命令面板 UX
+- Jupyter kernel 的硬超时 / 取消（从进程内 runner 迁到 subprocess pool，或等价方案）
+- Console 后端：图形捕获和更完整的矩阵覆盖（目前只物化估计相关矩阵的数值；状态按次调用）
+- 向编辑器优先的工具看齐的 IDE 体验：内联图形渲染 + DPI 导出，以及可选的“附着到正在运行的 Stata”后端
+- 数据浏览器：编辑数据集标签和值标签（它们在文件里是变长的，和变量标签不同），行筛选里的变量缩写和时间序列算子
+- 把可靠性 / token [基准测试](benchmarks/)结果（typed contract 对比 raw-log 工具）作为证据发布，而不是只做声明
 - **v1.0** —— 稳定 schema，覆盖更广的 Stata edition
 
 明确不做的范围见 [SCHEMA.md §7](SCHEMA.md)。
