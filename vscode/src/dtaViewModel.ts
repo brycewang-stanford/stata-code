@@ -58,6 +58,8 @@ export interface ViewerInit {
   valueLabelsTruncated: string[];
   /** Whether "Load in Stata" applies (a real file on disk, not a snapshot). */
   canLoadInStata: boolean;
+  /** Whether variable labels can be written back to the file. */
+  canEditLabels: boolean;
 }
 
 export interface ViewerRows {
@@ -98,7 +100,13 @@ function columnChars(v: DtaVariable, table: Map<number, string> | undefined): nu
 
 export function buildViewerInit(
   meta: DtaMeta,
-  options: { title: string; subtitle?: string; warnings?: string[]; canLoadInStata?: boolean },
+  options: {
+    title: string;
+    subtitle?: string;
+    warnings?: string[];
+    canLoadInStata?: boolean;
+    canEditLabels?: boolean;
+  },
 ): ViewerInit {
   const valueLabels: Record<string, Array<[string, string]>> = {};
   const valueLabelsTruncated: string[] = [];
@@ -141,6 +149,7 @@ export function buildViewerInit(
     valueLabels,
     valueLabelsTruncated,
     canLoadInStata: options.canLoadInStata ?? false,
+    canEditLabels: options.canEditLabels === true,
   };
 }
 

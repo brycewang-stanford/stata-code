@@ -150,6 +150,9 @@ interface Layout {
   dataOffset: number;
   /** [start, end) of the GSO records, or null when the format has no strLs. */
   strls: [number, number] | null;
+  /** File offset of the first variable-label field, and the width of each. */
+  labelsOffset: number;
+  labelWidth: number;
 }
 
 interface StrLEntry {
@@ -534,6 +537,8 @@ export class DtaReader {
       littleEndian,
       dataOffset,
       strls: [map[10] + "<strls>".length, map[11] - "</strls>".length],
+      labelsOffset: map[7] + "<variable_labels>".length,
+      labelWidth,
     };
     const meta = buildMeta({
       release,
@@ -595,6 +600,7 @@ export class DtaReader {
     for (let i = 0; i < nVars; i++) formats.push(decode(zeroTerminated(desc.take(formatWidth))));
     const labelNames: string[] = [];
     for (let i = 0; i < nVars; i++) labelNames.push(decode(zeroTerminated(desc.take(33))));
+    const labelsOffset = 109 + desc.pos;
     const labels: string[] = [];
     for (let i = 0; i < nVars; i++) labels.push(decode(zeroTerminated(desc.take(81))));
 
@@ -648,7 +654,14 @@ export class DtaReader {
       }
     }
 
-    const layout: Layout = { release, littleEndian, dataOffset, strls: null };
+    const layout: Layout = {
+      release,
+      littleEndian,
+      dataOffset,
+      strls: null,
+      labelsOffset,
+      labelWidth: 81,
+    };
     const meta = buildMeta({
       release,
       littleEndian,
@@ -666,6 +679,18 @@ export class DtaReader {
       dataBytes: Math.max(0, source.size - dataOffset),
     });
     return new DtaReader(source, meta, layout, decode, maxStrLBytes);
+  }
+
+  /**
+   * Where variable `index`'s label sits in the file. Labels are fixed-width,
+   * zero-terminated fields, which is what lets dtaWriter replace one in place.
+   */
+  variableLabelField(index: number): { offset: number; width: number } {
+    if (!Number.isInteger(index) || index < 0 || index >= this.meta.nVars) {
+      throw new RangeError(`variable index ${index} is out of range`);
+    }
+    const { labelsOffset, labelWidth } = this.layout;
+    return { offset: labelsOffset + index * labelWidth, width: labelWidth };
   }
 
   // ── observations ──────────────────────────────────────────────────────────

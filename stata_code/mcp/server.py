@@ -65,6 +65,11 @@ except ImportError:  # pragma: no cover - environment without mcp installed
 from stata_code.core import _refs, jobs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable
+from stata_code.core.dta_labels import (
+    DtaLabelError,
+    read_variable_labels,
+    set_variable_labels,
+)
 from stata_code.core.lint import lint_code
 from stata_code.core.notebook import (
     NotebookError,
@@ -1498,6 +1503,59 @@ def _tool_definitions() -> list[Tool]:
                 openWorldHint=False,
             ),
         ),
+        Tool(
+            name="set_variable_labels",
+            title="Set Variable Labels in a .dta File",
+            description=(
+                "Stata-free: write variable labels straight into a .dta file on "
+                "disk, the on-disk equivalent of `label variable x \"...\"` + "
+                "`save, replace`. Pass `path` and `labels` ({variable name: "
+                "label}; \"\" removes a label). Only the label fields are "
+                "overwritten, so the data, value labels, notes, formats and "
+                "characteristics are byte-for-byte unchanged and no Stata "
+                "session or license is used. Omit `labels` to just read the "
+                "current names and labels (e.g. to find unlabeled variables "
+                "before proposing labels). All edits are validated first; if "
+                "any is invalid nothing is written. Limits: 80 characters per "
+                "label; files in formats older than 118 (Stata 13 or earlier) "
+                "take ASCII labels only. Returns {ok, path, release, changed:"
+                "[{name, before, after}], unchanged:[...]}; `before` is what to "
+                "pass back to undo. Use `dry_run` to validate without writing. "
+                "This edits the file, not a dataset already loaded in a "
+                "session: run `use` again to see the new labels there."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the .dta file to edit.",
+                    },
+                    "labels": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "description": (
+                            "Variable name → new label. An empty string removes "
+                            "the label. Omit to read the current labels."
+                        ),
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Validate and report the changes without writing.",
+                    },
+                },
+            },
+            annotations=ToolAnnotations(
+                title="Set Variable Labels in a .dta File",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
     ]
 
 
@@ -2664,6 +2722,8 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return await asyncio.to_thread(_inspect_data_tool, arguments)
         if name == "lint_do":
             return _lint_do_tool(arguments)
+        if name == "set_variable_labels":
+            return _set_variable_labels_tool(arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
         return _error_result(str(exc), kind=exc.kind)
@@ -3075,6 +3135,57 @@ def _lint_do_tool(arguments: dict[str, Any]) -> Any:
         "findings": [f.to_dict() for f in findings],
     }
     return _json_result(payload)
+
+
+def _set_variable_labels_tool(arguments: dict[str, Any]) -> Any:
+    path = arguments.get("path")
+    labels = arguments.get("labels")
+    dry_run = arguments.get("dry_run", False)
+    if not isinstance(path, str) or not path:
+        return _error_result("path must be a non-empty string", kind="missing_argument")
+    if not isinstance(dry_run, bool):
+        return _error_result("dry_run must be a boolean", kind="invalid_request")
+    if labels is not None and (
+        not isinstance(labels, dict)
+        or not all(isinstance(k, str) and isinstance(v, str) for k, v in labels.items())
+    ):
+        return _error_result(
+            "labels must be an object mapping variable names to label strings",
+            kind="invalid_request",
+        )
+    try:
+        if labels is None:
+            found = read_variable_labels(path)
+            return _json_result(
+                {
+                    "ok": True,
+                    "path": path,
+                    "release": found.release,
+                    "labels": found.as_dict(),
+                    "changed": [],
+                    "unchanged": [],
+                    "dry_run": dry_run,
+                }
+            )
+        changes = set_variable_labels(path, labels, dry_run=dry_run)
+        release = read_variable_labels(path).release
+    except FileNotFoundError:
+        return _error_result(f"file not found: {path}", kind="file_not_found")
+    except DtaLabelError as exc:
+        return _error_result(str(exc), kind="invalid_request")
+    except OSError as exc:
+        return _error_result(f"could not edit {path}: {exc}", kind="file_io")
+    changed = {change.name for change in changes}
+    return _json_result(
+        {
+            "ok": True,
+            "path": path,
+            "release": release,
+            "changed": [change.to_dict() for change in changes],
+            "unchanged": [name for name in labels if name not in changed],
+            "dry_run": dry_run,
+        }
+    )
 
 
 def _inspect_data_tool(arguments: dict[str, Any]) -> Any:

@@ -53,7 +53,7 @@ you actually want to open.
 
 ### Data viewer for `.dta` files
 
-Double-click a `.dta` file in the Explorer and it opens in a read-only grid,
+Double-click a `.dta` file in the Explorer and it opens in a grid,
 the way Stata's Data Browser would show it. The file is read directly, from
 StataCorp's published format specification, so this works **without Stata or
 Python installed** and without the MCP server running.
@@ -121,6 +121,16 @@ the variable names. The *Export* menu writes:
 - **the codebook** — one row per variable with its type, format, value label,
   variable label and notes, plus a second file with every value-label mapping.
   This is the half of a dataset a CSV cannot carry.
+
+**Variable labels can be edited in place.** Select a variable, click *Edit*
+beside its label in the details panel (or double-click the variable in the
+list), type, and press Enter; Esc cancels. The label is written straight into
+the file. Only that label's fixed-width field is overwritten, so the data,
+value labels, notes and formats keep their bytes, and no Stata is involved.
+Labels follow Stata's limit of 80 characters; files in formats older than 118
+take ASCII only, since those formats do not say which encoding they use. The
+data cells, value labels and the dataset label are not editable. Agents get the
+same operation in bulk through the `set_variable_labels` MCP tool.
 
 *Load in Stata* (also on the Explorer context menu of any `.dta`) runs
 `use "<file>", clear` in the current session, asking first if that session has
@@ -361,6 +371,7 @@ UI modules:
 | `src/dtaFilter.ts` | Stata `if` expression evaluator for the row filter |
 | `src/dtaQuery.ts` | filter + sort row order, per-variable summary statistics |
 | `src/dtaExport.ts` | CSV, codebook and clipboard exports |
+| `src/dtaWriter.ts` | in-place variable-label edits |
 | `src/dtaViewModel.ts` | shapes metadata and formatted row blocks for the viewer |
 | `src/dtaEditor.ts` | custom editor + in-memory snapshot panel |
 | `media/dtaViewer.{js,css}` | the viewer's virtual grid and variables panel |

@@ -591,6 +591,39 @@ body.resizing * {
   overflow-wrap: anywhere;
 }
 
+#detail dd input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-focusBorder);
+  padding: 2px 4px;
+}
+
+#detail dd .hint {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--vscode-font-family);
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+#detail dd button {
+  font: inherit;
+  font-family: var(--vscode-font-family);
+  font-size: 0.85em;
+  color: var(--vscode-textLink-foreground);
+  background: none;
+  border: none;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+}
+
+#detail dd button:hover {
+  text-decoration: underline;
+}
+
 #detail table {
   border-collapse: collapse;
   width: 100%;

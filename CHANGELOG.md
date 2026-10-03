@@ -6,6 +6,29 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+### Added
+
+- **Edit variable labels without Stata.** A variable label is a fixed-width
+  field in every `.dta` format since Stata 8, so it can be replaced by
+  overwriting that field alone: no offset moves and the data, value labels,
+  notes, formats and characteristics keep their bytes. Two entry points share
+  that approach and the same Stata-written fixtures:
+  - **VS Code data viewer**: *Edit* beside a variable's label in the details
+    panel (or double-click the variable in the list), Enter to write it to the
+    file, Esc to cancel. Snapshots of in-memory data stay read-only.
+  - **MCP tool `set_variable_labels(path, labels?, dry_run?)`** (22 tools now):
+    a batch `{variable: label}` map for agents, e.g. to label an unlabeled
+    dataset after looking at it. Omit `labels` to read the current ones. The
+    reply lists `changed: [{name, before, after}]`, so `before` is the undo.
+    Python API: `stata_code.core.dta_labels`.
+
+  Every edit is validated before any byte is written. Limits are Stata's own
+  80 characters; files in formats older than 118 (Stata 13 or earlier) take
+  ASCII labels only, because those formats do not record their encoding.
+  Checked against Stata 18: the edited fixtures load, `describe` shows the new
+  labels, and `notes`, `label list` and `datasignature` are unchanged. Dataset
+  labels and value labels are variable-length and are not editable yet.
+
 ## 0.14.0 — 2026-10-03
 
 The `.dta` viewer added in 0.13 could only be scrolled. It can now be queried:

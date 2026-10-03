@@ -16,6 +16,7 @@
   const MAX_SCROLL_PX = 8000000;
   const MAX_CACHED_BLOCKS = 400;
   const MAX_LISTED_VARS = 2000;
+  const MAX_LABEL_CHARS = 80; // Stata's limit on a variable label
   const CELL_PAD = 17; // horizontal padding + border of a cell, in px
   const MIN_COL_W = 36;
   /** Above this many observations a summary is computed on request, not on select. */
@@ -95,6 +96,8 @@
   /** Column summaries for the current view, by column index. */
   const summaries = new Map();
   let noticeTimer;
+  /** The variable label being edited in the detail panel: {name, draft, caret}. */
+  let labelEdit = null;
 
   el.labels.checked = useLabels;
   if (saved.sideHidden) el.side.hidden = true;
@@ -784,7 +787,24 @@
     }
     const v = init.variables[focus.col];
     let html = "<h3>" + esc(v.name) + "</h3><dl>";
-    html += row("Label", v.label);
+    if (labelEdit && labelEdit.name !== v.name) labelEdit = null;
+    if (labelEdit) {
+      html +=
+        '<dt>Label</dt><dd><input type="text" id="label-input" maxlength="' +
+        MAX_LABEL_CHARS +
+        '" spellcheck="false" aria-label="Variable label for ' +
+        esc(v.name) +
+        '" value="' +
+        esc(labelEdit.draft) +
+        '" /><span class="hint">Enter to save to the file · Esc to cancel</span></dd>';
+    } else if (init.canEditLabels) {
+      html +=
+        "<dt>Label</dt><dd>" +
+        (v.label ? esc(v.label) : '<span class="dim">(none)</span>') +
+        ' <button type="button" id="label-edit" title="Edit this variable\'s label in the file">Edit</button></dd>';
+    } else {
+      html += row("Label", v.label);
+    }
     html += row("Type", v.type);
     html += row("Format", v.format);
     html += row("Value label", v.valueLabel);
@@ -807,6 +827,30 @@
       html += "<h4>Value label</h4><p>The file does not define this value label.</p>";
     }
     el.detail.innerHTML = html;
+    const input = document.getElementById("label-input");
+    if (input) {
+      // The panel re-renders when a summary arrives; keep the caret where it was.
+      input.focus();
+      const at = Math.min(labelEdit.caret ?? input.value.length, input.value.length);
+      input.setSelectionRange(at, at);
+    }
+  }
+
+  function startLabelEdit() {
+    if (!init || !init.canEditLabels || focus.col < 0) return;
+    const v = init.variables[focus.col];
+    labelEdit = { name: v.name, draft: v.label };
+    renderDetail();
+    document.getElementById("label-input")?.select();
+  }
+
+  function commitLabelEdit() {
+    if (!labelEdit) return;
+    const { name, draft } = labelEdit;
+    labelEdit = null;
+    const v = init.variables.find((x) => x.name === name);
+    if (v && draft !== v.label) vscode.postMessage({ type: "setLabel", name, label: draft });
+    renderDetail();
   }
 
   // ── events ──────────────────────────────────────────────────────────────
@@ -908,7 +952,33 @@
 
   el.varFilter.addEventListener("input", renderVarList);
 
+  el.varlist.addEventListener("dblclick", (event) => {
+    if (event.target.closest(".v[data-c]")) startLabelEdit();
+  });
+
+  el.detail.addEventListener("input", (event) => {
+    if (event.target.id !== "label-input" || !labelEdit) return;
+    labelEdit.draft = event.target.value;
+    labelEdit.caret = event.target.selectionStart;
+  });
+  el.detail.addEventListener("keydown", (event) => {
+    if (event.target.id !== "label-input") return;
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      commitLabelEdit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      labelEdit = null;
+      renderDetail();
+    }
+    event.stopPropagation();
+  });
+
   el.detail.addEventListener("click", (event) => {
+    if (event.target.id === "label-edit") {
+      startLabelEdit();
+      return;
+    }
     if (event.target.id === "summarize" && focus.col >= 0) {
       requestSummary(focus.col);
       renderDetail();

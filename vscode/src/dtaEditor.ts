@@ -25,6 +25,7 @@ import {
 } from "./dtaQuery";
 import { BufferByteSource, DtaFormatError, DtaReader, type ByteSource } from "./dtaReader";
 import { buildDtaViewerHtml } from "./dtaViewerHtml";
+import { DtaEditError, setVariableLabels } from "./dtaWriter";
 import { buildViewerInit, formatRange, formatRows, formatSummary } from "./dtaViewModel";
 
 export const DTA_VIEW_TYPE = "stataCode.dtaViewer";
@@ -36,6 +37,8 @@ interface ViewerSource {
   subtitle?: string;
   /** False for a snapshot of in-memory data: there is no file to `use`. */
   canLoadInStata: boolean;
+  /** True for a dataset file on disk, whose variable labels can be rewritten. */
+  canEditLabels: boolean;
 }
 
 interface WebviewRequest {
@@ -55,6 +58,8 @@ interface WebviewRequest {
   lastColumn?: unknown;
   headers?: unknown;
   kind?: unknown;
+  name?: unknown;
+  label?: unknown;
 }
 
 const NO_QUERY: RowQuery = { filter: "", sort: [] };
@@ -183,6 +188,9 @@ class DtaViewerSession implements vscode.Disposable {
       case "export":
         await this.export(message);
         return;
+      case "setLabel":
+        await this.setLabel(message);
+        return;
       case "loadInStata":
         if (this.source.canLoadInStata) {
           await vscode.commands.executeCommand("stataCode.useDtaFile", this.source.uri);
@@ -225,6 +233,7 @@ class DtaViewerSession implements vscode.Disposable {
           title: source.title,
           subtitle: source.subtitle,
           canLoadInStata: source.canLoadInStata,
+          canEditLabels: source.canEditLabels && source.uri.scheme === "file",
         }),
       );
       await this.postView();
@@ -333,6 +342,39 @@ class DtaViewerSession implements vscode.Disposable {
 
   private async notice(text: string, isError = false): Promise<void> {
     await this.webview.postMessage({ type: "notice", text, isError });
+  }
+
+  /** Write one variable's label into the file, then show the file as it now is. */
+  private async setLabel(message: WebviewRequest): Promise<void> {
+    const { uri, canEditLabels } = this.source;
+    if (!canEditLabels || uri.scheme !== "file") return;
+    if (typeof message.name !== "string" || typeof message.label !== "string") return;
+    const name = message.name;
+    try {
+      const legacyEncoding = vscode.workspace
+        .getConfiguration("stataCode")
+        .get<string>("dtaLegacyEncoding", "auto");
+      const changes = await setVariableLabels(
+        uri.fsPath,
+        { [name]: message.label.trim() },
+        { legacyEncoding },
+      );
+      await this.load();
+      if (changes.length === 0) return;
+      const { before, after } = changes[0];
+      await this.notice(
+        after === ""
+          ? `Removed the label of ${name} (was "${before}")`
+          : before === ""
+            ? `Labeled ${name}`
+            : `Relabeled ${name} (was "${before}")`,
+      );
+    } catch (err) {
+      if (!(err instanceof DtaEditError)) {
+        this.log(`[stata-code] dta viewer: writing a label failed: ${errorText(err)}`);
+      }
+      await this.notice(`Label not saved: ${errorText(err)}`, true);
+    }
   }
 
   private async copyRange(message: WebviewRequest): Promise<void> {
@@ -467,7 +509,12 @@ export class DtaViewerProvider implements vscode.CustomReadonlyEditorProvider {
     const session = new DtaViewerSession(
       panel.webview,
       this.extensionUri,
-      { uri: document.uri, title: path.basename(document.uri.path), canLoadInStata: true },
+      {
+        uri: document.uri,
+        title: path.basename(document.uri.path),
+        canLoadInStata: true,
+        canEditLabels: true,
+      },
       this.log,
     );
     panel.onDidDispose(() => session.dispose());
@@ -505,6 +552,7 @@ export function openDtaSnapshotPanel(
     title: `Data — ${options.sessionId}`,
     subtitle: options.subtitle,
     canLoadInStata: false,
+    canEditLabels: false,
   };
   const existing = snapshotPanels.get(options.sessionId);
   if (existing) {

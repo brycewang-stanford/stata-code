@@ -1,6 +1,6 @@
 ---
 name: stata-code
-description: Use this skill whenever the user asks to run Stata code, debug a `.do` file, work with a Stata-backed Jupyter notebook, repair a Stata error, interpret `r()` / `e()` results, or write/plan a Stata analysis — and the `stata-code` MCP server is available (or, when it is not, to generate self-contained do-files). The skill teaches Claude the v1.0 RunResult schema, the 21 MCP tools, token-economy defaults, the typed-error repair loop, and a routing table into an on-demand Stata reference library (syntax, data management, econometrics, causal inference, panel/time series, graphics, tables, error codes, defensive coding, and key packages).
+description: Use this skill whenever the user asks to run Stata code, debug a `.do` file, work with a Stata-backed Jupyter notebook, repair a Stata error, interpret `r()` / `e()` results, or write/plan a Stata analysis — and the `stata-code` MCP server is available (or, when it is not, to generate self-contained do-files). The skill teaches Claude the v1.0 RunResult schema, the 22 MCP tools, token-economy defaults, the typed-error repair loop, and a routing table into an on-demand Stata reference library (syntax, data management, econometrics, causal inference, panel/time series, graphics, tables, error codes, defensive coding, and key packages).
 ---
 
 # stata-code Skill
@@ -56,7 +56,7 @@ The skill ships a `references/` library of dense Stata domain knowledge. **Progr
 
 Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+ `panel-timeseries.md`); "my merge gives wrong N" → `defensive-coding.md`; "command not found: reghdfe" → `error-codes.md` + `packages/reghdfe.md`; "make a publication table" → `tables-export.md` + `recipes/publication-tables.md`; "compare Stata csdid against R did" → `parity-audit.md` + `packages/csdid.md`; "OECD MCP pulled a CSV; now analyze it in Stata" → `data-mcp-handoff.md`; "run the full DiD/event-study workflow" → `recipes/did-event-study.md`.
 
-## 4. The 21 MCP tools (cheat sheet)
+## 4. The 22 MCP tools (cheat sheet)
 
 | Tool | Use it when… |
 |---|---|
@@ -70,6 +70,7 @@ Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+
 | `get_matrix(ref)` | A matrix in `results.r.matrices` / `results.e.matrices` came back with `values: null`. By default *every* matrix is a stub, so this is the normal way to get raw `e(V)` / `e(b)` numbers. |
 | `inspect_data(varlist?, detail?, session_id?)` | "What's in this dataset?" Runs `describe` + `codebook`; returns the structured `dataset` block plus the codebook log. |
 | `lint_do(code? / path?)` | Before running a long or generated do-file, statically check it (unbalanced braces, missing `end`, dangling `///`). Cheap, Stata-free; catches structural mistakes without spending a run. Advisory — a clean result is not a guarantee. |
+| `set_variable_labels(path, labels?, dry_run?)` | The user wants variable labels added or fixed in a `.dta` file on disk (e.g. "label this unlabeled dataset"). Stata-free and in place: only the label fields change, so notes, value labels and formats survive. Omit `labels` to read the current ones first; `changed[].before` is the undo. 80 characters max; formats older than 118 take ASCII only. For a dataset in a session's memory use `label variable` via `stata_run` instead. |
 | `install_package(name, source?, url?, replace?, session_id?)` | A run failed with `command_not_found` (rc 199) for a community package, or the user asks to install one. Builds `ssc`/`net install`, then verifies with `which`. |
 | `list_sessions()` | The user mentions multiple parallel Stata "tabs", or you need to find a session by id. |
 | `cancel_session(session_id)` | A run is hung or the user said "stop". Subprocess workers terminate; in-flight code is killed. |
