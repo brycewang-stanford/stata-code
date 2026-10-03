@@ -718,3 +718,75 @@ body.resizing * {
     width: 220px;
   }
 }
+
+/* value-label editing in the detail panel */
+#detail dd select {
+  max-width: 100%;
+  font: inherit;
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-focusBorder));
+  padding: 1px 2px;
+}
+
+#detail h4 button,
+#vl-editor .actions button,
+#notice button {
+  font: inherit;
+  font-family: var(--vscode-font-family);
+  font-size: 0.85em;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--vscode-textLink-foreground);
+  background: none;
+  border: none;
+  padding: 0 0 0 6px;
+  cursor: pointer;
+}
+
+#detail h4 button:hover,
+#vl-editor .actions button:hover,
+#notice button:hover {
+  text-decoration: underline;
+}
+
+#vl-editor input,
+#vl-editor textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  font-family: var(--grid-font);
+  font-size: inherit;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-focusBorder);
+  padding: 2px 4px;
+}
+
+#vl-editor textarea {
+  resize: vertical;
+  white-space: pre;
+}
+
+#vl-editor .hint {
+  display: block;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+#vl-editor .actions {
+  margin-top: 4px;
+}
+
+#vl-editor .actions button {
+  padding: 0 10px 0 0;
+}
+
+/* a value label's name is case-sensitive: do not let the heading upper-case it */
+#detail h4 .set-name {
+  font-family: var(--grid-font);
+  text-transform: none;
+  letter-spacing: 0;
+}

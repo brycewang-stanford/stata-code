@@ -25,7 +25,14 @@ import {
 } from "./dtaQuery";
 import { BufferByteSource, DtaFormatError, DtaReader, type ByteSource } from "./dtaReader";
 import { buildDtaViewerHtml } from "./dtaViewerHtml";
-import { DtaEditError, setVariableLabels } from "./dtaWriter";
+import {
+  describeEdit,
+  type DtaLabelEdit,
+  DtaEditError,
+  editChanged,
+  editLabels,
+  inverseEdit,
+} from "./dtaWriter";
 import { buildViewerInit, formatRange, formatRows, formatSummary } from "./dtaViewModel";
 
 export const DTA_VIEW_TYPE = "stataCode.dtaViewer";
@@ -60,6 +67,42 @@ interface WebviewRequest {
   kind?: unknown;
   name?: unknown;
   label?: unknown;
+  edit?: unknown;
+}
+
+/** How many label edits a viewer can take back. */
+const MAX_UNDO = 50;
+
+/** Keep only the well-formed parts of an edit a webview sent. */
+function parseEdit(value: unknown): DtaLabelEdit | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const strings = (v: unknown): Record<string, string> | undefined => {
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+    const entries = Object.entries(v as Record<string, unknown>);
+    return entries.every(([, text]) => typeof text === "string")
+      ? (Object.fromEntries(entries) as Record<string, string>)
+      : undefined;
+  };
+  const edit: DtaLabelEdit = {};
+  const variableLabels = strings(raw.variableLabels);
+  if (variableLabels) edit.variableLabels = variableLabels;
+  const attach = strings(raw.attach);
+  if (attach) edit.attach = attach;
+  if (typeof raw.dataLabel === "string") edit.dataLabel = raw.dataLabel;
+  if (typeof raw.valueLabels === "object" && raw.valueLabels !== null) {
+    const sets: Record<string, Record<string, string> | null> = {};
+    for (const [name, table] of Object.entries(raw.valueLabels as Record<string, unknown>)) {
+      if (table === null) sets[name] = null;
+      else {
+        const parsed = strings(table);
+        if (!parsed) return null;
+        sets[name] = parsed;
+      }
+    }
+    edit.valueLabels = sets;
+  }
+  return edit;
 }
 
 const NO_QUERY: RowQuery = { filter: "", sort: [] };
@@ -106,6 +149,8 @@ class DtaViewerSession implements vscode.Disposable {
   private source: ViewerSource;
   private ready = false;
   private loadSeq = 0;
+  /** Edits that take back the label changes made in this viewer, oldest first. */
+  private undoStack: DtaLabelEdit[] = [];
   private reloadTimer: NodeJS.Timeout | undefined;
   private watcher: vscode.FileSystemWatcher | undefined;
   private readonly disposables: vscode.Disposable[] = [];
@@ -189,7 +234,20 @@ class DtaViewerSession implements vscode.Disposable {
         await this.export(message);
         return;
       case "setLabel":
-        await this.setLabel(message);
+        if (typeof message.name === "string" && typeof message.label === "string") {
+          await this.applyEdit({ variableLabels: { [message.name]: message.label.trim() } });
+        }
+        return;
+      case "editLabels": {
+        const edit = parseEdit(message.edit);
+        if (edit) await this.applyEdit(edit);
+        return;
+      }
+      case "dropValueLabel":
+        await this.dropValueLabel(message);
+        return;
+      case "undoEdit":
+        await this.undoEdit();
         return;
       case "loadInStata":
         if (this.source.canLoadInStata) {
@@ -344,37 +402,64 @@ class DtaViewerSession implements vscode.Disposable {
     await this.webview.postMessage({ type: "notice", text, isError });
   }
 
-  /** Write one variable's label into the file, then show the file as it now is. */
-  private async setLabel(message: WebviewRequest): Promise<void> {
+  /**
+   * Write a label edit into the file, then show the file as it now is. The
+   * edit that takes it back is kept, so the notice can offer Undo.
+   */
+  private async applyEdit(edit: DtaLabelEdit, undoing = false): Promise<void> {
     const { uri, canEditLabels } = this.source;
     if (!canEditLabels || uri.scheme !== "file") return;
-    if (typeof message.name !== "string" || typeof message.label !== "string") return;
-    const name = message.name;
+    const before = this.reader?.meta;
     try {
       const legacyEncoding = vscode.workspace
         .getConfiguration("stataCode")
         .get<string>("dtaLegacyEncoding", "auto");
-      const changes = await setVariableLabels(
-        uri.fsPath,
-        { [name]: message.label.trim() },
-        { legacyEncoding },
-      );
+      const result = await editLabels(uri.fsPath, edit, { legacyEncoding });
       await this.load();
-      if (changes.length === 0) return;
-      const { before, after } = changes[0];
-      await this.notice(
-        after === ""
-          ? `Removed the label of ${name} (was "${before}")`
-          : before === ""
-            ? `Labeled ${name}`
-            : `Relabeled ${name} (was "${before}")`,
-      );
+      if (!editChanged(result)) return;
+      if (!undoing && before) {
+        this.undoStack.push(inverseEdit(before, result));
+        if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
+      }
+      await this.webview.postMessage({
+        type: "notice",
+        text: undoing ? `Undone: ${describeEdit(result).toLowerCase()}` : describeEdit(result),
+        isError: false,
+        canUndo: !undoing && before !== undefined,
+      });
     } catch (err) {
       if (!(err instanceof DtaEditError)) {
-        this.log(`[stata-code] dta viewer: writing a label failed: ${errorText(err)}`);
+        this.log(`[stata-code] dta viewer: writing labels failed: ${errorText(err)}`);
       }
-      await this.notice(`Label not saved: ${errorText(err)}`, true);
+      await this.notice(`Not saved: ${errorText(err)}`, true);
     }
+  }
+
+  /** Drop a value label after asking; it is detached from every variable using it. */
+  private async dropValueLabel(message: WebviewRequest): Promise<void> {
+    const name = message.name;
+    const meta = this.reader?.meta;
+    if (typeof name !== "string" || !name || !meta) return;
+    const users = meta.variables.filter((v) => v.valueLabel === name).map((v) => v.name);
+    const detail =
+      users.length > 0
+        ? `It will be detached from ${users.join(", ")}. The codes in the data are not changed.`
+        : "No variable uses it.";
+    const choice = await vscode.window.showWarningMessage(
+      `Drop the value label "${name}" from ${path.basename(this.source.uri.fsPath)}?`,
+      { modal: true, detail },
+      "Drop",
+    );
+    if (choice === "Drop") await this.applyEdit({ valueLabels: { [name]: null } });
+  }
+
+  private async undoEdit(): Promise<void> {
+    const edit = this.undoStack.pop();
+    if (!edit) {
+      await this.notice("Nothing to undo");
+      return;
+    }
+    await this.applyEdit(edit, true);
   }
 
   private async copyRange(message: WebviewRequest): Promise<void> {

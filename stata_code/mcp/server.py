@@ -65,6 +65,7 @@ except ImportError:  # pragma: no cover - environment without mcp installed
 from stata_code.core import _refs, jobs
 from stata_code.core._pool import get_default_pool, pool_execute, pool_stata_info
 from stata_code.core._runtime import PystataNotAvailable
+from stata_code.core.dta_edit import edit_labels, read_metadata
 from stata_code.core.dta_labels import (
     DtaLabelError,
     read_variable_labels,
@@ -1556,6 +1557,83 @@ def _tool_definitions() -> list[Tool]:
                 openWorldHint=False,
             ),
         ),
+        Tool(
+            name="set_value_labels",
+            title="Set Value Labels in a .dta File",
+            description=(
+                "Stata-free: read or edit the value labels, the dataset label "
+                "and the value label attached to each variable of a .dta file "
+                "on disk, the on-disk equivalent of `label define`, `label "
+                "values`, `label drop` and `label data` + `save, replace`. "
+                "Pass only `path` to read: the result lists every variable "
+                "(type, label, attached value label, notes), every value-label "
+                "set, the dataset label and the dataset notes. To edit, pass "
+                "any of: `value_labels` ({name: {code: text}} defines that "
+                "set, replacing the whole set if it exists; {name: null} drops "
+                "it and detaches it from the variables that used it; a code is "
+                'an integer or ".a"-".z"), `attach` ({variable: name}; '
+                '"" detaches; the name must exist once this call\'s '
+                "`value_labels` are applied; string variables are refused), "
+                '`data_label` ("" removes it). The observations are never '
+                "re-encoded: attachments are overwritten in place; a change to "
+                "a set or to the dataset label writes a new copy of the file "
+                "beside it and swaps it in atomically. All edits are validated "
+                "first; if any is invalid nothing is written. Limits: 32,000 "
+                "bytes per label text, 80 characters for the dataset label; "
+                "files older than format 118 (Stata 13 or earlier) take ASCII "
+                "only. Returns {ok, path, release, changed: {value_labels: "
+                "{name: defined|modified|dropped}, attached: [{name, before, "
+                "after}], data_label}, rewritten}. Use `dry_run` to validate "
+                "without writing. This edits the file, not a dataset already "
+                "loaded in a session: run `use` again to see the change there. "
+                "For variable labels use `set_variable_labels`."
+            ),
+            inputSchema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["path"],
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the .dta file to read or edit.",
+                    },
+                    "value_labels": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": ["object", "null"],
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "description": (
+                            "Value-label name → {code: text} to define or "
+                            "replace that set, or null to drop it."
+                        ),
+                    },
+                    "attach": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "description": (
+                            "Variable name → value-label name to attach; an empty string detaches."
+                        ),
+                    },
+                    "data_label": {
+                        "type": "string",
+                        "description": "New dataset label; an empty string removes it.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Validate and report the changes without writing.",
+                    },
+                },
+            },
+            annotations=ToolAnnotations(
+                title="Set Value Labels in a .dta File",
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
     ]
 
 
@@ -2724,6 +2802,8 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
             return _lint_do_tool(arguments)
         if name == "set_variable_labels":
             return _set_variable_labels_tool(arguments)
+        if name == "set_value_labels":
+            return _set_value_labels_tool(arguments)
         return _error_result(f"Unknown tool: {name}", kind="unknown_tool")
     except NotebookError as exc:
         return _error_result(str(exc), kind=exc.kind)
@@ -3183,6 +3263,67 @@ def _set_variable_labels_tool(arguments: dict[str, Any]) -> Any:
             "release": release,
             "changed": [change.to_dict() for change in changes],
             "unchanged": [name for name in labels if name not in changed],
+            "dry_run": dry_run,
+        }
+    )
+
+
+def _set_value_labels_tool(arguments: dict[str, Any]) -> Any:
+    path = arguments.get("path")
+    value_labels = arguments.get("value_labels")
+    attach = arguments.get("attach")
+    data_label = arguments.get("data_label")
+    dry_run = arguments.get("dry_run", False)
+    if not isinstance(path, str) or not path:
+        return _error_result("path must be a non-empty string", kind="missing_argument")
+    if not isinstance(dry_run, bool):
+        return _error_result("dry_run must be a boolean", kind="invalid_request")
+    if value_labels is not None and not isinstance(value_labels, dict):
+        return _error_result(
+            "value_labels must be an object mapping names to {code: text} or null",
+            kind="invalid_request",
+        )
+    if attach is not None and (
+        not isinstance(attach, dict)
+        or not all(isinstance(k, str) and isinstance(v, str) for k, v in attach.items())
+    ):
+        return _error_result(
+            "attach must be an object mapping variable names to value-label names",
+            kind="invalid_request",
+        )
+    if data_label is not None and not isinstance(data_label, str):
+        return _error_result("data_label must be a string", kind="invalid_request")
+    try:
+        if value_labels is None and attach is None and data_label is None:
+            return _json_result(
+                {"ok": True, "path": path, **read_metadata(path).to_dict(), "dry_run": dry_run}
+            )
+        result = edit_labels(
+            path,
+            value_labels=value_labels,
+            attach=attach,
+            data_label=data_label,
+            dry_run=dry_run,
+        )
+        release = read_metadata(path).release
+    except FileNotFoundError:
+        return _error_result(f"file not found: {path}", kind="file_not_found")
+    except DtaLabelError as exc:
+        return _error_result(str(exc), kind="invalid_request")
+    except OSError as exc:
+        return _error_result(f"could not edit {path}: {exc}", kind="file_io")
+    changed = result.to_dict()
+    return _json_result(
+        {
+            "ok": True,
+            "path": path,
+            "release": release,
+            "changed": {
+                "value_labels": changed["value_labels"],
+                "attached": changed["attached"],
+                "data_label": changed["data_label"],
+            },
+            "rewritten": result.rewritten and not dry_run,
             "dry_run": dry_run,
         }
     )

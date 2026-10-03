@@ -301,7 +301,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 22 个工具（`stata_run`, `stata_run_status`, `list_background_runs`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `set_variable_labels`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
+接着运行 `claude`，输入 `/mcp` 确认 `stata-code` 出现并带有 23 个工具（`stata_run`, `stata_run_status`, `list_background_runs`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `set_variable_labels`, `set_value_labels`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`）。
 
 #### Agent 工作流里的报错恢复
 
@@ -381,7 +381,7 @@ client 配置里写绝对路径，例如 `/abs/path/to/.venv/bin/stata-code-mcp`
 `stata-code>=0.6.5`，然后重启 MCP client。旧 server 进程在重启前仍会继续
 暴露旧 schema。
 
-MCP server 注册了 22 个工具：
+MCP server 注册了 23 个工具：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -396,6 +396,7 @@ MCP server 注册了 22 个工具：
 | `inspect_data` | 运行 `describe` + `codebook`，返回紧凑的数据集元数据 |
 | `lint_do` | 在执行前静态检查 do 文件源代码（花括号不匹配、缺少 `end`、悬空 `///`） |
 | `set_variable_labels` | 不经过 Stata，直接改写 `.dta` 文件里的变量标签（原地覆写标签字段，数据、值标签、notes 逐字节不变）；不传 `labels` 时只读取现有标签 |
+| `set_value_labels` | 不经过 Stata，读取或修改 `.dta` 文件里的值标签、每个变量挂接的值标签和数据集标签（相当于在磁盘上做 `label define` / `label values` / `label drop` / `label data`）；只传 `path` 时返回每个变量的标签、值标签和 notes，以及全部值标签集和数据集标签 |
 | `install_package` | 安装 SSC 或显式 `net install` 包，并验证命令可解析 |
 | `list_sessions` | 列出 live sessions |
 | `cancel_session` | 取消某个 session；subprocess-backed 路径会终止运行中的 worker，也会短路尚未开始的运行 |
@@ -464,9 +465,9 @@ jupyter kernelspec list
 - **用 Stata 的 `if` 表达式筛选行**（如 `age > 60 & !missing(income)`），缺失值的处理遵循 Stata 的语义；
 - 按一列或多列**排序**，查看**单变量汇总**（`summarize, detail` 的统计量，外加出现最多的取值）；
 - **复制选区**到剪贴板，把当前视图**导出**为 CSV，或把 codebook（标签、格式、notes）单独导出；
-- **原地修改变量标签**：标签直接写进文件，数据、值标签和 notes 逐字节不变。
+- **直接在文件里改标签**：变量标签、值标签（新建、修改、删除、挂接到变量）和数据集标签都直接写进 `.dta` 文件，每次修改都可以撤销，观测数据不会被重新编码。
 
-Agent 可以通过 MCP 工具 `set_variable_labels` 批量做同一件事，例如看完数据后给一份没有标签的数据集补上标签。细节见 [vscode/README.md](vscode/README.md)。
+Agent 可以通过 MCP 工具 `set_variable_labels` 和 `set_value_labels` 批量做同样的事，例如看完数据后给一份没有标签的数据集补上标签。细节见 [vscode/README.md](vscode/README.md)。
 
 ```bash
 # 从 VS Code 命令行
@@ -556,7 +557,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   └── server.py      # MCP server (22 tools)
+│   └── server.py      # MCP server (23 tools)
 └── kernel/
     └── kernel.py      # Jupyter kernel
 ```
@@ -631,7 +632,7 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
 - 34 类错误分类法 + 标准化建议，以及机器可读的 `recovery` 判定（可重试 / 需改代码 / 需人工介入）
-- MCP server：22 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）、无需 Stata 的变量标签编辑（`set_variable_labels`）和包安装（`install_package`）
+- MCP server：23 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）、无需 Stata 的变量标签编辑（`set_variable_labels`）和包安装（`install_package`）
 - 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
 - Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置
 - Console（批处理）后端（`core/console.py`、`--backend console`、`run_console()`）：驱动 Stata 命令行、把日志解析成同一套带类型的 `RunResult`，支持 **Stata 13+ 且无需 pystata**
@@ -654,7 +655,7 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、七视图侧边栏（sessions / last result / data 变量浏览器 / run history / logs / graphs / outputs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
 - VS Code 扩展里不依赖 Stata 的 `.dta` 数据浏览器（格式 113–115 与 117–121，依据 StataCorp 公开的格式文档实现）：随机读取浏览几个 GB 的文件、Stata `if` 行筛选、多键排序、单变量汇总、选区复制、CSV 与 codebook 导出
-- 不依赖 Stata 的变量标签编辑：原地覆写定长的标签字段，可在浏览器里手动改，也可通过 MCP 工具 `set_variable_labels` 批量改；已用 Stata 18 核对（`describe` 显示新标签，`notes`、`label list` 和 `datasignature` 不变）
+- 不依赖 Stata 的标签编辑：变量标签、值标签、变量挂接的值标签和数据集标签，可在浏览器里手动改（可撤销），也可通过 MCP 工具 `set_variable_labels` 和 `set_value_labels` 批量改。定长字段原地覆写；修改值标签集或数据集标签时先写出一份新文件再原子替换。已在所有支持的格式上用 Stata 18 核对（`datasignature` 和 `notes` 不变，`label list` 和 `describe` 显示修改结果）
 - 扩展同时发布到 [Open VSX](https://open-vsx.org/)，供 Cursor、Windsurf、VSCodium 安装
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 

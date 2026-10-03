@@ -153,6 +153,37 @@ interface Layout {
   /** File offset of the first variable-label field, and the width of each. */
   labelsOffset: number;
   labelWidth: number;
+  edit: DtaEditLayout;
+}
+
+/** One value-label set as it sits in the file, tags included. */
+export interface DtaValueLabelRecord {
+  name: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Where the label metadata that dtaWriter can change sits in the file. Kept
+ * apart from the rest of the layout because only the writer needs it.
+ */
+export interface DtaEditLayout {
+  release: number;
+  littleEndian: boolean;
+  fileSize: number;
+  /** File offset of the first value-label-name field, and the width of each. */
+  setNamesOffset: number;
+  nameWidth: number;
+  /** Offset and length of everything a new dataset label replaces. */
+  dataLabelAt: [number, number];
+  /** File offset of the 14 map entries and their values; null before format 117. */
+  mapAt: number | null;
+  map: number[] | null;
+  /** [start, end) of the value-label records. */
+  valueLabels: [number, number];
+  records: DtaValueLabelRecord[];
+  /** False when the value-label section could not be read to its end. */
+  valueLabelsIntact: boolean;
 }
 
 interface StrLEntry {
@@ -424,11 +455,14 @@ export class DtaReader {
     cur.expect("</K><N>");
     const nObsHeader = release === 117 ? cur.u32() : cur.u64();
     cur.expect("</N><label>");
+    const dataLabelStart = cur.pos;
     const labelLength = release === 117 ? cur.u8() : cur.u16();
     const dataLabel = decode(cur.take(labelLength));
+    const dataLabelAt: [number, number] = [dataLabelStart, cur.pos - dataLabelStart];
     cur.expect("</label><timestamp>");
     const timestamp = decode(cur.take(cur.u8())).trim();
     cur.expect("</timestamp></header><map>");
+    const mapAt = cur.pos;
     const map: number[] = [];
     for (let i = 0; i < 14; i++) map.push(cur.u64());
     cur.expect("</map>");
@@ -520,14 +554,25 @@ export class DtaReader {
     }
     const vl = new Cursor(await source.read(map[11], vlLength), () => littleEndian);
     vl.expect("<value_labels>");
+    const recordsStart = map[11] + vl.pos;
+    const records: DtaValueLabelRecord[] = [];
     while (vl.bytes[vl.pos + 1] === 0x6c) {
       // "<lbl>" (as opposed to "</value_labels>")
+      const start = map[11] + vl.pos;
       vl.expect("<lbl>");
       const length = vl.u32();
       const name = decode(zeroTerminated(vl.take(nameWidth)));
       vl.take(3);
       valueLabels.set(name, parseValueLabelTable(vl, length, decode));
       vl.expect("</lbl>");
+      records.push({ name, start, end: map[11] + vl.pos });
+    }
+    const recordsEnd = map[11] + vl.pos;
+    let valueLabelsIntact = true;
+    try {
+      vl.expect("</value_labels>");
+    } catch {
+      valueLabelsIntact = false;
     }
 
     const dataOffset = map[9] + "<data>".length;
@@ -539,6 +584,19 @@ export class DtaReader {
       strls: [map[10] + "<strls>".length, map[11] - "</strls>".length],
       labelsOffset: map[7] + "<variable_labels>".length,
       labelWidth,
+      edit: {
+        release,
+        littleEndian,
+        fileSize: source.size,
+        setNamesOffset: map[6] + "<value_label_names>".length,
+        nameWidth,
+        dataLabelAt,
+        mapAt,
+        map,
+        valueLabels: [recordsStart, recordsEnd],
+        records,
+        valueLabelsIntact,
+      },
     };
     const meta = buildMeta({
       release,
@@ -598,6 +656,7 @@ export class DtaReader {
     desc.pos = sortStart + 2 * (nVars + 1);
     const formats: string[] = [];
     for (let i = 0; i < nVars; i++) formats.push(decode(zeroTerminated(desc.take(formatWidth))));
+    const setNamesOffset = 109 + desc.pos;
     const labelNames: string[] = [];
     for (let i = 0; i < nVars; i++) labelNames.push(decode(zeroTerminated(desc.take(33))));
     const labelsOffset = 109 + desc.pos;
@@ -638,19 +697,30 @@ export class DtaReader {
     // Value labels run from the end of the data to EOF.
     const valueLabels = new Map<string, Map<number, string>>();
     const vlLength = source.size - dataEnd;
+    const records: DtaValueLabelRecord[] = [];
+    // The writer needs every record accounted for; the viewer does not.
+    let valueLabelsIntact =
+      dataOffset + nObsHeader * rowWidth <= source.size && vlLength <= MAX_METADATA_BYTES;
     if (vlLength > 0 && vlLength <= MAX_METADATA_BYTES) {
       const vl = new Cursor(await source.read(dataEnd, vlLength), () => littleEndian);
       try {
         while (vl.pos + 40 <= vl.bytes.byteLength) {
+          const start = dataEnd + vl.pos;
           const length = vl.i32();
           const name = decode(zeroTerminated(vl.take(33)));
           vl.take(3);
-          if (length < 8) break;
+          if (length < 8 || vl.pos + length > vl.bytes.byteLength) {
+            valueLabelsIntact = false;
+            break;
+          }
           valueLabels.set(name, parseValueLabelTable(vl, length, decode));
+          records.push({ name, start, end: dataEnd + vl.pos });
         }
+        if (vl.pos !== vl.bytes.byteLength) valueLabelsIntact = false;
       } catch (err) {
         if (!(err instanceof DtaFormatError)) throw err;
         // A cut-off trailing table is not worth refusing the whole file for.
+        valueLabelsIntact = false;
       }
     }
 
@@ -661,6 +731,19 @@ export class DtaReader {
       strls: null,
       labelsOffset,
       labelWidth: 81,
+      edit: {
+        release,
+        littleEndian,
+        fileSize: source.size,
+        setNamesOffset,
+        nameWidth: 33,
+        dataLabelAt: [10, 81],
+        mapAt: null,
+        map: null,
+        valueLabels: [dataEnd, source.size],
+        records,
+        valueLabelsIntact,
+      },
     };
     const meta = buildMeta({
       release,
@@ -679,6 +762,11 @@ export class DtaReader {
       dataBytes: Math.max(0, source.size - dataOffset),
     });
     return new DtaReader(source, meta, layout, decode, maxStrLBytes);
+  }
+
+  /** Where the label metadata dtaWriter can change sits in the file. */
+  get editLayout(): DtaEditLayout {
+    return this.layout.edit;
   }
 
   /**

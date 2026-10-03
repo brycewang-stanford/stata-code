@@ -6,6 +6,49 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+Value labels and the dataset label can now be edited in a `.dta` file without
+Stata, alongside variable labels. Adds one MCP tool; the result schema is
+unchanged.
+
+### Added
+
+- **Edit value labels, their attachments and the dataset label without
+  Stata.** The name of the value label attached to a variable is a fixed-width
+  field and is patched in place, like a variable label. The contents of a
+  value-label set, and the dataset label of a format 117+ file, are
+  variable-length: the file is written again to a temporary file beside the
+  original with every other byte copied as it is, the offsets in `<map>` are
+  corrected, and one rename puts it in place. The observations, strLs, notes
+  and formats are never re-encoded.
+  - **VS Code data viewer**: a *Value label* list in a numeric variable's
+    details attaches a set, detaches it, or starts a new one; *Edit* turns the
+    table of codes into one `code label` pair per line; *Drop* removes a set
+    after asking and detaches it everywhere; the dataset label has its own
+    *Edit*.
+  - **Undo.** Every label edit in the viewer reports what it did with an
+    *Undo* button; the last 50 edits can be taken back.
+  - **MCP tool `set_value_labels(path, value_labels?, attach?, data_label?,
+    dry_run?)`** (23 tools now). With only `path` it reads: every variable's
+    type, label, attached value label and notes, every value-label set, the
+    dataset label and the dataset notes, which no Stata-free tool returned
+    before. Python API: `stata_code.core.dta_edit` (`edit_labels`,
+    `read_metadata`).
+
+  Every edit is validated before any byte is written. Limits are Stata's own:
+  integer codes or `.a` to `.z`, 32,000 bytes per label text, 80 characters
+  for the dataset label; files in formats older than 118 take ASCII only. The
+  Python and TypeScript editors are held to the same 32 cases
+  (`vscode/test-fixtures/dta/edit_cases.json`) and write identical bytes.
+  Checked against Stata 18 on formats 115, 117, 118 and 120: the edited
+  fixtures load, `datasignature` and `notes` are unchanged, and `label list`,
+  `describe` and the dataset label show the edit and nothing else.
+
+### Changed
+
+- A rewrite needs free space for one more copy of the file while it runs, and
+  replaces the file by rename, so a program that holds the old file open (a
+  Stata session that has `use`d it does not) keeps seeing the old contents.
+
 ## 0.15.0 — 2026-10-03
 
 Variable labels can now be edited straight in a `.dta` file, by hand in the VS

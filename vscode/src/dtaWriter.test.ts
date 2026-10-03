@@ -5,11 +5,21 @@ import * as path from "node:path";
 import { describe, test } from "node:test";
 
 import { BufferByteSource, DtaReader } from "./dtaReader";
+import { createHash } from "node:crypto";
+
 import {
+  applySplices,
+  describeEdit,
   DtaEditError,
+  type DtaLabelEdit,
+  editChanged,
+  editLabels,
+  inverseEdit,
   encodeVariableLabel,
+  planEdits,
   planLabelEdits,
   setVariableLabels,
+  valueLabelCode,
 } from "./dtaWriter";
 
 // Fixtures are written by a real Stata (test-fixtures/dta/make_fixtures.do).
@@ -207,5 +217,213 @@ describe("setVariableLabels", () => {
       assert.equal(raw.subarray(0, 5).toString("utf8"), "Short");
       assert.ok(raw.subarray(5).every((b) => b === 0));
     });
+  });
+});
+
+// ── value labels, attachments, dataset label ────────────────────────────────
+//
+// edit_cases.json is written by the Python editor (make_edit_cases.py) after
+// its output was checked against a real Stata. Matching its hashes is what
+// keeps this editor and stata_code/core/dta_edit.py byte-identical.
+
+interface EditCase {
+  name: string;
+  fixture: string;
+  edit: {
+    variable_labels?: Record<string, string>;
+    value_labels?: Record<string, Record<string, string> | null>;
+    attach?: Record<string, string>;
+    data_label?: string;
+  };
+  error?: string;
+  sha256?: string;
+  result?: {
+    variable_labels: Array<{ name: string; before: string; after: string }>;
+    value_labels: Record<string, string>;
+    attached: Array<{ name: string; before: string; after: string }>;
+    data_label: { name: string; before: string; after: string } | null;
+    rewritten: boolean;
+  };
+}
+
+const EDIT_CASES: EditCase[] = JSON.parse(
+  fs.readFileSync(path.join(FIXTURES, "edit_cases.json"), "utf8"),
+).cases;
+
+function toEdit(raw: EditCase["edit"]): DtaLabelEdit {
+  return {
+    variableLabels: raw.variable_labels,
+    valueLabels: raw.value_labels,
+    attach: raw.attach,
+    dataLabel: raw.data_label,
+  };
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+describe("editLabels: cases shared with the Python editor", () => {
+  for (const c of EDIT_CASES) {
+    test(c.name, () =>
+      withCopy(c.fixture, async (file) => {
+        const before = sha256(fs.readFileSync(file));
+        if (c.error !== undefined) {
+          await assert.rejects(
+            () => editLabels(file, toEdit(c.edit)),
+            (err: unknown) => err instanceof DtaEditError && err.message.includes(c.error as string),
+          );
+          assert.equal(sha256(fs.readFileSync(file)), before, "a refused edit writes nothing");
+          return;
+        }
+        const expected = c.result as NonNullable<EditCase["result"]>;
+        const dry = await editLabels(file, toEdit(c.edit), { dryRun: true });
+        assert.equal(sha256(fs.readFileSync(file)), before, "a dry run writes nothing");
+        const result = await editLabels(file, toEdit(c.edit));
+        assert.deepEqual(result, dry);
+        assert.deepEqual(
+          {
+            variable_labels: result.variableLabels,
+            value_labels: result.valueLabels,
+            attached: result.attached,
+            data_label: result.dataLabel,
+            rewritten: result.rewritten,
+          },
+          expected,
+        );
+        assert.equal(sha256(fs.readFileSync(file)), c.sha256, "same bytes as the Python editor");
+        // a second run has nothing left to do, and no temporary file stays behind
+        const again = await editLabels(file, toEdit(c.edit));
+        assert.equal(again.rewritten, false);
+        assert.deepEqual(again.valueLabels, {});
+        assert.deepEqual(fs.readdirSync(path.dirname(file)), [c.fixture]);
+      }),
+    );
+  }
+});
+
+describe("editLabels", () => {
+  test("the reader sees what was written", () =>
+    withCopy("survey118.dta", async (file) => {
+      await editLabels(file, {
+        valueLabels: { agree: { "1": "Agree", "2": "Disagree", ".a": "Refused" } },
+        attach: { score: "agree" },
+        dataLabel: "调查",
+      });
+      const reader = await open(fs.readFileSync(file));
+      const table = reader.meta.valueLabels.get("agree") as Map<number, string>;
+      assert.deepEqual(
+        [...table].map(([code, text]) => [valueLabelCode(code), text]),
+        [
+          ["1", "Agree"],
+          ["2", "Disagree"],
+          [".a", "Refused"],
+        ],
+      );
+      assert.equal(reader.meta.variables.find((v) => v.name === "score")?.valueLabel, "agree");
+      assert.equal(reader.meta.dataLabel, "调查");
+      assert.deepEqual([...reader.meta.valueLabels.keys()], ["yn", "regionlbl", "agree"]);
+      // the data are untouched
+      const original = await open(fixtureBytes("survey118.dta"));
+      assert.deepEqual(await reader.readRows(0, 500), await original.readRows(0, 500));
+    }));
+
+  test("an attachment alone is patched in place", async () => {
+    const bytes = fixtureBytes("survey118.dta");
+    const { splices, result } = planEdits(await open(bytes), { attach: { score: "yn" } });
+    assert.equal(result.rewritten, false);
+    const edited = applySplices(bytes, splices);
+    const changed = differingOffsets(bytes, edited);
+    assert.equal(changed.length, 2); // "yn" into one name field
+  });
+
+  test("a rewrite keeps every other set's bytes and fixes the map", async () => {
+    const bytes = fixtureBytes("modern118.dta");
+    const { splices, result } = planEdits(await open(bytes), {
+      valueLabels: { extra: { "1": "one" } },
+      dataLabel: "A dataset label that is longer",
+    });
+    assert.equal(result.rewritten, true);
+    const edited = Buffer.from(applySplices(bytes, splices));
+    const reader = await open(edited);
+    const { map, fileSize } = reader.editLayout;
+    assert.ok(map);
+    assert.equal(map[13], fileSize);
+    const tags = ["<stata_dta>", "<map>", "<variable_types>", "<varnames>", "<sortlist>"];
+    tags.forEach((tag, i) => assert.equal(edited.subarray(map[i], map[i] + tag.length).toString(), tag));
+    assert.equal(edited.subarray(map[12]).toString(), "</stata_dta>");
+    const start = bytes.indexOf("<lbl>");
+    const end = bytes.indexOf("</lbl>") + 6;
+    assert.ok(edited.includes(bytes.subarray(start, end)));
+    assert.deepEqual(reader.meta.notes, (await open(bytes)).meta.notes);
+  });
+
+  test("a failed rewrite leaves the file and no temporary file", () =>
+    withCopy("survey118.dta", async (file) => {
+      const before = sha256(fs.readFileSync(file));
+      const dir = path.dirname(file);
+      fs.chmodSync(dir, 0o500); // the temporary file cannot be created
+      try {
+        await assert.rejects(() => editLabels(file, { valueLabels: { yn: null } }));
+      } finally {
+        fs.chmodSync(dir, 0o700);
+      }
+      assert.equal(sha256(fs.readFileSync(file)), before);
+      assert.deepEqual(fs.readdirSync(dir), ["survey118.dta"]);
+    }));
+
+  test("the file mode survives a rewrite", () =>
+    withCopy("survey118.dta", async (file) => {
+      fs.chmodSync(file, 0o640);
+      await editLabels(file, { valueLabels: { yn: null } });
+      assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+    }));
+});
+
+describe("inverseEdit", () => {
+  // Undo in the viewer is the inverse edit applied to the edited file; it has
+  // to give back what the file said, whatever mix of changes was made.
+  for (const c of EDIT_CASES.filter((x) => x.error === undefined)) {
+    test(`undo restores the file: ${c.name}`, () =>
+      withCopy(c.fixture, async (file) => {
+        const original = fs.readFileSync(file);
+        const before = (await open(original)).meta;
+        const result = await editLabels(file, toEdit(c.edit));
+        const undone = await editLabels(file, inverseEdit(before, result));
+        assert.equal(editChanged(undone), editChanged(result));
+        const restored = await open(fs.readFileSync(file));
+        assert.deepEqual(restored.meta.valueLabels, before.valueLabels);
+        assert.deepEqual(
+          restored.meta.variables.map((v) => [v.name, v.label, v.valueLabel]),
+          before.variables.map((v) => [v.name, v.label, v.valueLabel]),
+        );
+        assert.equal(restored.meta.dataLabel, before.dataLabel);
+        assert.deepEqual(restored.meta.notes, before.notes);
+        // Not byte-identical in general: Stata leaves stray bytes after a
+        // field's terminator and lays out a label table its own way. What the
+        // file says is the same, and so is every observation.
+        const rows = Math.min(before.nObs, 50);
+        assert.deepEqual(
+          await restored.readRows(0, rows),
+          await (await open(original)).readRows(0, rows),
+        );
+      }),
+    );
+  }
+
+  test("describeEdit says what happened", async () => {
+    const reader = await open(fixtureBytes("survey118.dta"));
+    const { result } = planEdits(reader, {
+      variableLabels: { wage: "Hourly wage", id: "" },
+      valueLabels: { yn: null, fresh: { "1": "one" } },
+      attach: { score: "fresh" },
+      dataLabel: "",
+    });
+    assert.equal(
+      describeEdit(result),
+      "Labeled wage; removed the label of id; dropped value label yn; defined value label fresh; " +
+        "detached yn from female; attached fresh to score; removed the dataset label",
+    );
+    assert.equal(describeEdit(planEdits(reader, {}).result), "");
   });
 });

@@ -323,7 +323,7 @@ claude mcp add stata-code --scope local -- stata-code-mcp
 claude mcp add stata-code --scope project -- stata-code-mcp
 ```
 
-Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 22 tools (`stata_run`, `stata_run_status`, `list_background_runs`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `set_variable_labels`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
+Then launch `claude` and type `/mcp` to confirm `stata-code` shows up with its 23 tools (`stata_run`, `stata_run_status`, `list_background_runs`, `stata_info`, `get_log`, `search_log`, `get_graph`, `get_matrix`, `inspect_data`, `lint_do`, `set_variable_labels`, `set_value_labels`, `install_package`, `list_sessions`, `cancel_session`, `reset_session`, `notebook_outline`, `notebook_get_cell`, `notebook_locate`, `notebook_edit_cell`, `notebook_insert_cell`, `notebook_delete_cell`, `list_runs`).
 
 #### Error Recovery in Agent Workflows
 
@@ -411,7 +411,7 @@ If an OpenAI-backed client reports `API Error: 400 Invalid schema for function
 upgrade to `stata-code>=0.6.5`, then restart the MCP client. Older server
 processes keep advertising the stale schema until they are restarted.
 
-The MCP server registers 22 tools:
+The MCP server registers 23 tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -426,6 +426,7 @@ The MCP server registers 22 tools:
 | `inspect_data` | Run `describe` + `codebook` and return compact dataset metadata |
 | `lint_do` | Statically check do-file source (unbalanced braces, missing `end`, dangling `///`) before spending a run |
 | `set_variable_labels` | Write variable labels straight into a `.dta` file without Stata (the label fields are overwritten in place; data, value labels and notes keep their bytes); omit `labels` to read the current ones |
+| `set_value_labels` | Read or edit a `.dta` file's value labels, the value label attached to each variable and the dataset label without Stata (`label define` / `label values` / `label drop` / `label data` on disk); with only `path` it returns every variable's label, value label and notes, every value-label set, and the dataset label |
 | `install_package` | Install an SSC or explicit `net install` package and verify it resolves |
 | `list_sessions` | Enumerate live sessions |
 | `cancel_session` | Cancel a session; the subprocess-backed path terminates in-flight runs and short-circuits pending ones |
@@ -496,9 +497,9 @@ It also registers a **Stata-free `.dta` data viewer**. Double-click any `.dta` f
 - **filter rows with a Stata `if` expression** (`age > 60 & !missing(income)`), evaluated with Stata's semantics for missing values;
 - **sort** by one or several columns and get **per-variable summaries** (the statistics of `summarize, detail`, plus the most frequent values);
 - **copy a range** to the clipboard, and **export** the current view as CSV or the codebook (labels, formats, notes) as its own file;
-- **edit variable labels in place**: the label is written straight into the file, and the data, value labels and notes keep their bytes.
+- **edit labels in the file**: variable labels, value labels (define, change, drop, attach to a variable) and the dataset label are written straight into the `.dta` file, each edit can be undone, and the observations are never re-encoded.
 
-Agents get the label edit in bulk through the `set_variable_labels` MCP tool, for example to label an unlabeled dataset after inspecting it. Details are in [vscode/README.md](vscode/README.md).
+Agents get the same edits in bulk through the `set_variable_labels` and `set_value_labels` MCP tools, for example to label an unlabeled dataset after inspecting it. Details are in [vscode/README.md](vscode/README.md).
 
 ```bash
 # from the VS Code CLI
@@ -590,7 +591,7 @@ stata_code/
 │   ├── runner.py      # in-process execute(); collects everything via sfi
 │   └── _pool.py       # subprocess workers for public API / MCP hard timeouts
 ├── mcp/
-│   ├── server.py      # MCP server (22 tools)
+│   ├── server.py      # MCP server (23 tools)
 │   └── ...
 ├── core/console.py    # console (batch) backend — Stata 13+, no pystata
 └── kernel/
@@ -689,7 +690,7 @@ Rule of thumb:
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
 - 34-kind error taxonomy with canonical suggestions and a machine-readable `recovery` verdict (retriable / needs-code-change / needs-user-input)
-- MCP server: 22 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), Stata-free variable-label editing (`set_variable_labels`), and package installation (`install_package`)
+- MCP server: 23 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), Stata-free variable-label editing (`set_variable_labels`), and package installation (`install_package`)
 - Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
 - Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs
 - Console (batch) backend (`core/console.py`, `--backend console`, `run_console()`): drives the Stata command-line executable, parses the log into the same typed `RunResult`, and supports **Stata 13+ with no pystata**
@@ -713,7 +714,7 @@ Rule of thumb:
 - JSON Schema artifact auto-generated from `schema.py`: [`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code extension published to the Marketplace as [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode): syntax highlighting, section outline/navigation, code-lens cell and section runners, seven-view sidebar (sessions / last result / data variables / run history / logs / graphs / outputs), status bar, completions, conservative variable rename, diagnostics, MCP child-process spawn
 - Stata-free `.dta` data viewer in the VS Code extension (formats 113–115 and 117–121, written from StataCorp's published format documentation): random-access browsing of multi-gigabyte files, Stata `if` row filter, multi-key sort, per-variable summaries, range copy, CSV and codebook export
-- Stata-free variable-label editing: the fixed-width label field is overwritten in place, by hand in the viewer or in bulk through the `set_variable_labels` MCP tool; checked against Stata 18 (`describe` shows the new labels; `notes`, `label list` and `datasignature` unchanged)
+- Stata-free label editing: variable labels, value labels, the value label attached to a variable and the dataset label, by hand in the viewer (with undo) or in bulk through the `set_variable_labels` and `set_value_labels` MCP tools. Fixed-width fields are overwritten in place; a change to a value-label set or to the dataset label writes a new copy and swaps it in atomically. Checked against Stata 18 on every supported format (`datasignature` and `notes` unchanged; `label list` and `describe` show the edit)
 - Extension also published to [Open VSX](https://open-vsx.org/) for Cursor, Windsurf and VSCodium
 - Clean-room license policy ([LICENSE-POLICY.md](LICENSE-POLICY.md))
 

@@ -128,9 +128,26 @@ list), type, and press Enter; Esc cancels. The label is written straight into
 the file. Only that label's fixed-width field is overwritten, so the data,
 value labels, notes and formats keep their bytes, and no Stata is involved.
 Labels follow Stata's limit of 80 characters; files in formats older than 118
-take ASCII only, since those formats do not say which encoding they use. The
-data cells, value labels and the dataset label are not editable. Agents get the
-same operation in bulk through the `set_variable_labels` MCP tool.
+take ASCII only, since those formats do not say which encoding they use.
+
+**So can value labels and the dataset label.** In a numeric variable's details
+the *Value label* list attaches any of the file's value labels, none, or a new
+one. *Edit* above the table of codes turns it into a list with one
+`code label` pair per line (a code is an integer or `.a` to `.z`); *Save to
+file* or Ctrl/Cmd+Enter replaces the whole set, which changes it for every
+variable that uses it. *Drop* removes a value label after asking and detaches
+it from the variables that used it. The dataset label has its own *Edit* in
+the dataset details (shown when no variable is selected).
+
+Every edit shows what it did in the status bar with an **Undo** button, and
+the viewer keeps the last 50 edits to take back. Attaching a value label
+overwrites one fixed-width field in place. Changing a value label's contents
+or the dataset label changes the length of the file, so a new copy is written
+beside it and swapped in with one rename; a crash leaves either the old file
+or the new one. In both cases the observations, notes and formats are copied,
+never re-encoded. The data cells are not editable. Agents get the same
+operations in bulk through the `set_variable_labels` and `set_value_labels`
+MCP tools.
 
 *Load in Stata* (also on the Explorer context menu of any `.dta`) runs
 `use "<file>", clear` in the current session, asking first if that session has

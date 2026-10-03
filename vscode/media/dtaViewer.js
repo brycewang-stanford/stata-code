@@ -96,8 +96,16 @@
   /** Column summaries for the current view, by column index. */
   const summaries = new Map();
   let noticeTimer;
-  /** The variable label being edited in the detail panel: {name, draft, caret}. */
+  /**
+   * The label being edited in the detail panel: {name, draft, caret}. The
+   * name is a variable's, or "_dta" for the dataset label.
+   */
   let labelEdit = null;
+  /**
+   * The value label being edited: {name, isNew, forVar, text}. `text` holds
+   * one "code label" pair per line; saving replaces the whole set.
+   */
+  let valueLabelEdit = null;
 
   el.labels.checked = useLabels;
   if (saved.sideHidden) el.side.hidden = true;
@@ -652,15 +660,23 @@
     });
   }
 
-  function showNotice(text, isError) {
+  function showNotice(text, isError, canUndo) {
     el.notice.textContent = text;
     el.notice.className = isError ? "bad" : "";
+    if (canUndo) {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.id = "undo-edit";
+      undo.textContent = "Undo";
+      undo.title = "Put the file back as it was before this edit";
+      el.notice.append(" ", undo);
+    }
     if (noticeTimer) clearTimeout(noticeTimer);
     noticeTimer = setTimeout(
       () => {
         el.notice.textContent = "";
       },
-      isError ? 8000 : 3000,
+      isError || canUndo ? 8000 : 3000,
     );
   }
 
@@ -774,7 +790,22 @@
   function renderDetail() {
     if (focus.col < 0) {
       let html = "<h3>" + esc(init.title) + "</h3><dl>";
-      html += row("Label", init.dataLabel);
+      if (labelEdit && labelEdit.name !== "_dta") labelEdit = null;
+      if (labelEdit) {
+        html +=
+          '<dt>Label</dt><dd><input type="text" id="label-input" maxlength="' +
+          MAX_LABEL_CHARS +
+          '" spellcheck="false" aria-label="Dataset label" value="' +
+          esc(labelEdit.draft) +
+          '" /><span class="hint">Enter to save to the file · Esc to cancel</span></dd>';
+      } else if (init.canEditLabels) {
+        html +=
+          "<dt>Label</dt><dd>" +
+          (init.dataLabel ? esc(init.dataLabel) : '<span class="dim">(none)</span>') +
+          ' <button type="button" id="label-edit" title="Edit the dataset label in the file">Edit</button></dd>';
+      } else {
+        html += row("Label", init.dataLabel);
+      }
       html += row("Saved", init.timestamp);
       html += row("Sorted by", init.sortedBy.join(" "));
       html += row("Format", ".dta " + init.release);
@@ -783,9 +814,11 @@
         html += "<h4>Notes</h4>" + init.notes.map((n) => "<p>" + esc(n) + "</p>").join("");
       }
       el.detail.innerHTML = html;
+      restoreLabelInput();
       return;
     }
     const v = init.variables[focus.col];
+    if (valueLabelEdit && valueLabelEdit.forVar !== v.name) valueLabelEdit = null;
     let html = "<h3>" + esc(v.name) + "</h3><dl>";
     if (labelEdit && labelEdit.name !== v.name) labelEdit = null;
     if (labelEdit) {
@@ -807,39 +840,82 @@
     }
     html += row("Type", v.type);
     html += row("Format", v.format);
-    html += row("Value label", v.valueLabel);
+    if (init.canEditLabels && v.numeric && v.type !== "alias") {
+      // attach one of the file's value labels, none, or a new one
+      const names = Object.keys(init.valueLabels);
+      if (v.valueLabel && !names.includes(v.valueLabel)) names.push(v.valueLabel);
+      html +=
+        '<dt>Value label</dt><dd><select id="vl-attach" aria-label="Value label attached to ' +
+        esc(v.name) +
+        '"><option value="">(none)</option>' +
+        names
+          .map(
+            (n) =>
+              '<option value="' +
+              esc(n) +
+              '"' +
+              (n === v.valueLabel ? " selected" : "") +
+              ">" +
+              esc(n) +
+              "</option>",
+          )
+          .join("") +
+        '<option value="+new">New value label…</option></select></dd>';
+    } else {
+      html += row("Value label", v.valueLabel);
+    }
     html += "</dl>";
     if (v.notes.length) {
       html += "<h4>Notes</h4>" + v.notes.map((n) => "<p>" + esc(n) + "</p>").join("");
     }
     if (v.type !== "alias" && viewRows > 0) html += summaryHtml(focus.col);
     const entries = v.valueLabel ? init.valueLabels[v.valueLabel] : undefined;
-    if (entries) {
-      html += "<h4>Value label</h4><table>";
+    if (valueLabelEdit) {
+      html += valueLabelEditorHtml();
+    } else if (entries) {
+      const truncated = init.valueLabelsTruncated.includes(v.valueLabel);
+      html += '<h4>Value label <span class="set-name">' + esc(v.valueLabel) + "</span>";
+      if (init.canEditLabels && !truncated) {
+        html +=
+          ' <button type="button" id="vl-edit" title="Edit the codes and texts of this value label in the file">Edit</button>' +
+          '<button type="button" id="vl-drop" title="Remove this value label from the file and from every variable that uses it">Drop</button>';
+      }
+      html += "</h4><table>";
       for (const entry of entries) {
         html += "<tr><td>" + esc(entry[0]) + "</td><td>" + esc(entry[1]) + "</td></tr>";
       }
       html += "</table>";
-      if (init.valueLabelsTruncated.includes(v.valueLabel)) {
+      if (truncated) {
         html += "<p>(list cut at " + group(entries.length) + " entries)</p>";
       }
     } else if (v.valueLabel) {
       html += "<h4>Value label</h4><p>The file does not define this value label.</p>";
     }
     el.detail.innerHTML = html;
-    const input = document.getElementById("label-input");
-    if (input) {
-      // The panel re-renders when a summary arrives; keep the caret where it was.
-      input.focus();
-      const at = Math.min(labelEdit.caret ?? input.value.length, input.value.length);
-      input.setSelectionRange(at, at);
+    restoreLabelInput();
+    const area = document.getElementById("vl-text");
+    if (area && valueLabelEdit.caret !== undefined) {
+      const focusName = valueLabelEdit.inName ? document.getElementById("vl-name") : area;
+      focusName?.focus();
+      if (!valueLabelEdit.inName) area.setSelectionRange(valueLabelEdit.caret, valueLabelEdit.caret);
     }
   }
 
+  function restoreLabelInput() {
+    const input = document.getElementById("label-input");
+    if (!input || !labelEdit) return;
+    // The panel re-renders when a summary arrives; keep the caret where it was.
+    input.focus();
+    const at = Math.min(labelEdit.caret ?? input.value.length, input.value.length);
+    input.setSelectionRange(at, at);
+  }
+
   function startLabelEdit() {
-    if (!init || !init.canEditLabels || focus.col < 0) return;
-    const v = init.variables[focus.col];
-    labelEdit = { name: v.name, draft: v.label };
+    if (!init || !init.canEditLabels) return;
+    labelEdit =
+      focus.col < 0
+        ? { name: "_dta", draft: init.dataLabel }
+        : { name: init.variables[focus.col].name, draft: init.variables[focus.col].label };
     renderDetail();
     document.getElementById("label-input")?.select();
   }
@@ -848,8 +924,106 @@
     if (!labelEdit) return;
     const { name, draft } = labelEdit;
     labelEdit = null;
-    const v = init.variables.find((x) => x.name === name);
-    if (v && draft !== v.label) vscode.postMessage({ type: "setLabel", name, label: draft });
+    if (name === "_dta") {
+      if (draft.trim() !== init.dataLabel) {
+        vscode.postMessage({ type: "editLabels", edit: { dataLabel: draft.trim() } });
+      }
+    } else {
+      const v = init.variables.find((x) => x.name === name);
+      if (v && draft !== v.label) vscode.postMessage({ type: "setLabel", name, label: draft });
+    }
+    renderDetail();
+  }
+
+  // ── value labels ────────────────────────────────────────────────────────
+
+  function usersOf(setName) {
+    return init.variables.filter((x) => x.valueLabel === setName).map((x) => x.name);
+  }
+
+  function valueLabelEditorHtml() {
+    const edit = valueLabelEdit;
+    const others = edit.isNew ? [] : usersOf(edit.name).filter((n) => n !== edit.forVar);
+    let html =
+      "<h4>" +
+      (edit.isNew
+        ? "New value label"
+        : 'Value label <span class="set-name">' + esc(edit.name) + "</span>") +
+      "</h4>";
+    html += '<div id="vl-editor">';
+    if (edit.isNew) {
+      html +=
+        '<input type="text" id="vl-name" maxlength="32" spellcheck="false" placeholder="Name, e.g. yesno" aria-label="Name of the new value label" value="' +
+        esc(edit.name) +
+        '" />';
+    }
+    html +=
+      '<textarea id="vl-text" rows="' +
+      Math.min(14, Math.max(4, edit.text.split("\n").length + 1)) +
+      '" spellcheck="false" aria-label="Codes and labels, one pair per line">' +
+      esc(edit.text) +
+      "</textarea>" +
+      '<span class="hint">One per line: the code, a space, the label. A code is an integer or .a to .z.' +
+      (others.length ? " Also used by " + esc(others.join(", ")) + "." : "") +
+      "</span>" +
+      '<div class="actions"><button type="button" id="vl-save" title="Write to the file (Ctrl/Cmd+Enter)">Save to file</button>' +
+      '<button type="button" id="vl-cancel">Cancel</button></div></div>';
+    return html;
+  }
+
+  function startValueLabelEdit(isNew) {
+    if (!init || !init.canEditLabels || focus.col < 0) return;
+    const v = init.variables[focus.col];
+    if (isNew) {
+      valueLabelEdit = { name: "", isNew: true, forVar: v.name, text: "", caret: 0, inName: true };
+    } else {
+      const entries = init.valueLabels[v.valueLabel];
+      if (!entries) return;
+      const text = entries.map((e) => e[0] + " " + e[1]).join("\n");
+      valueLabelEdit = { name: v.valueLabel, isNew: false, forVar: v.name, text, caret: text.length };
+    }
+    renderDetail();
+  }
+
+  /** Parse the editor's text into {code: label}, or return a message. */
+  function parseValueLabelText(text) {
+    const table = {};
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === "") continue;
+      const m = /^\s*(-?\d+|\.[a-z])\s+(.*\S)\s*$/.exec(lines[i]);
+      if (!m) {
+        return "Line " + (i + 1) + ": expected a code (an integer or .a to .z), a space, and the label";
+      }
+      if (Object.prototype.hasOwnProperty.call(table, m[1])) {
+        return "Line " + (i + 1) + ": code " + m[1] + " is given twice";
+      }
+      table[m[1]] = m[2];
+    }
+    return Object.keys(table).length ? table : "Enter at least one code and label";
+  }
+
+  function commitValueLabelEdit() {
+    if (!valueLabelEdit) return;
+    const edit = valueLabelEdit;
+    const name = edit.name.trim();
+    if (edit.isNew && !/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(name)) {
+      showNotice("A value label name is 1-32 letters, digits or _, not starting with a digit", true);
+      return;
+    }
+    if (edit.isNew && init.valueLabels[name]) {
+      showNotice("The file already has a value label named " + name + "; pick it from the list", true);
+      return;
+    }
+    const table = parseValueLabelText(edit.text);
+    if (typeof table === "string") {
+      showNotice(table, true);
+      return;
+    }
+    valueLabelEdit = null;
+    const message = { valueLabels: { [name]: table } };
+    if (edit.isNew) message.attach = { [edit.forVar]: name };
+    vscode.postMessage({ type: "editLabels", edit: message });
     renderDetail();
   }
 
@@ -957,11 +1131,46 @@
   });
 
   el.detail.addEventListener("input", (event) => {
+    if (valueLabelEdit && event.target.id === "vl-text") {
+      valueLabelEdit.text = event.target.value;
+      valueLabelEdit.caret = event.target.selectionStart;
+      valueLabelEdit.inName = false;
+      return;
+    }
+    if (valueLabelEdit && event.target.id === "vl-name") {
+      valueLabelEdit.name = event.target.value;
+      valueLabelEdit.inName = true;
+      return;
+    }
     if (event.target.id !== "label-input" || !labelEdit) return;
     labelEdit.draft = event.target.value;
     labelEdit.caret = event.target.selectionStart;
   });
+  el.detail.addEventListener("change", (event) => {
+    if (event.target.id !== "vl-attach" || focus.col < 0) return;
+    const v = init.variables[focus.col];
+    const choice = event.target.value;
+    if (choice === "+new") {
+      startValueLabelEdit(true);
+      return;
+    }
+    if (choice !== v.valueLabel) {
+      vscode.postMessage({ type: "editLabels", edit: { attach: { [v.name]: choice } } });
+    }
+  });
   el.detail.addEventListener("keydown", (event) => {
+    if (event.target.id === "vl-text" || event.target.id === "vl-name") {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+        event.preventDefault();
+        commitValueLabelEdit();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        valueLabelEdit = null;
+        renderDetail();
+      }
+      event.stopPropagation();
+      return;
+    }
     if (event.target.id !== "label-input") return;
     if (event.key === "Enter" && !event.isComposing) {
       event.preventDefault();
@@ -974,9 +1183,33 @@
     event.stopPropagation();
   });
 
+  el.notice.addEventListener("click", (event) => {
+    if (event.target.id !== "undo-edit") return;
+    el.notice.textContent = "";
+    vscode.postMessage({ type: "undoEdit" });
+  });
+
   el.detail.addEventListener("click", (event) => {
     if (event.target.id === "label-edit") {
       startLabelEdit();
+      return;
+    }
+    if (event.target.id === "vl-edit") {
+      startValueLabelEdit(false);
+      return;
+    }
+    if (event.target.id === "vl-save") {
+      commitValueLabelEdit();
+      return;
+    }
+    if (event.target.id === "vl-cancel") {
+      valueLabelEdit = null;
+      renderDetail();
+      return;
+    }
+    if (event.target.id === "vl-drop" && focus.col >= 0) {
+      // the extension asks for confirmation; a webview cannot
+      vscode.postMessage({ type: "dropValueLabel", name: init.variables[focus.col].valueLabel });
       return;
     }
     if (event.target.id === "summarize" && focus.col >= 0) {
@@ -1143,7 +1376,7 @@
         if (message.column === focus.col) renderDetail();
         break;
       case "notice":
-        showNotice(message.text, message.isError);
+        showNotice(message.text, message.isError, message.canUndo);
         break;
       case "error":
         el.main.hidden = true;
