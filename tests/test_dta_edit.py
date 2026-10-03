@@ -179,6 +179,7 @@ def test_the_map_follows_a_longer_dataset_label(copy_of):
     assert new[13] == len(edited)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_file_mode_survives_a_rewrite(copy_of):
     target = copy_of("survey118.dta")
     os.chmod(target, 0o640)

@@ -358,7 +358,11 @@ describe("editLabels", () => {
     assert.deepEqual(reader.meta.notes, (await open(bytes)).meta.notes);
   });
 
-  test("a failed rewrite leaves the file and no temporary file", () =>
+  // A read-only directory stops the temporary file from being created; that
+  // needs POSIX permissions and a user they apply to.
+  const canLockDirectory = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  test("a failed rewrite leaves the file and no temporary file", { skip: !canLockDirectory }, () =>
     withCopy("survey118.dta", async (file) => {
       const before = sha256(fs.readFileSync(file));
       const dir = path.dirname(file);
@@ -372,7 +376,7 @@ describe("editLabels", () => {
       assert.deepEqual(fs.readdirSync(dir), ["survey118.dta"]);
     }));
 
-  test("the file mode survives a rewrite", () =>
+  test("the file mode survives a rewrite", { skip: process.platform === "win32" }, () =>
     withCopy("survey118.dta", async (file) => {
       fs.chmodSync(file, 0o640);
       await editLabels(file, { valueLabels: { yn: null } });
