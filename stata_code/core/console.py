@@ -75,6 +75,14 @@ _STATA_ROOT_ENV_VARS: tuple[str, ...] = ("STATA_HOME", "STATA_PATH")
 # Console executable basenames by platform, most-capable edition first.
 _UNIX_EXE_NAMES: tuple[str, ...] = ("stata-mp", "stata-se", "stata", "stata-be")
 _MAC_EXE_NAMES: tuple[str, ...] = ("stata-mp", "stata-se", "stata", "stata-be")
+#: The app bundle each macOS console binary ships in. The bundle is named for
+#: the edition (StataMP.app), not for the binary inside it (stata-mp).
+_MAC_APP_BUNDLES: dict[str, str] = {
+    "stata-mp": "StataMP.app",
+    "stata-se": "StataSE.app",
+    "stata-be": "StataBE.app",
+    "stata": "Stata.app",
+}
 _WIN_EXE_NAMES: tuple[str, ...] = (
     "StataMP-64.exe",
     "StataSE-64.exe",
@@ -171,9 +179,12 @@ def _names_in_root(root: str, names: tuple[str, ...]) -> list[str]:
     out: list[str] = []
     for name in names:
         out.append(str(base / name))
-        # macOS app bundles keep the console binary under Contents/MacOS.
+        # macOS keeps the console binary inside the edition's app bundle:
+        # /Applications/Stata/StataMP.app/Contents/MacOS/stata-mp.
         if platform.system() == "Darwin":
-            out.append(str(base / f"{name}.app" / "Contents" / "MacOS" / name))
+            bundle = _MAC_APP_BUNDLES.get(name)
+            if bundle:
+                out.append(str(base / bundle / "Contents" / "MacOS" / name))
     return out
 
 
@@ -275,7 +286,9 @@ def build_wrapper_do(code: str, *, working_dir: str | None = None) -> str:
         "    foreach __v of varlist * {",
         # Stata: display "<MARK>`__v'|`: type `__v''|`: variable label `__v''"
         # Built by concatenation to avoid f-string quote/backtick collisions.
-        "        display \"" + MARK_VAR + "`__v'|`: type `__v''|`: variable label `__v''\"",
+        # Compound quotes: a variable label may contain a double quote, which
+        # would end a plain "..." string and abort the loop at that variable.
+        "        display `\"" + MARK_VAR + "`__v'|`: type `__v''|`: variable label `__v''\"'",
         # A second line rather than two more fields on the first: a variable
         # label may itself contain "|", so it has to stay the last field.
         "        display \"" + MARK_VARFMT + "`__v'|`: format `__v''|`: value label `__v''\"",

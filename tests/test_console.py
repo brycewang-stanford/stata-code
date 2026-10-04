@@ -329,3 +329,22 @@ class TestExecuteGuards:
         assert console._batch_argv("stata-mp", Path("/x/run.do"))[:2] == ["stata-mp", "-b"]
         monkeypatch.setattr(console.platform, "system", lambda: "Windows")
         assert console._batch_argv("StataMP-64", Path("/x/run.do"))[1] == "/e"
+
+
+class TestFindStataCliOnMac:
+    """A standard macOS install keeps `stata-mp` inside `StataMP.app`."""
+
+    def test_binary_is_found_inside_the_edition_bundle(self, tmp_path, monkeypatch):
+        exe = tmp_path / "StataMP.app" / "Contents" / "MacOS" / "stata-mp"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+        monkeypatch.setattr(console.platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(console, "_MAC_APP_ROOTS", (str(tmp_path),))
+        monkeypatch.setattr(console.shutil, "which", lambda _name: None)
+        for var in (*console._STATA_CLI_ENV_VARS, *console._STATA_ROOT_ENV_VARS):
+            monkeypatch.delenv(var, raising=False)
+        assert console.find_stata_cli() == str(exe)
+
+    def test_each_edition_has_its_bundle(self):
+        assert set(console._MAC_APP_BUNDLES) == set(console._MAC_EXE_NAMES)
