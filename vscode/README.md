@@ -93,11 +93,17 @@ It follows Stata's rules, not JavaScript's — a missing value is larger than
 every number (so `age > 60` keeps missing ages, exactly as `count if` does),
 arithmetic on a missing value is missing, and comparing a string with a number
 is a `type mismatch`. The evaluator is tested against Stata 18's own
-`count if` on 48 expressions. Supported: the operators
+`count if` on 80 expressions. Supported: the operators
 `! ~ ^ - * / + == != ~= < <= > >= & |`, `_n` / `_N`, `"text":labelname`, and
 `missing mi inlist inrange strpos regexm strmatch lower upper trim strlen
 ustrlen substr abs floor ceil int round mod min max sqrt exp ln log10 mdy td`.
-Variable abbreviations, time-series operators and macros are not.
+
+A variable can be named by any abbreviation only it starts with (`gro` for
+`growth_flag`); an ambiguous one is refused, as in Stata. On a dataset that
+was `tsset` or `xtset`, the time-series operators work too: `L.sales`,
+`L2.sales`, `F.sales`, `D.sales`, `S12.sales`, and runs such as `L2D.sales`.
+The lag is found by panel and time, whatever order the rows are saved in.
+Macros and operator lists (`L(1/3).x`) are not supported.
 
 Hover a column header and click its arrow to sort (ascending, descending,
 off); Shift-click adds a secondary key. Sorting is by the underlying values
@@ -161,13 +167,20 @@ MCP tools.
 `use "<file>", clear` in the current session, asking first if that session has
 unsaved changes.
 
-Filtering, sorting and summaries read the whole column, so they are limited
-to 20 million observations; browsing is not.
+Filtering, sorting and summaries read the whole column. They are bounded by
+memory, not by a row count: `stataCode.dtaViewerMemoryMb` (default 2048)
+is what they may hold at once. A filter keeps 4 bytes per matching row and a
+sort about 20 bytes per row, so the default sorts roughly 80 million rows.
+Past the limit a filter or sort stops and says how much it needed; a summary
+still gives the count, mean, standard deviation, minimum and maximum, and
+leaves out the percentiles. Browsing has no limit. A descending sort keeps
+missing values at the end, as `gsort` does.
 
 Supported formats: 113, 114, 115 (Stata 8–12), 117 (Stata 13), 118 and 119
-(Stata 14+), 120 and 121 (Stata 18 alias variables). Formats older than 113
-need a round trip through Stata. To open a `.dta` as raw bytes instead, use
-*Reopen Editor With…*.
+(Stata 14+), 120 and 121 (Stata 18 alias variables). Formats 102 to 111
+(Stata 1 to 7) open read-only: they can be browsed, filtered, sorted and
+summarized, and their labels cannot be edited in place. To open a `.dta` as
+raw bytes instead, use *Reopen Editor With…*.
 
 *View Data Preview* uses the same viewer for data that is only in memory: it
 copies the first rows through a scratch frame into a temporary `.dta` (your
@@ -391,7 +404,8 @@ UI modules:
 | `src/treeProviders.ts` | sessions / last-result / data / run-history / logs / graphs / outputs sidebar trees |
 | `src/dataBrowser.ts` | variables-window data nodes for the **Data** view |
 | `src/outputs.ts` | table/export artifact nodes for the **Outputs** view |
-| `src/dtaReader.ts` | Stata-free `.dta` parser (formats 113–115, 117–121), random-access row reads |
+| `src/dtaReader.ts` | Stata-free `.dta` parser (formats 102–111 read-only, 113–115, 117–121), random-access row reads |
+| `src/webviewHarness.ts` | runs the viewer's page in headless Chrome against the real session (`npm run test:webview`) |
 | `src/dtaFormat.ts` | Stata display formats (`%td`, `%9.2f`, `%12.0gc`, …) |
 | `src/dtaFilter.ts` | Stata `if` expression evaluator for the row filter |
 | `src/dtaQuery.ts` | filter + sort row order, per-variable summary statistics |

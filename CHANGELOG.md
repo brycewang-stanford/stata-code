@@ -6,6 +6,59 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+The `.dta` viewer loses four limits, and a real batch Stata now tests the
+console backend. The result schema and the MCP tools are unchanged.
+
+### Added
+
+- **Variable abbreviations and time-series operators in the viewer's
+  filter.** A variable can be named by any abbreviation only it starts with;
+  an ambiguous one is refused with Stata's message. On a dataset that was
+  `tsset` or `xtset`, `L.` `F.` `D.` `S.` and their runs (`L2D.sales`) are
+  evaluated against the declaration stored in the file, by panel and time
+  rather than by row, so a file saved in any order filters correctly. 32 more
+  expressions are pinned to Stata 18's `count if`, on a panel with gaps and
+  on a series declared with `delta(2)`.
+- **Formats 102 to 111 (Stata 1 to 7) open read-only.** They can be browsed,
+  filtered, sorted and summarized. Each type's single missing value and its
+  wider range are read as those formats define them (126 is a byte there,
+  not `.z`). StataCorp's published documentation starts at format 113, so
+  the reference is Stata itself: 28 old-format files from the pandas test
+  suite (BSD 3-Clause) are each compared, cell by cell and label by label,
+  with the same file as Stata 18 reads and re-saves it. Label editing stays
+  refused for these formats.
+- **A browser test of the viewer** (`npm run test:webview`, also in CI). The
+  page the extension ships runs in headless Chrome against the real viewer
+  session, joined over the DevTools protocol on Node's own WebSocket, with no
+  new dependency. Eight cases cover opening a file, filtering, sorting,
+  value labels, summaries, editing a label and undoing it, and scrolling.
+  Until now the page was only exercised by hand.
+- **`stataCode.dtaViewerMemoryMb`** (default 2048).
+
+### Changed
+
+- **Filtering, sorting and summaries are bounded by memory, not by 20 million
+  rows.** A filter that keeps few rows of a very large file now runs; one
+  that would not fit says how much memory it needed. A summary past the
+  limit keeps its exact count, mean, standard deviation, minimum and
+  maximum and leaves out the percentiles. Checked on a 30-million-row file
+  against Stata's `count if` and `summarize`.
+
+### Fixed
+
+- **A descending sort put missing values first.** Stata's `gsort -x` keeps
+  them after every number (and `.z` before `.`); the viewer now does the
+  same, on each key of a multi-key sort.
+- **The console backend was never found on a standard macOS install.** It
+  looked for `stata-mp.app`; the bundle is `StataMP.app`. Stata 16 and older
+  on macOS, which have no pystata, therefore reported no Stata at all.
+- **A variable label containing a double quote cut the dataset listing
+  short on the console backend.** The label came back garbled and every
+  variable after it was missing. Found by the new test that runs the batch
+  wrapper in a real Stata and compares it with the pystata backend
+  (`tests/test_real_console.py`); until now the wrapper's variable probe was
+  only tested against a recorded log.
+
 ## 0.16.0 — 2026-10-04
 
 Value labels and the dataset label can now be edited in a `.dta` file without

@@ -82,8 +82,19 @@ export function encodeVariableLabel(label: string, release: number, width: numbe
  * before any is applied. Variables whose label already equals the requested
  * text produce no patch.
  */
+/** Formats 102-111 (Stata 7 and older) are read, never written. */
+function assertEditable(release: number): void {
+  if (release < 113) {
+    throw new DtaEditError(
+      `this is a format-${release} file (Stata 7 or older), which can be viewed but not ` +
+        "edited in place; open it in Stata and save it again to convert it",
+    );
+  }
+}
+
 export function planLabelEdits(reader: DtaReader, edits: Record<string, string>): LabelPatch[] {
   const { release, variables } = reader.meta;
+  assertEditable(release);
   const byName = new Map(variables.map((v) => [v.name, v]));
   const patches: LabelPatch[] = [];
   const problems: string[] = [];
@@ -365,6 +376,7 @@ export function planEdits(
   edit: DtaLabelEdit,
 ): { splices: Splice[]; result: DtaEditResult } {
   const { release, variables, valueLabels: currentSets } = reader.meta;
+  assertEditable(release);
   const layout = reader.editLayout;
   const tagged = layout.map !== null;
   const byName = new Map(variables.map((v) => [v.name, v]));

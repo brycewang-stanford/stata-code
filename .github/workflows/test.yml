@@ -99,6 +99,10 @@ jobs:
       - name: Compile and run tests
         run: npm test
 
+      # The .dta viewer's page in the runner's Chrome, against the real session.
+      - name: Viewer end-to-end tests in a browser
+        run: npm run test:webview
+
       - name: Package VSIX smoke test
         run: npm run package:vsix -- --out /tmp/stata-code-vscode-ci.vsix
 

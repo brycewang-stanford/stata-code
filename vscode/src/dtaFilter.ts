@@ -11,16 +11,22 @@
 //   - comparing a string with a number is a "type mismatch" error.
 // The test suite checks 48 expressions against Stata 18's own `count if`.
 //
-// Supported: numeric and string literals, `.` / `.a`–`.z`, variable names,
-// `_n` / `_N`, `"text":labelname`, the operators ! ~ ^ - * / + == != ~= < <=
-// > >= & |, and a working set of functions (see FUNCTIONS). Not supported:
-// variable abbreviations, time-series operators, macros, `in` ranges.
+// Supported: numeric and string literals, `.` / `.a`–`.z`, variable names
+// and their unambiguous abbreviations, `_n` / `_N`, `"text":labelname`, the
+// operators ! ~ ^ - * / + == != ~= < <= > >= & |, a working set of functions
+// (see FUNCTIONS), and the time-series operators L. F. D. S. (`L2.x`,
+// `D.x`, `L2D.x`) on a dataset that was `tsset` or `xtset`. Not supported:
+// macros, `in` ranges, operator lists such as `L(1/3).x`.
+//
+// A time-series operator reads another observation, so an expression that
+// uses one must be prepared (one pass over the time, panel and operand
+// columns) before it is tested; see CompiledFilter.prepare.
 //
 // Kept free of any `vscode` import so it runs under `node --test`.
 
 import { TextEncoder } from "node:util";
 
-import { DtaCell, DtaMeta, missingIndex } from "./dtaReader";
+import { DtaCell, DtaMeta, DtaReader, missingIndex } from "./dtaReader";
 
 /** Numbers at or above this are Stata missing values in this module's encoding. */
 const MISSING_FLOOR = 8.99e307;
@@ -64,6 +70,14 @@ export interface CompiledFilter {
    * 1-based position in the dataset (`_n`).
    */
   test(cells: DtaCell[], obs: number): boolean;
+  /**
+   * Present when the expression uses time-series operators. Reads the lagged
+   * values it needs in one pass; `test` may only be called once it resolves.
+   * `onChunk` is called between chunks and may throw to cancel.
+   */
+  prepare?(reader: DtaReader, onChunk?: () => void): Promise<void>;
+  /** Bytes per observation that `prepare` holds in memory. */
+  prepareBytesPerRow?: number;
 }
 
 // ── tokens ──────────────────────────────────────────────────────────────────
@@ -72,12 +86,15 @@ type Token =
   | { kind: "num"; value: number }
   | { kind: "str"; value: string }
   | { kind: "name"; value: string }
+  | { kind: "tsop"; value: string }
   | { kind: "op"; value: string }
   | { kind: "end" };
 
 const OPERATORS = ["==", "!=", "~=", ">=", "<=", "&", "|", "!", "~", "^", "*", "/", "+", "-", ">", "<", "(", ")", ",", ":", "="];
 const NAME_START = /[\p{L}_]/u;
 const NAME_CHAR = /[\p{L}\p{N}_]/u;
+/** `L`, `l2`, `F`, `D2`, `S12`, and runs of them such as `L2D`. */
+const TS_OPERATOR = /^(?:[LFDSlfds]\d*)+$/;
 
 function tokenize(source: string): Token[] {
   const tokens: Token[] = [];
@@ -133,6 +150,12 @@ function tokenize(source: string): Token[] {
         const open = source.indexOf("(", j);
         tokens.push({ kind: "num", value: parseDateLiteral(source.slice(open + 1, close)) });
         i = close + 1;
+        continue;
+      }
+      // `L.sales`: a time-series operator, its dot, and the variable.
+      if (TS_OPERATOR.test(name) && source[j] === "." && NAME_START.test(source[j + 1] ?? "")) {
+        tokens.push({ kind: "tsop", value: name });
+        i = j + 1;
         continue;
       }
       tokens.push({ kind: "name", value: name });
@@ -432,11 +455,131 @@ const FUNCTIONS: Record<string, FunctionBuilder> = {
   },
 };
 
+// ── time-series operators ───────────────────────────────────────────────────
+
+/**
+ * An operator such as `L2D` as a polynomial in the lag operator: lag → weight.
+ * `L2` is {2: 1}, `F` is {-1: 1}, `D` is {0: 1, 1: -1}, `S12` is
+ * {0: 1, 12: -1}; a run of operators is the product of its parts.
+ */
+function lagPolynomial(operator: string): Map<number, number> {
+  let poly = new Map<number, number>([[0, 1]]);
+  const times = (factor: Map<number, number>): void => {
+    const next = new Map<number, number>();
+    for (const [a, wa] of poly) {
+      for (const [b, wb] of factor) next.set(a + b, (next.get(a + b) ?? 0) + wa * wb);
+    }
+    poly = next;
+  };
+  for (const m of operator.matchAll(/([LFDSlfds])(\d*)/g)) {
+    const letter = m[1].toUpperCase();
+    const k = m[2] === "" ? 1 : Number(m[2]);
+    if (letter === "L") times(new Map([[k, 1]]));
+    else if (letter === "F") times(new Map([[-k, 1]]));
+    else if (letter === "S") times(k === 0 ? new Map([[0, 1]]) : new Map([[0, 1], [k, -1]]));
+    else for (let i = 0; i < k; i++) times(new Map([[0, 1], [1, -1]]));
+  }
+  for (const [lag, weight] of poly) if (weight === 0) poly.delete(lag);
+  return poly;
+}
+
+/** One `L2.x`-style operand: filled by {@link prepareSeries}. */
+interface Series {
+  column: number;
+  terms: Array<[number, number]>;
+  /** Value per observation, in dataset order. */
+  values?: Float64Array;
+}
+
+async function prepareSeries(
+  reader: DtaReader,
+  series: Series[],
+  onChunk?: () => void,
+): Promise<void> {
+  const { meta } = reader;
+  const ts = meta.tsset;
+  if (!ts) throw new DtaFilterError("time variable not set");
+  const index = new Map(meta.variables.map((v) => [v.name, v.index]));
+  const timeColumn = index.get(ts.timeVar) as number;
+  const panelColumn = ts.panelVar === "" ? undefined : (index.get(ts.panelVar) as number);
+  const operands = [...new Set(series.map((s) => s.column))];
+  const columns = [timeColumn, ...(panelColumn === undefined ? [] : [panelColumn]), ...operands];
+  const first = panelColumn === undefined ? 1 : 2;
+
+  const n = meta.nObs;
+  const time = new Float64Array(n);
+  const panel = new Float64Array(panelColumn === undefined ? 0 : n);
+  const data = operands.map(() => new Float64Array(n));
+  await reader.scan(columns, (rows, start) => {
+    onChunk?.();
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      time[start + r] = numericKey(row[0]);
+      if (panelColumn !== undefined) panel[start + r] = numericKey(row[1]);
+      for (let k = 0; k < data.length; k++) data[k][start + r] = numericKey(row[first + k]);
+    }
+  });
+
+  // Observations in (panel, time) order; a lag is then found by bisection.
+  const byTime = new Uint32Array(n);
+  for (let i = 0; i < n; i++) byTime[i] = i;
+  const inPanels = panel.length > 0;
+  byTime.sort((a, b) => (inPanels && panel[a] !== panel[b] ? panel[a] - panel[b] : time[a] - time[b]));
+  const find = (group: number, when: number): number => {
+    let lo = 0;
+    let hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const obs = byTime[mid];
+      const before = inPanels && panel[obs] !== group ? panel[obs] < group : time[obs] < when;
+      if (before) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo === n) return -1;
+    const obs = byTime[lo];
+    return time[obs] === when && (!inPanels || panel[obs] === group) ? obs : -1;
+  };
+
+  for (const s of series) {
+    const x = data[operands.indexOf(s.column)];
+    const out = new Float64Array(n);
+    // `L.x` alone hands back the lagged value itself, so `L.x == .a` is true
+    // where the lag held .a; anything that computes yields `.` on a missing.
+    const plain = s.terms.length === 1 && s.terms[0][1] === 1;
+    for (let obs = 0; obs < n; obs++) {
+      const when = time[obs];
+      let value = 0;
+      if (isMissingKey(when)) value = SYSMISS;
+      else {
+        for (const [lag, weight] of s.terms) {
+          const at = lag === 0 ? obs : find(inPanels ? panel[obs] : 0, when - lag * ts.delta);
+          if (at < 0) {
+            value = SYSMISS;
+            break;
+          }
+          if (plain) {
+            value = x[at];
+            break;
+          }
+          if (isMissingKey(x[at])) {
+            value = SYSMISS;
+            break;
+          }
+          value += weight * x[at];
+        }
+      }
+      out[obs] = plain ? value : arith(value);
+    }
+    s.values = out;
+  }
+}
+
 // ── parser ──────────────────────────────────────────────────────────────────
 
 class Parser {
   private pos = 0;
   readonly columns: number[] = [];
+  readonly series: Series[] = [];
   private readonly slots = new Map<number, number>();
   private readonly byName: Map<string, number>;
 
@@ -589,7 +732,39 @@ class Parser {
       if (this.takeOp("(")) return this.call(t.value);
       return this.variable(t.value);
     }
+    if (t.kind === "tsop") {
+      this.pos += 1;
+      const operand = this.peek();
+      if (operand.kind !== "name") throw new DtaFilterError("invalid syntax");
+      this.pos += 1;
+      return this.lagged(t.value, operand.value);
+    }
     throw new DtaFilterError("invalid syntax");
+  }
+
+  /** `L2.sales`: the operand's value at another time, read once prepared. */
+  private lagged(operator: string, name: string): Node {
+    if (!this.meta.tsset) throw new DtaFilterError("time variable not set");
+    const index = this.resolve(name);
+    const kind = this.meta.variables[index].kind;
+    if (kind === "str" || kind === "strL") throw new DtaFilterError("type mismatch");
+    if (kind === "alias") throw new DtaFilterError(`${name} is an alias variable and holds no data`);
+    const entry: Series = { column: index, terms: [...lagPolynomial(operator)] };
+    this.series.push(entry);
+    return num((_r, n) => (entry.values as Float64Array)[n - 1]);
+  }
+
+  /**
+   * A variable by name or, as Stata allows, by an abbreviation that only
+   * one variable starts with. An exact name always wins.
+   */
+  private resolve(name: string): number {
+    const exact = this.byName.get(name);
+    if (exact !== undefined) return exact;
+    const matches = this.meta.variables.filter((v) => v.name.startsWith(name));
+    if (matches.length === 1) return matches[0].index;
+    if (matches.length > 1) throw new DtaFilterError(`${name} ambiguous abbreviation`);
+    throw new DtaFilterError(`${name} not found`);
   }
 
   /** `"South":regionlbl` — the number that value label maps to that text. */
@@ -631,8 +806,7 @@ class Parser {
       const total = this.meta.nObs;
       return num(() => total);
     }
-    const index = this.byName.get(name);
-    if (index === undefined) throw new DtaFilterError(`${name} not found`);
+    const index = this.resolve(name);
     let slot = this.slots.get(index);
     if (slot === undefined) {
       slot = this.columns.length;
@@ -690,8 +864,16 @@ export function compileFilter(expression: string, meta: DtaMeta): CompiledFilter
   const parser = new Parser(tokenize(source), meta);
   const root = parser.parse();
   const fn = wantNum(root);
+  const { series } = parser;
   return {
     columns: parser.columns,
     test: (cells, obs) => fn(cells, obs) !== 0,
+    ...(series.length > 0
+      ? {
+          prepare: (reader: DtaReader, onChunk?: () => void) => prepareSeries(reader, series, onChunk),
+          // time, panel, one array per operand and per result, and the index
+          prepareBytesPerRow: 8 * (2 + new Set(series.map((x) => x.column)).size + series.length) + 4,
+        }
+      : {}),
   };
 }

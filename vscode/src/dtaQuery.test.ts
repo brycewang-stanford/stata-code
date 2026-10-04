@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { describe, test } from "node:test";
 
 import { DtaFilterError } from "./dtaFilter";
-import { buildRowOrder, DtaQueryCancelled, summarizeColumn } from "./dtaQuery";
+import { buildRowOrder, DtaQueryCancelled, DtaQueryError, summarizeColumn } from "./dtaQuery";
 import { BufferByteSource, DtaReader } from "./dtaReader";
 
 const FIXTURES = path.join(__dirname, "..", "test-fixtures", "dta");
@@ -63,6 +63,50 @@ describe("buildRowOrder matches Stata's sort", () => {
       sort: [{ column: col(reader, "score"), descending: true }],
     });
     assert.deepEqual(ids(order, 0, 8), [98, 46, 57, 107, 144, 120, 152, 242]);
+  });
+
+  test("gsort -age id — missing values stay last when descending", async () => {
+    const reader = await open("survey118.dta");
+    const order = await buildRowOrder(reader, {
+      filter: "",
+      sort: [
+        { column: col(reader, "age"), descending: true },
+        { column: col(reader, "id"), descending: false },
+      ],
+    });
+    assert.deepEqual(ids(order, 0, 4), [68, 181, 320, 380]);
+    // the last age-18 rows, then .a before '.', as Stata lists them
+    assert.deepEqual(
+      ids(order, 479, 500),
+      [293, 325, 346, 455, 97, 194, 291, 388, 485, 41, 82, 123, 164, 205, 246, 287, 328, 369, 410, 451, 492],
+    );
+  });
+
+  test("gsort -region -age id — each key keeps its missing values last", async () => {
+    const reader = await open("survey118.dta");
+    const order = await buildRowOrder(reader, {
+      filter: "",
+      sort: [
+        { column: col(reader, "region"), descending: true },
+        { column: col(reader, "age"), descending: true },
+        { column: col(reader, "id"), descending: false },
+      ],
+    });
+    assert.deepEqual(ids(order, 0, 3), [386, 44, 393]);
+    assert.deepEqual(ids(order, 488, 500), [97, 388, 369, 159, 265, 106, 212, 318, 477, 53, 371, 424]);
+  });
+
+  test("gsort -city id — empty strings last when descending", async () => {
+    const reader = await open("survey118.dta");
+    const order = await buildRowOrder(reader, {
+      filter: "",
+      sort: [
+        { column: col(reader, "city"), descending: true },
+        { column: col(reader, "id"), descending: false },
+      ],
+    });
+    assert.deepEqual(ids(order, 0, 3), [3, 8, 13]);
+    assert.deepEqual(ids(order, 497, 500), [489, 494, 499]);
   });
 
   test("sort region age id — two keys, extended missing after sysmiss", async () => {
@@ -237,5 +281,61 @@ describe("DtaReader.readRowsAt", () => {
     assert.deepEqual(rows, [[500], [1], [251], [2], [499]]);
     assert.deepEqual(await reader.readRowsAt([], [id]), []);
     await assert.rejects(reader.readRowsAt([500], [id]), RangeError);
+  });
+});
+
+// The whole-column operations are bounded by memory, not by a row count: a
+// small limit stands in here for a file too large for the real one.
+describe("memory limit", () => {
+  const tight = { memoryBytes: 2000 };
+  const never = (): boolean => false;
+
+  test("a filter that keeps few rows runs under a limit a full one would break", async () => {
+    const reader = await open("survey118.dta");
+    const order = await buildRowOrder(reader, { filter: "mod(id, 100) == 0", sort: [] }, never, tight);
+    assert.deepEqual(ids(order, 0, 5), [100, 200, 300, 400, 500]);
+    await assert.rejects(
+      buildRowOrder(reader, { filter: "id > 0", sort: [] }, never, tight),
+      (err: unknown) =>
+        err instanceof DtaQueryError &&
+        /This filter needs about .* MB .* stataCode\.dtaViewerMemoryMb/.test(err.message),
+    );
+  });
+
+  test("a sort counts its keys, numeric and string", async () => {
+    const reader = await open("survey118.dta");
+    for (const name of ["income", "city"]) {
+      await assert.rejects(
+        buildRowOrder(reader, { filter: "", sort: [{ column: col(reader, name), descending: false }] }, never, tight),
+        /Sorting these rows needs about/,
+      );
+    }
+  });
+
+  test("a time-series filter is refused before its pass over the file", async () => {
+    const reader = await open("panel118.dta");
+    await assert.rejects(
+      buildRowOrder(reader, { filter: "L.sales > 100", sort: [] }, never, tight),
+      /This time-series filter needs about/,
+    );
+    const order = await buildRowOrder(reader, { filter: "L.sales > 100", sort: [] });
+    assert.equal(order?.length, 123);
+  });
+
+  test("a summary past the limit keeps exact moments and drops the percentiles", async () => {
+    const reader = await open("survey118.dta");
+    for (const name of ["income", "score", "age"]) {
+      const full = await summarizeColumn(reader, col(reader, name), null);
+      const lean = await summarizeColumn(reader, col(reader, name), null, never, tight);
+      assert.equal(lean.percentilesOmitted, true);
+      assert.equal(lean.p50, undefined);
+      assert.equal(lean.n, full.n);
+      assert.equal(lean.missing, full.missing);
+      assert.equal(lean.min, full.min);
+      assert.equal(lean.max, full.max);
+      assert.ok(Math.abs((lean.mean as number) - (full.mean as number)) <= 1e-9 * Math.abs(full.mean as number));
+      assert.ok(Math.abs((lean.sd as number) - (full.sd as number)) <= 1e-9 * (full.sd as number));
+      assert.equal(full.percentilesOmitted, undefined);
+    }
   });
 });

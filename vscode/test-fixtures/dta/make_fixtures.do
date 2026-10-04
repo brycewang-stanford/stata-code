@@ -133,3 +133,36 @@ label variable region "Census region"
 label variable city "City of residence"
 label data "Synthetic survey"
 save "survey118.dta", replace
+
+* --- panel118.dta / ts118.dta: time-series operators in the viewer's filter --
+* An xtset panel with gaps and missing values, saved in shuffled row order
+* (the viewer must find each lag by panel and time, not by row), and a
+* single series declared with delta(2). The expected counts in
+* vscode/src/dtaFilter.test.ts are Stata's `count if` on the sorted data.
+clear all
+set seed 20261004
+set obs 240
+generate int firm = 1 + floor((_n - 1) / 12)
+bysort firm: generate int year = 2000 + _n
+drop if mod(_n, 17) == 0
+generate double sales = round(100 + 50 * rnormal(), 0.01)
+replace sales = . if mod(_n, 29) == 0
+replace sales = .a if mod(_n, 61) == 0
+generate long sales_index = _n
+generate byte growth_flag = runiform() < 0.4
+generate str3 code = "a"
+generate double shuffle = runiform()
+xtset firm year
+label data "Panel with gaps"
+sort shuffle
+drop shuffle
+save "panel118.dta", replace
+
+clear all
+set seed 20261005
+set obs 40
+generate int t = 2 * _n
+drop if inlist(_n, 7, 8, 21)
+generate double y = round(rnormal(), 0.001)
+tsset t, delta(2)
+save "ts118.dta", replace

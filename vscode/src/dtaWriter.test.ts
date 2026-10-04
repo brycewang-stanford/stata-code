@@ -431,3 +431,15 @@ describe("inverseEdit", () => {
     assert.equal(describeEdit(planEdits(reader, {}).result), "");
   });
 });
+
+describe("formats 102-111 are read-only", () => {
+  test("label edits are refused before anything is planned", async () => {
+    const file = path.join(__dirname, "..", "test-fixtures", "dta", "old", "stata4_105.dta");
+    const reader = await DtaReader.open(new BufferByteSource(new Uint8Array(fs.readFileSync(file))));
+    assert.throws(
+      () => planLabelEdits(reader, { fulllab: "x" }),
+      /format-105 file \(Stata 7 or older\), which can be viewed but not edited/,
+    );
+    assert.throws(() => planEdits(reader, { dataLabel: "x" }), /can be viewed but not edited/);
+  });
+});

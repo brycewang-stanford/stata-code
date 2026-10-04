@@ -743,6 +743,12 @@
           "default": "auto",
           "description": "Text encoding for .dta files in formats older than 118 (written by Stata 13 or earlier, or by saveold), which predate Stata's switch to UTF-8. \"auto\" tries UTF-8, then GB18030, then Windows-1252. Set an explicit encoding label (for example \"gbk\", \"big5\", \"shift_jis\", \"windows-1252\") when auto-detection picks the wrong one."
         },
+        "stataCode.dtaViewerMemoryMb": {
+          "type": "number",
+          "default": 2048,
+          "minimum": 16,
+          "description": "Memory, in megabytes, the .dta viewer may use to filter, sort or summarize a whole column. A filter keeps 4 bytes per matching row and a sort about 20 bytes per row, so the default sorts roughly 80 million rows. Past the limit a filter or sort stops with a message, and a summary leaves out its percentiles."
+        },
         "stataCode.includeFullLog": {
           "type": "boolean",
           "default": false,
@@ -779,6 +785,7 @@
     "watch": "tsc -p . --watch",
     "gen-types": "node scripts/gen-types.cjs",
     "test": "npm run compile:ts && node --test out/*.test.js",
+    "test:webview": "npm run compile:ts && node --test out/dtaWebview.e2e.js",
     "package:vsix": "vsce package",
     "publish:vsix": "vsce publish",
     "vscode:prepublish": "npm run compile"

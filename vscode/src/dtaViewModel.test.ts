@@ -3,8 +3,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, test } from "node:test";
 
-import { BufferByteSource, DtaReader } from "./dtaReader";
+import { BufferByteSource, DtaReader, type DtaVariable } from "./dtaReader";
 import {
+  formatSummary,
   buildViewerInit,
   formatRows,
   MAX_ROWS_PER_REQUEST,
@@ -185,5 +186,35 @@ describe("valueLabelKeyText", () => {
     assert.equal(valueLabelKeyText(2147483621), ".");
     assert.equal(valueLabelKeyText(2147483622), ".a");
     assert.equal(valueLabelKeyText(2147483647), ".z");
+  });
+});
+
+describe("formatSummary", () => {
+  const variable = { name: "x", format: "%9.0g", type: "double" } as DtaVariable;
+  const base = { name: "x", numeric: true, rows: 10, n: 9, missing: 1, distinct: 9, distinctCapped: false };
+
+  test("lists the percentiles when they were computed", () => {
+    const shown = formatSummary(
+      { ...base, mean: 5, sd: 2, min: 1, max: 9, p25: 3, p50: 5, p75: 7 },
+      variable,
+    );
+    assert.deepEqual(
+      shown.stats.map(([term]) => term),
+      ["Obs", "Missing", "Distinct", "Mean", "Std. dev.", "Min", "p25", "Median", "p75", "Max"],
+    );
+  });
+
+  test("says so when the memory limit left the percentiles out", () => {
+    const shown = formatSummary(
+      { ...base, mean: 5, sd: 2, min: 1, max: 9, percentilesOmitted: true },
+      variable,
+    );
+    assert.deepEqual(shown.stats.slice(3), [
+      ["Mean", "5"],
+      ["Std. dev.", "2"],
+      ["Min", "1"],
+      ["Median", "not computed (memory limit)"],
+      ["Max", "9"],
+    ]);
   });
 });

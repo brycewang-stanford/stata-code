@@ -18,11 +18,22 @@ import {
 } from "./dtaReader";
 
 /**
- * Datasets with more observations than this are browsed but not filtered,
- * sorted or summarized: those need a full pass and, for a sort, the whole
- * column in memory.
+ * Row positions are kept as 32-bit integers, so this is the most
+ * observations a filter, sort or summary can address.
  */
-export const MAX_QUERY_ROWS = 20_000_000;
+export const MAX_QUERY_ROWS = 0xffffffff;
+/**
+ * What the whole-column operations may hold in memory at once. A filter
+ * keeps 4 bytes per matching row and a sort 12 more plus 8 per numeric key,
+ * so the default covers a sort of about 80 million rows on one key and a
+ * filter of far more. A summary past the limit drops its percentiles
+ * instead of failing; see {@link summarizeColumn}.
+ */
+export const DEFAULT_QUERY_MEMORY_BYTES = 2 * 1024 ** 3;
+
+export interface QueryLimits {
+  memoryBytes: number;
+}
 /** Distinct values tracked exactly; past this the count is reported as a floor. */
 export const MAX_DISTINCT_TRACKED = 100_000;
 const FREQUENCY_ROWS = 12;
@@ -66,19 +77,32 @@ function assertQueryable(reader: DtaReader): void {
   }
 }
 
+function megabytes(bytes: number): string {
+  return `${Math.ceil(bytes / 1024 ** 2).toLocaleString("en-US")} MB`;
+}
+
+function overBudget(what: string, needed: number, limits: QueryLimits): DtaQueryError {
+  return new DtaQueryError(
+    `${what} needs about ${megabytes(needed)} of memory and the viewer's limit is ` +
+      `${megabytes(limits.memoryBytes)}. Narrow the filter, or raise the setting ` +
+      `stataCode.dtaViewerMemoryMb.`,
+  );
+}
+
 /**
  * Row order for a view: the zero-based observation indices that pass
  * `query.filter`, arranged by `query.sort`. Returns `null` for the identity
  * (no filter, no sort), so the common case costs nothing.
  *
  * Sorting is by the underlying values, not by value-label text, with missing
- * values last in ascending order — the same as Stata's `sort` / `gsort`.
- * Ties keep their original order.
+ * values after every number in both directions, the same as Stata's `sort`
+ * and `gsort`. Ties keep their original order.
  */
 export async function buildRowOrder(
   reader: DtaReader,
   query: RowQuery,
   isCancelled: () => boolean = () => false,
+  limits: QueryLimits = { memoryBytes: DEFAULT_QUERY_MEMORY_BYTES },
 ): Promise<Uint32Array | null> {
   const { meta } = reader;
   const expression = query.filter.trim();
@@ -86,6 +110,14 @@ export async function buildRowOrder(
   assertQueryable(reader);
 
   const filter = expression === "" ? undefined : compileFilter(expression, meta);
+  // Time-series operators read other observations: one pass to fetch them.
+  if (filter?.prepare) {
+    const needed = (filter.prepareBytesPerRow ?? 0) * meta.nObs;
+    if (needed > limits.memoryBytes) throw overBudget("This time-series filter", needed, limits);
+    await filter.prepare(reader, () => {
+      if (isCancelled()) throw new DtaQueryCancelled();
+    });
+  }
   for (const key of query.sort) {
     const v = meta.variables[key.column];
     if (!v) throw new DtaQueryError(`sort: variable index ${key.column} is out of range`);
@@ -97,7 +129,12 @@ export async function buildRowOrder(
   const columns = [...filterColumns, ...query.sort.map((k) => k.column)];
   const sortStrings = query.sort.map((k) => isString(meta.variables[k.column]));
 
-  let kept = new Uint32Array(Math.min(meta.nObs, 1 << 16));
+  // Per kept row: its position, each numeric key, and for a sort the two
+  // index arrays built below. String keys are counted as they arrive.
+  const numericSortKeys = sortStrings.filter((isText) => !isText).length;
+  const bytesPerRow = 4 + 8 * numericSortKeys + (query.sort.length > 0 ? 8 : 0);
+  const affordable = Math.max(16, Math.floor(limits.memoryBytes / (2 * bytesPerRow)));
+  let kept = new Uint32Array(Math.min(meta.nObs, 1 << 16, affordable));
   let count = 0;
   const numericKeys: Array<Float64Array | undefined> = query.sort.map((_, i) =>
     sortStrings[i] ? undefined : new Float64Array(kept.length),
@@ -106,8 +143,13 @@ export async function buildRowOrder(
     sortStrings[i] ? [] : undefined,
   );
 
+  let stringBytes = 0;
+  const what = query.sort.length > 0 ? "Sorting these rows" : "This filter";
   const grow = (): void => {
     const size = Math.min(meta.nObs, kept.length * 2);
+    // while growing, the old arrays and the new ones exist side by side
+    const needed = (size + kept.length) * bytesPerRow + stringBytes;
+    if (needed > limits.memoryBytes) throw overBudget(what, needed, limits);
     const next = new Uint32Array(size);
     next.set(kept);
     kept = next;
@@ -141,9 +183,16 @@ export async function buildRowOrder(
           const cell = row[filterWidth + k];
           const numeric = numericKeys[k];
           if (numeric) numeric[count] = numericKey(cell);
-          else (stringKeys[k] as string[]).push(cell as string);
+          else {
+            (stringKeys[k] as string[]).push(cell as string);
+            // two bytes a character plus the engine's per-string overhead
+            stringBytes += 2 * (cell as string).length + 24;
+          }
         }
         count += 1;
+      }
+      if (stringBytes > limits.memoryBytes) {
+        throw overBudget(what, kept.length * bytesPerRow + stringBytes, limits);
       }
     });
   }
@@ -155,7 +204,18 @@ export async function buildRowOrder(
   const comparators = query.sort.map((key, k) => {
     const sign = key.descending ? -1 : 1;
     const numeric = numericKeys[k];
-    if (numeric) return (a: number, b: number): number => sign * (numeric[a] - numeric[b]);
+    if (numeric && key.descending) {
+      // gsort -x: largest first, but missing values still after every
+      // number (Stata's default; `mfirst` is the exception), .z before '.'.
+      return (a: number, b: number): number => {
+        const x = numeric[a];
+        const y = numeric[b];
+        const xMissing = isMissingKey(x);
+        if (xMissing !== isMissingKey(y)) return xMissing ? 1 : -1;
+        return y - x;
+      };
+    }
+    if (numeric) return (a: number, b: number): number => numeric[a] - numeric[b];
     const strings = stringKeys[k] as string[];
     // Code-unit order, as Stata sorts strings: uppercase before lowercase.
     return (a: number, b: number): number =>
@@ -199,6 +259,11 @@ export interface ColumnSummary {
   p25?: number;
   p50?: number;
   p75?: number;
+  /**
+   * True when the nonmissing values did not fit in the memory limit: the
+   * percentiles are then left out, and the rest is still exact.
+   */
+  percentilesOmitted?: boolean;
   /** Most frequent values, missing included; absent for high-cardinality variables. */
   frequencies?: FrequencyRow[];
   /** Number of distinct values beyond those listed in `frequencies`. */
@@ -226,6 +291,7 @@ export async function summarizeColumn(
   column: number,
   order: Uint32Array | null,
   isCancelled: () => boolean = () => false,
+  limits: QueryLimits = { memoryBytes: DEFAULT_QUERY_MEMORY_BYTES },
 ): Promise<ColumnSummary> {
   const { meta } = reader;
   const variable = meta.variables[column];
@@ -245,7 +311,15 @@ export async function summarizeColumn(
   let countsCapped = false;
   let missing = 0;
   let n = 0;
-  let values = new Float64Array(numeric ? Math.min(rows, 1 << 16) : 0);
+  const affordable = Math.max(16, Math.floor(limits.memoryBytes / 16));
+  let values = new Float64Array(numeric ? Math.min(rows, 1 << 16, affordable) : 0);
+  // Past the memory limit the values are no longer kept; the moments below
+  // are accumulated as the rows go by, so only the percentiles are lost.
+  let keepValues = true;
+  let mean = 0;
+  let spread = 0; // sum of squared deviations from the running mean
+  let lowest = Infinity;
+  let highest = -Infinity;
 
   await reader.scan([column], (chunk, start) => {
     if (isCancelled()) throw new DtaQueryCancelled();
@@ -257,12 +331,24 @@ export async function summarizeColumn(
         key = numericKey(cell);
         if (isMissingKey(key)) missing += 1;
         else {
-          if (n === values.length) {
-            const bigger = new Float64Array(Math.max(16, Math.min(rows, values.length * 2)));
-            bigger.set(values);
-            values = bigger;
+          if (keepValues && n === values.length) {
+            const size = Math.max(16, Math.min(rows, values.length * 2));
+            if (8 * (size + values.length) > limits.memoryBytes) {
+              keepValues = false;
+              values = new Float64Array(0);
+            } else {
+              const bigger = new Float64Array(size);
+              bigger.set(values);
+              values = bigger;
+            }
           }
-          values[n++] = key;
+          if (keepValues) values[n] = key;
+          n += 1;
+          const delta = key - mean;
+          mean += delta / n;
+          spread += delta * (key - mean);
+          if (key < lowest) lowest = key;
+          if (key > highest) highest = key;
         }
       } else {
         key = String(cell);
@@ -292,20 +378,26 @@ export async function summarizeColumn(
     distinctCapped: countsCapped,
   };
 
-  if (numeric && n > 0) {
+  if (numeric && n > 0 && keepValues) {
     const sorted = values.subarray(0, n).sort();
     let sum = 0;
     for (let i = 0; i < n; i++) sum += sorted[i];
-    const mean = sum / n;
+    const exactMean = sum / n;
     let squares = 0;
-    for (let i = 0; i < n; i++) squares += (sorted[i] - mean) ** 2;
-    summary.mean = mean;
+    for (let i = 0; i < n; i++) squares += (sorted[i] - exactMean) ** 2;
+    summary.mean = exactMean;
     summary.sd = n > 1 ? Math.sqrt(squares / (n - 1)) : undefined;
     summary.min = sorted[0];
     summary.max = sorted[n - 1];
     summary.p25 = percentile(sorted, 25);
     summary.p50 = percentile(sorted, 50);
     summary.p75 = percentile(sorted, 75);
+  } else if (numeric && n > 0) {
+    summary.mean = mean;
+    summary.sd = n > 1 ? Math.sqrt(spread / (n - 1)) : undefined;
+    summary.min = lowest;
+    summary.max = highest;
+    summary.percentilesOmitted = true;
   }
 
   // A frequency table is worth showing for categorical-looking variables:

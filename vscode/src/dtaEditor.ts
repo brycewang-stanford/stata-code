@@ -16,10 +16,12 @@ import { codebookCsv, csvChunks, rangeToTsv, valueLabelsCsv } from "./dtaExport"
 import { openFileByteSource } from "./dtaFileSource";
 import { DtaFilterError } from "./dtaFilter";
 import {
+  DEFAULT_QUERY_MEMORY_BYTES,
   buildRowOrder,
   DtaQueryCancelled,
   DtaQueryError,
   summarizeColumn,
+  type QueryLimits,
   type RowQuery,
   type SortKey,
 } from "./dtaQuery";
@@ -107,6 +109,15 @@ function parseEdit(value: unknown): DtaLabelEdit | null {
 }
 
 const NO_QUERY: RowQuery = { filter: "", sort: [] };
+
+/** The memory filters, sorts and summaries may take, from the user's setting. */
+function queryLimits(): QueryLimits {
+  const megabytes = vscode.workspace
+    .getConfiguration("stataCode")
+    .get<number>("dtaViewerMemoryMb", DEFAULT_QUERY_MEMORY_BYTES / 1024 ** 2);
+  const safe = Number.isFinite(megabytes) && megabytes >= 16 ? megabytes : 16;
+  return { memoryBytes: safe * 1024 ** 2 };
+}
 
 /** Validate the sort keys a webview sent; anything malformed is dropped. */
 function parseSort(value: unknown, nVars: number): SortKey[] {
@@ -282,6 +293,7 @@ class DtaViewerSession implements vscode.Disposable {
           reader,
           { filter: query.filter, sort: parseSort(query.sort, reader.meta.nVars) },
           () => querySeq !== this.querySeq,
+          queryLimits(),
         );
       } catch {
         query = NO_QUERY;
@@ -295,7 +307,9 @@ class DtaViewerSession implements vscode.Disposable {
           title: source.title,
           subtitle: source.subtitle,
           canLoadInStata: source.canLoadInStata,
-          canEditLabels: source.canEditLabels && source.uri.scheme === "file",
+          // formats 102-111 (Stata 7 and older) are shown read-only
+          canEditLabels:
+            source.canEditLabels && source.uri.scheme === "file" && reader.meta.release >= 113,
         }),
       );
       await this.postView();
@@ -363,7 +377,7 @@ class DtaViewerSession implements vscode.Disposable {
     };
     const seq = ++this.querySeq;
     try {
-      const order = await buildRowOrder(reader, query, () => seq !== this.querySeq);
+      const order = await buildRowOrder(reader, query, () => seq !== this.querySeq, queryLimits());
       if (seq !== this.querySeq || reader !== this.reader) return;
       this.order = order;
       this.query = query;
@@ -389,6 +403,7 @@ class DtaViewerSession implements vscode.Disposable {
         column,
         order,
         () => reader !== this.reader || order !== this.order,
+        queryLimits(),
       );
       if (reader !== this.reader || order !== this.order) return;
       await this.webview.postMessage({

@@ -390,10 +390,16 @@ describe("rejecting files that are not readable .dta", () => {
     await assert.rejects(DtaReader.open(new BufferByteSource(new Uint8Array(0))), DtaFormatError);
   });
 
-  test("a pre-Stata-8 format names the way out", async () => {
+  test("a format number Stata never released names the way out", async () => {
+    const bytes = new Uint8Array(200);
+    bytes[0] = 112;
+    await assert.rejects(DtaReader.open(new BufferByteSource(bytes)), /save it again/);
+  });
+
+  test("an old-format header with no byte order is not a .dta file", async () => {
     const bytes = new Uint8Array(200);
     bytes[0] = 110;
-    await assert.rejects(DtaReader.open(new BufferByteSource(bytes)), /save it again/);
+    await assert.rejects(DtaReader.open(new BufferByteSource(bytes)), /unknown byte order/);
   });
 
   test("a tagged file whose section map points past EOF", async () => {
@@ -422,5 +428,103 @@ describe("helpers", () => {
     assert.equal(defaultFormat("str80"), "%80s");
     assert.equal(defaultFormat("str2045"), "%2045s");
     assert.equal(defaultFormat("strL"), "%9s");
+  });
+});
+
+// Formats 102-111 predate StataCorp's published format documentation. The
+// reference is Stata itself: each fixture in test-fixtures/dta/old has a twin
+// that Stata 18 wrote after reading it, and the two must read the same.
+describe("formats 102-111 read as Stata reads them", () => {
+  const OLD = path.join(FIXTURES, "old");
+  const originals = fs
+    .readdirSync(OLD)
+    .filter((name) => name.endsWith(".dta") && !name.endsWith("_as118.dta"))
+    .sort();
+
+  async function openOld(name: string): Promise<DtaReader> {
+    return DtaReader.open(new BufferByteSource(new Uint8Array(fs.readFileSync(path.join(OLD, name)))));
+  }
+
+  /** Stata widens a type whose old range does not fit today's (byte → int …). */
+  const WIDER: Record<string, string[]> = {
+    byte: ["byte", "int"],
+    int: ["int", "long"],
+    long: ["long", "double"],
+    float: ["float", "double"],
+    double: ["double"],
+  };
+
+  test("every released old format has a fixture", () => {
+    const releases = new Set(originals.map((name) => fs.readFileSync(path.join(OLD, name))[0]));
+    assert.deepEqual([...releases].sort(), [102, 103, 104, 105, 108, 110, 111]);
+    assert.ok(originals.some((name) => fs.readFileSync(path.join(OLD, name))[1] === 1), "a big-endian file");
+  });
+
+  for (const name of originals) {
+    test(name, async () => {
+      const old = await openOld(name);
+      const twin = await openOld(name.replace(/\.dta$/, "_as118.dta"));
+      assert.equal(old.meta.release, fs.readFileSync(path.join(OLD, name))[0]);
+      assert.equal(twin.meta.release, 118);
+      assert.equal(old.meta.nObs, twin.meta.nObs);
+      assert.equal(old.meta.dataLabel, twin.meta.dataLabel);
+      assert.deepEqual(old.meta.warnings, []);
+      assert.deepEqual(
+        old.meta.variables.map((v) => [v.name, v.label, v.valueLabel]),
+        twin.meta.variables.map((v) => [v.name, v.label, v.valueLabel]),
+      );
+      for (const v of old.meta.variables) {
+        const now = twin.meta.variables[v.index].type;
+        assert.ok(v.kind === "str" ? now === v.type : WIDER[v.type].includes(now), `${v.name}: ${v.type} → ${now}`);
+      }
+      // every value label a variable uses, with the same codes and texts
+      for (const v of old.meta.variables) {
+        if (!v.valueLabel) continue;
+        assert.deepEqual(
+          [...(old.meta.valueLabels.get(v.valueLabel) ?? [])].sort((a, b) => a[0] - b[0]),
+          [...(twin.meta.valueLabels.get(v.valueLabel) ?? [])].sort((a, b) => a[0] - b[0]),
+          v.valueLabel,
+        );
+      }
+      const columns = old.meta.variables.map((v) => v.index);
+      assert.deepEqual(
+        await old.readRows(0, old.meta.nObs, columns),
+        await twin.readRows(0, twin.meta.nObs, columns),
+      );
+    });
+  }
+
+  test("a missing value is '.', and the numbers just below it are data", async () => {
+    // one row, every numeric type missing
+    const missing = await openOld("stata1_105.dta");
+    assert.deepEqual(await missing.readRows(0, 1, [0, 1, 2, 3, 4]), [[".", ".", ".", ".", "."]]);
+    // old byte / int / long reach further than today's: 126 is a byte here
+    const ranges = await openOld("stata_int_validranges_105.dta");
+    const rows = await ranges.readRows(0, 2, [0, 1, 2]);
+    assert.deepEqual(rows, [
+      [-128, -32768, -2147483648],
+      [126, 32766, 2147483646],
+    ]);
+    assert.deepEqual(
+      ranges.meta.variables.map((v) => v.type),
+      ["byte", "int", "long"],
+    );
+  });
+
+  test("the header's own fields: timestamp from 105 on, none before", async () => {
+    assert.equal((await openOld("stata4_105.dta")).meta.timestamp, "1 Mar 2014 09:44");
+    assert.equal((await openOld("stata4_104.dta")).meta.timestamp, "");
+    assert.equal((await openOld("stata_int_validranges_102.dta")).meta.dataLabel.length > 0, true);
+  });
+
+  test("a format number Stata never released is refused with a reason", async () => {
+    for (const release of [106, 107, 109, 112]) {
+      const bytes = new Uint8Array(fs.readFileSync(path.join(OLD, "stata4_111.dta")));
+      bytes[0] = release;
+      await assert.rejects(
+        DtaReader.open(new BufferByteSource(bytes)),
+        new RegExp(`format ${release} is not a format Stata released`),
+      );
+    }
   });
 });

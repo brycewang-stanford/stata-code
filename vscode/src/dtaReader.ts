@@ -54,8 +54,17 @@ export interface DtaVariable {
   notes: string[];
 }
 
+/** What `tsset` / `xtset` recorded: time-series operators are read against it. */
+export interface DtaTimeSeries {
+  timeVar: string;
+  /** Panel variable, or "" for a single time series. */
+  panelVar: string;
+  /** Period between consecutive observations, in units of the time variable. */
+  delta: number;
+}
+
 export interface DtaMeta {
-  /** .dta format number: 113-115 or 117-121. */
+  /** .dta format number: 102-105, 108, 110, 111, 113-115 or 117-121. */
   release: number;
   byteOrder: "LSF" | "MSF";
   nVars: number;
@@ -68,6 +77,8 @@ export interface DtaMeta {
   valueLabels: Map<string, Map<number, string>>;
   /** Dataset-level notes (`notes _dta`). */
   notes: string[];
+  /** The `tsset` / `xtset` declaration stored with the dataset, if any. */
+  tsset?: DtaTimeSeries;
   rowWidth: number;
   /** Non-fatal problems found while parsing (e.g. a truncated data section). */
   warnings: string[];
@@ -324,6 +335,30 @@ function typeFromModernCode(code: number): { type: string; kind: DtaVarKind; wid
   }
 }
 
+/** Formats this reader opens that predate StataCorp's published `help dta`. */
+const OLD_RELEASES: ReadonlySet<number> = new Set([102, 103, 104, 105, 108, 110, 111]);
+/** The first format with `.a`-`.z` and with today's ranges for each type. */
+const FIRST_EXTENDED_MISSING_RELEASE = 113;
+
+/** Formats before 111 name a type by a letter: b, i, l, f, d; else 127 + str length. */
+function typeFromLetterCode(code: number): { type: string; kind: DtaVarKind; width: number } {
+  switch (code) {
+    case 0x62:
+      return { type: "byte", kind: "byte", width: 1 };
+    case 0x69:
+      return { type: "int", kind: "int", width: 2 };
+    case 0x6c:
+      return { type: "long", kind: "long", width: 4 };
+    case 0x66:
+      return { type: "float", kind: "float", width: 4 };
+    case 0x64:
+      return { type: "double", kind: "double", width: 8 };
+    default:
+      if (code > 127) return { type: `str${code - 127}`, kind: "str", width: code - 127 };
+      throw new DtaFormatError(`malformed .dta file: unknown variable type code ${code}`);
+  }
+}
+
 function typeFromLegacyCode(code: number): { type: string; kind: DtaVarKind; width: number } {
   if (code >= 1 && code <= 244) return { type: `str${code}`, kind: "str", width: code };
   switch (code) {
@@ -346,6 +381,34 @@ interface RawCharacteristic {
   varname: string;
   name: string;
   value: string;
+}
+
+const KEPT_CHARACTERISTIC = /^(?:note\d+|_TStvar|_TSpanel|_TSdelta)$/;
+
+/**
+ * Stata writes a double in characteristics as hexadecimal,
+ * `+1.0000000000000X+000`: sign, hex mantissa, `X`, hex exponent of two.
+ */
+export function parseHexDouble(text: string): number | undefined {
+  const m = /^([+-]?)([0-9a-fA-F])\.([0-9a-fA-F]*)X([+-][0-9a-fA-F]+)$/.exec(text.trim());
+  if (!m) return undefined;
+  let mantissa = parseInt(m[2], 16);
+  for (let i = 0; i < m[3].length; i++) mantissa += parseInt(m[3][i], 16) / 16 ** (i + 1);
+  const sign = m[4][0] === "-" ? -1 : 1;
+  const exponent = sign * parseInt(m[4].slice(1), 16);
+  return (m[1] === "-" ? -1 : 1) * mantissa * 2 ** exponent;
+}
+
+/** The `tsset` / `xtset` declaration among the dataset's characteristics. */
+function collectTimeSeries(chars: RawCharacteristic[], names: string[]): DtaTimeSeries | undefined {
+  const own = new Map<string, string>();
+  for (const ch of chars) if (ch.varname === "_dta") own.set(ch.name, ch.value);
+  const timeVar = own.get("_TStvar") ?? "";
+  if (timeVar === "" || !names.includes(timeVar)) return undefined;
+  const panelVar = own.get("_TSpanel") ?? "";
+  if (panelVar !== "" && !names.includes(panelVar)) return undefined;
+  const delta = parseHexDouble(own.get("_TSdelta") ?? "");
+  return { timeVar, panelVar, delta: delta !== undefined && delta > 0 ? delta : 1 };
 }
 
 /** Turn `note1`, `note2`, … characteristics into ordered note lists per variable. */
@@ -417,13 +480,187 @@ export class DtaReader {
     if (head[0] >= 113 && head[0] <= 115) {
       return DtaReader.openLegacy(source, head, legacyEncoding, maxStrLBytes);
     }
+    if (OLD_RELEASES.has(head[0])) {
+      return DtaReader.openOld(source, head, legacyEncoding, maxStrLBytes);
+    }
     if (head[0] >= 102 && head[0] <= 112) {
       throw new DtaFormatError(
-        `.dta format ${head[0]} (Stata 7 or older) is not supported; ` +
-          "open it in Stata and save it again to convert it",
+        `.dta format ${head[0]} is not a format Stata released; ` +
+          "open the file in Stata and save it again to convert it",
       );
     }
     throw new DtaFormatError("not a Stata .dta file (unrecognized header)");
+  }
+
+  // ── formats 102-111 (Stata 1 to 7) ────────────────────────────────────────
+  //
+  // StataCorp's `help dta` covers format 113 onward. The widths below are the
+  // ones the BSD-licensed pandas reader uses for the older formats, and every
+  // fixture is checked cell by cell against the same file as Stata 18 reads
+  // it and saves it again (dtaReader.test.ts). These files can be viewed,
+  // filtered, sorted and summarized; they are not edited in place.
+
+  private static async openOld(
+    source: ByteSource,
+    head: Uint8Array,
+    legacyEncoding: string,
+    maxStrLBytes: number,
+  ): Promise<DtaReader> {
+    const release = head[0];
+    // Format 102 leaves the byte-order field zero and is always low-byte first.
+    if (head[1] !== 1 && head[1] !== 2 && !(release === 102 && head[1] === 0)) {
+      throw new DtaFormatError("malformed .dta file: unknown byte order");
+    }
+    const littleEndian = head[1] !== 1;
+    const decode = makeDecoder(release, legacyEncoding);
+    const nameWidth = release >= 110 ? 33 : 9;
+    const labelWidth = release >= 108 ? 81 : 32;
+    const formatWidth = release >= 105 ? 12 : 7;
+
+    const cur = new Cursor(head, () => littleEndian);
+    cur.pos = 4;
+    const nVars = cur.u16();
+    const nObsHeader = release >= 103 ? cur.u32() : cur.u16();
+    const dataLabelStart = cur.pos;
+    const dataLabel = decode(zeroTerminated(cur.take(labelWidth)));
+    const timestamp = release >= 105 ? decode(zeroTerminated(cur.take(18))).trim() : "";
+    const descOffset = cur.pos;
+
+    const descLength = nVars * (1 + nameWidth + formatWidth + nameWidth + labelWidth) + 2 * (nVars + 1);
+    if (descOffset + descLength > source.size) {
+      throw new DtaFormatError("malformed or truncated .dta file: descriptors are cut off");
+    }
+    const desc = new Cursor(await source.read(descOffset, descLength), () => littleEndian);
+    const types = [];
+    for (let i = 0; i < nVars; i++) {
+      const code = desc.u8();
+      types.push(release >= 111 ? typeFromLegacyCode(code) : typeFromLetterCode(code));
+    }
+    const names: string[] = [];
+    for (let i = 0; i < nVars; i++) names.push(decode(zeroTerminated(desc.take(nameWidth))));
+    const sortedBy: string[] = [];
+    const sortStart = desc.pos;
+    for (let i = 0; i < nVars + 1; i++) {
+      const v = desc.u16();
+      if (v === 0 || v > nVars) break;
+      sortedBy.push(names[v - 1]);
+    }
+    desc.pos = sortStart + 2 * (nVars + 1);
+    const formats: string[] = [];
+    for (let i = 0; i < nVars; i++) formats.push(decode(zeroTerminated(desc.take(formatWidth))));
+    const setNamesOffset = descOffset + desc.pos;
+    const labelNames: string[] = [];
+    for (let i = 0; i < nVars; i++) labelNames.push(decode(zeroTerminated(desc.take(nameWidth))));
+    const labelsOffset = descOffset + desc.pos;
+    const labels: string[] = [];
+    for (let i = 0; i < nVars; i++) labels.push(decode(zeroTerminated(desc.take(labelWidth))));
+
+    // Expansion fields from format 105 on; the length is 2 bytes before 110.
+    const chars: RawCharacteristic[] = [];
+    let pos = descOffset + descLength;
+    if (release >= 105) {
+      const lengthBytes = release >= 110 ? 4 : 2;
+      for (;;) {
+        const rec = new Cursor(await source.read(pos, 1 + lengthBytes), () => littleEndian);
+        const type = rec.u8();
+        const length = lengthBytes === 4 ? rec.u32() : rec.u16();
+        pos += 1 + lengthBytes;
+        if (type === 0) break;
+        if (pos + length > source.size) {
+          throw new DtaFormatError("malformed or truncated .dta file: expansion field overruns EOF");
+        }
+        if (type === 1 && length >= 2 * nameWidth) {
+          const body = await source.read(pos, length);
+          const name = decode(zeroTerminated(body.subarray(nameWidth, 2 * nameWidth)));
+          if (KEPT_CHARACTERISTIC.test(name)) {
+            chars.push({
+              varname: decode(zeroTerminated(body.subarray(0, nameWidth))),
+              name,
+              value: decode(zeroTerminated(body.subarray(2 * nameWidth))),
+            });
+          }
+        }
+        pos += length;
+      }
+    }
+
+    const dataOffset = pos;
+    const rowWidth = types.reduce((sum, t) => sum + t.width, 0);
+    const dataEnd = Math.min(source.size, dataOffset + nObsHeader * rowWidth);
+
+    const valueLabels = new Map<string, Map<number, string>>();
+    const vlLength = source.size - dataEnd;
+    if (vlLength > 0 && vlLength <= MAX_METADATA_BYTES) {
+      const vl = new Cursor(await source.read(dataEnd, vlLength), () => littleEndian);
+      try {
+        if (release >= 108) {
+          // The table of format 113, under a name field as wide as this format's.
+          while (vl.pos + 4 + nameWidth + 3 <= vl.bytes.byteLength) {
+            const length = vl.i32();
+            const name = decode(zeroTerminated(vl.take(nameWidth)));
+            vl.take(3);
+            if (length < 8 || vl.pos + length > vl.bytes.byteLength) break;
+            valueLabels.set(name, parseValueLabelTable(vl, length, decode));
+          }
+        } else {
+          // Before format 108: a count, the name, then the codes as 2-byte
+          // integers followed by one 8-byte text per code.
+          while (vl.pos + 12 <= vl.bytes.byteLength) {
+            const n = vl.u16();
+            const name = decode(zeroTerminated(vl.take(9)));
+            vl.take(1);
+            if (vl.pos + 10 * n > vl.bytes.byteLength) break;
+            const codes: number[] = [];
+            for (let i = 0; i < n; i++) codes.push((vl.u16() << 16) >> 16);
+            const table = new Map<number, string>();
+            for (let i = 0; i < n; i++) table.set(codes[i], decode(zeroTerminated(vl.take(8))));
+            valueLabels.set(name, table);
+          }
+        }
+      } catch (err) {
+        if (!(err instanceof DtaFormatError)) throw err;
+        // A cut-off trailing table is not worth refusing the whole file for.
+      }
+    }
+
+    const layout: Layout = {
+      release,
+      littleEndian,
+      dataOffset,
+      strls: null,
+      labelsOffset,
+      labelWidth,
+      edit: {
+        release,
+        littleEndian,
+        fileSize: source.size,
+        setNamesOffset,
+        nameWidth,
+        dataLabelAt: [dataLabelStart, labelWidth],
+        mapAt: null,
+        map: null,
+        valueLabels: [dataEnd, source.size],
+        records: [],
+        valueLabelsIntact: false,
+      },
+    };
+    const meta = buildMeta({
+      release,
+      littleEndian,
+      nObsHeader,
+      dataLabel,
+      timestamp,
+      types,
+      names,
+      formats,
+      labelNames,
+      labels,
+      sortedBy,
+      valueLabels,
+      chars,
+      dataBytes: Math.max(0, source.size - dataOffset),
+    });
+    return new DtaReader(source, meta, layout, decode, maxStrLBytes);
   }
 
   // ── formats 117-121 ───────────────────────────────────────────────────────
@@ -537,8 +774,9 @@ export class DtaReader {
       desc.expect("</ch>");
       if (length < 2 * nameWidth) continue;
       const name = decode(zeroTerminated(body.subarray(nameWidth, 2 * nameWidth)));
-      // Only notes are text worth decoding; other characteristics may be binary.
-      if (!/^note\d+$/.test(name)) continue;
+      // Only notes and the tsset declaration are text worth decoding; other
+      // characteristics may be binary.
+      if (!KEPT_CHARACTERISTIC.test(name)) continue;
       chars.push({
         varname: decode(zeroTerminated(body.subarray(0, nameWidth))),
         name,
@@ -678,7 +916,7 @@ export class DtaReader {
       if (type === 1 && length >= 66) {
         const nameBytes = await source.read(pos + 33, 33);
         const name = decode(zeroTerminated(nameBytes));
-        if (/^note\d+$/.test(name)) {
+        if (KEPT_CHARACTERISTIC.test(name)) {
           const body = await source.read(pos, length);
           chars.push({
             varname: decode(zeroTerminated(body.subarray(0, 33))),
@@ -807,6 +1045,10 @@ export class DtaReader {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const le = this.layout.littleEndian;
 
+    // Before format 113 each type had one missing value, its largest, and
+    // the numbers just below it were ordinary data.
+    const oneMissing = this.layout.release < FIRST_EXTENDED_MISSING_RELEASE;
+
     const rows: DtaCell[][] = [];
     const pending: Array<{ row: number; col: number; key: string }> = [];
     for (let r = 0; r < n; r++) {
@@ -818,24 +1060,27 @@ export class DtaReader {
         switch (v.kind) {
           case "byte": {
             const x = view.getInt8(at);
-            row[c] = x > 100 ? missingCode(x - 101) : x;
+            if (oneMissing) row[c] = x === 127 ? "." : x;
+            else row[c] = x > 100 ? missingCode(x - 101) : x;
             break;
           }
           case "int": {
             const x = view.getInt16(at, le);
-            row[c] = x > 32740 ? missingCode(x - 32741) : x;
+            if (oneMissing) row[c] = x === 32767 ? "." : x;
+            else row[c] = x > 32740 ? missingCode(x - 32741) : x;
             break;
           }
           case "long": {
             const x = view.getInt32(at, le);
-            row[c] = x > 2147483620 ? missingCode(x - VALUE_LABEL_MISSING_BASE) : x;
+            if (oneMissing) row[c] = x === 2147483647 ? "." : x;
+            else row[c] = x > 2147483620 ? missingCode(x - VALUE_LABEL_MISSING_BASE) : x;
             break;
           }
           case "float": {
             const bits = view.getUint32(at, le);
             if (bits >= 0x7f000000 && bits < 0x80000000) {
               const step = bits - 0x7f000000;
-              row[c] = step % 0x800 === 0 ? missingCode(step / 0x800) : ".";
+              row[c] = !oneMissing && step % 0x800 === 0 ? missingCode(step / 0x800) : ".";
             } else {
               row[c] = float32ToNumber(view.getFloat32(at, le));
             }
@@ -844,9 +1089,12 @@ export class DtaReader {
           case "double": {
             const hi = view.getUint32(le ? at + 4 : at, le);
             const lo = view.getUint32(le ? at : at + 4, le);
-            if (hi >= 0x7fe00000 && hi < 0x80000000) {
+            if (oneMissing && this.layout.release <= 105 && hi === 0x54c00000 && lo === 0) {
+              // through format 105 a missing double was written as 2^333
+              row[c] = ".";
+            } else if (hi >= 0x7fe00000 && hi < 0x80000000) {
               const step = hi - 0x7fe00000;
-              row[c] = lo === 0 && step % 0x100 === 0 ? missingCode(step / 0x100) : ".";
+              row[c] = !oneMissing && lo === 0 && step % 0x100 === 0 ? missingCode(step / 0x100) : ".";
             } else {
               row[c] = view.getFloat64(at, le);
             }
@@ -1069,6 +1317,7 @@ function buildMeta(p: MetaParts): DtaMeta {
     sortedBy: p.sortedBy,
     valueLabels: p.valueLabels,
     notes: notes.get("_dta") ?? [],
+    tsset: collectTimeSeries(p.chars, p.names),
     rowWidth,
     warnings,
   };

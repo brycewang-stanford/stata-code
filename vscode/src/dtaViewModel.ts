@@ -321,13 +321,22 @@ export function formatSummary(summary: ColumnSummary, variable: DtaVariable): Vi
           : statText(x);
     stats.push(["Mean", statText(summary.mean)]);
     if (summary.sd !== undefined) stats.push(["Std. dev.", statText(summary.sd)]);
-    stats.push(
-      ["Min", point(summary.min)],
-      ["p25", point(summary.p25)],
-      ["Median", point(summary.p50)],
-      ["p75", point(summary.p75)],
-      ["Max", point(summary.max)],
-    );
+    if (summary.percentilesOmitted) {
+      // too many values to hold for a sort: the moments are still exact
+      stats.push(
+        ["Min", point(summary.min)],
+        ["Median", "not computed (memory limit)"],
+        ["Max", point(summary.max)],
+      );
+    } else {
+      stats.push(
+        ["Min", point(summary.min)],
+        ["p25", point(summary.p25)],
+        ["Median", point(summary.p50)],
+        ["p75", point(summary.p75)],
+        ["Max", point(summary.max)],
+      );
+    }
   }
   const frequencies = (summary.frequencies ?? []).map((f) => ({
     value: f.value,

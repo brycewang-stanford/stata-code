@@ -654,7 +654,7 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 - 经济学实证工作流层：现代 DiD、IV/弱工具变量、RDD、表格导出、data-MCP handoff、跨包/跨栈 parity audit 的 skill references 和 cookbook examples
 - 从 `schema.py` 自动生成 JSON Schema 工件：[`schema/run_result.schema.json`](schema/run_result.schema.json)
 - VS Code 扩展已发布到 Marketplace [`brycewang-stanford.stata-code-vscode`](https://marketplace.visualstudio.com/items?itemName=brycewang-stanford.stata-code-vscode)：语法高亮、section outline/navigation、code-lens cell/section runner、七视图侧边栏（sessions / last result / data 变量浏览器 / run history / logs / graphs / outputs）、状态栏、补全、保守变量重命名、诊断、MCP 子进程
-- VS Code 扩展里不依赖 Stata 的 `.dta` 数据浏览器（格式 113–115 与 117–121，依据 StataCorp 公开的格式文档实现）：随机读取浏览几个 GB 的文件、Stata `if` 行筛选、多键排序、单变量汇总、选区复制、CSV 与 codebook 导出
+- VS Code 扩展里不依赖 Stata 的 `.dta` 数据浏览器（格式 113–115 与 117–121，依据 StataCorp 公开的格式文档实现；Stata 7 及更早的 102–111 只读）：随机读取浏览几个 GB 的文件、Stata `if` 行筛选（支持变量缩写和 `L.` `F.` `D.` `S.` 时间序列算子）、多键排序、单变量汇总、选区复制、CSV 与 codebook 导出
 - 不依赖 Stata 的标签编辑：变量标签、值标签、变量挂接的值标签和数据集标签，可在浏览器里手动改（可撤销），也可通过 MCP 工具 `set_variable_labels` 和 `set_value_labels` 批量改。定长字段原地覆写；修改值标签集或数据集标签时先写出一份新文件再原子替换。已在所有支持的格式上用 Stata 18 核对（`datasignature` 和 `notes` 不变，`label list` 和 `describe` 显示修改结果）
 - 扩展同时发布到 [Open VSX](https://open-vsx.org/)，供 Cursor、Windsurf、VSCodium 安装
 - Clean-room 许可证策略 ([LICENSE-POLICY.md](LICENSE-POLICY.md))
