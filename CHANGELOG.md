@@ -6,6 +6,8 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.17.0 — 2026-10-04
+
 The `.dta` viewer loses four limits, and a real batch Stata now tests the
 console backend. The result schema and the MCP tools are unchanged.
 
