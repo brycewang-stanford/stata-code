@@ -223,6 +223,8 @@ log-files/
 *.smcl
 *.dta
 !tests/fixtures/*.dta
+# Scratch do-files dropped at the top of tests/ (fixtures go in tests/fixtures/)
+/tests/*.do
 # Graph-export artifact written by the runner graph-capture tests
 stata_code_test_export.png
 
