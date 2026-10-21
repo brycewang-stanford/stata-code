@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stata-code logo v5</title>
+<style>
+  :root { --ink: #1A1050; --muted: #6B6880; --line: #E7E3DA; --bg: #FAF8F4; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 16px 80px; background: var(--bg); color: var(--ink);
+         font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 40px 0 12px; font-weight: 600; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 16px; padding: 32px; display: flex; align-items: center;
+          justify-content: center; gap: 40px; flex-wrap: wrap; }
+  .white { background: #FFFFFF; }
+  .cream { background: var(--bg); }
+  .slate { background: #1E293B; border-color: #1E293B; }
+  .ghdark { background: #0D1117; border-color: #30363D; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  img { max-width: 100%; height: auto; display: block; }
+  .label { font-size: 12px; color: var(--muted); margin-top: 8px; text-align: center; }
+  .slate .label, .ghdark .label { color: #94A3B8; }
+  figure { margin: 0; }
+  .px { image-rendering: pixelated; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 12px; }
+  .sw { width: 120px; font-size: 12px; }
+  .sw i { display: block; height: 48px; border-radius: 10px; margin-bottom: 6px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>stata-code logo v5</h1>
+    <p>Coefficient-plot mark in the StatsPAI palette. Used by the VS Code extension icon; regenerate with build.py.</p>
+  </header>
+
+  <h2>Horizontal lockup</h2>
+  <div class="row">
+    <figure class="card white"><img src="horizontal.svg" alt="" width="460" /><figcaption class="label">horizontal.svg · white (GitHub light)</figcaption></figure>
+    <figure class="card ghdark"><img src="horizontal-on-dark.svg" alt="" width="460" /><figcaption class="label">horizontal-on-dark.svg · GitHub dark</figcaption></figure>
+  </div>
+
+  <h2>README hero size (width 520, as in README.md)</h2>
+  <div class="card white"><img src="horizontal@1024.png" alt="" width="520" /></div>
+
+  <h2>Mark</h2>
+  <div class="row">
+    <figure class="card cream"><img src="mark.svg" alt="" width="200" /><figcaption class="label">mark.svg · cream</figcaption></figure>
+    <figure class="card slate"><img src="mark.svg" alt="" width="200" /><figcaption class="label">mark.svg · slate</figcaption></figure>
+    <figure class="card cream"><img src="stacked.svg" alt="" width="220" /><figcaption class="label">stacked.svg</figcaption></figure>
+  </div>
+
+  <h2>Small sizes</h2>
+  <div class="card white">
+    <figure><img class="px" src="favicon-16.png" width="16" height="16" alt="" /><figcaption class="label">16 px</figcaption></figure>
+    <figure><img class="px" src="favicon-32.png" width="32" height="32" alt="" /><figcaption class="label">32 px</figcaption></figure>
+    <figure><img src="favicon.svg" width="64" height="64" alt="" /><figcaption class="label">favicon 64</figcaption></figure>
+    <figure><img src="mark.svg" width="128" height="128" alt="" /><figcaption class="label">VS Code Marketplace 128</figcaption></figure>
+    <figure><img src="apple-touch-icon-180.png" width="90" height="90" alt="" /><figcaption class="label">apple-touch 180 @2x</figcaption></figure>
+    <figure><img class="px" src="favicon-16.png" width="64" height="64" alt="" /><figcaption class="label">16 px, zoomed 4×</figcaption></figure>
+  </div>
+
+  <h2>Palette</h2>
+  <div class="swatches">
+    <div class="sw"><i style="background:#1A1050"></i>Ink #1A1050</div>
+    <div class="sw"><i style="background:linear-gradient(90deg,#CC30C5,#7E3AEC,#486BE3,#1C94DB)"></i>Accent gradient</div>
+    <div class="sw"><i style="background:#FF4FD8"></i>Neon pink #FF4FD8</div>
+    <div class="sw"><i style="background:#9D6CFF"></i>Neon violet #9D6CFF</div>
+    <div class="sw"><i style="background:#2EDBFF"></i>Neon cyan #2EDBFF</div>
+    <div class="sw"><i style="background:linear-gradient(135deg,#8E2AA7,#140E44 60%,#1D5C8C)"></i>Tile</div>
+    <div class="sw"><i style="background:#FAF8F4"></i>Cream #FAF8F4</div>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="stata-code mark">
+  <title>stata-code mark</title>
+  <defs>
+    <linearGradient id="mtile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8E2AA7"/>
+      <stop offset="0.45" stop-color="#1A0F4A"/>
+      <stop offset="0.7" stop-color="#140E44"/>
+      <stop offset="1" stop-color="#1D5C8C"/>
+    </linearGradient>
+    <radialGradient id="mglowTL" cx="0.12" cy="0.1" r="0.6">
+      <stop offset="0" stop-color="#C33BD0" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#C33BD0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mglowBR" cx="0.95" cy="0.95" r="0.55">
+      <stop offset="0" stop-color="#36AFDA" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#36AFDA" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mrim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#C86BFF"/>
+      <stop offset="0.5" stop-color="#5B3BB0" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#3FC3F0"/>
+    </linearGradient>
+    <filter id="mblur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3.2"/>
+    </filter>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#mtile)"/>
+    <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#mglowTL)"/>
+    <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#mglowBR)"/>
+    <rect x="4.75" y="4.75" width="118.5" height="118.5" rx="27.25" fill="none" stroke="url(#mrim)" stroke-width="1.5"/>
+    <line x1="60" y1="22" x2="60" y2="106" stroke="#FFFFFF" stroke-opacity="0.38" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="3 6"/>
+    <polyline points="76,38 42,64 80,90" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1.5" stroke-linejoin="round"/>
+    <line x1="40" y1="38" x2="96" y2="38" stroke="#FF4FD8" stroke-width="9" stroke-linecap="round" opacity="0.75" filter="url(#mblur)"/>
+    <line x1="40" y1="38" x2="96" y2="38" stroke="#FF4FD8" stroke-width="5" stroke-linecap="round"/>
+    <line x1="30" y1="64" x2="72" y2="64" stroke="#9D6CFF" stroke-width="9" stroke-linecap="round" opacity="0.75" filter="url(#mblur)"/>
+    <line x1="30" y1="64" x2="72" y2="64" stroke="#9D6CFF" stroke-width="5" stroke-linecap="round"/>
+    <line x1="48" y1="90" x2="94" y2="90" stroke="#2EDBFF" stroke-width="9" stroke-linecap="round" opacity="0.75" filter="url(#mblur)"/>
+    <line x1="48" y1="90" x2="94" y2="90" stroke="#2EDBFF" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="76" cy="38" r="12" fill="#FF4FD8" filter="url(#mblur)"/>
+    <circle cx="76" cy="38" r="8" fill="#FFFFFF"/>
+    <circle cx="42" cy="64" r="12" fill="#9D6CFF" filter="url(#mblur)"/>
+    <circle cx="42" cy="64" r="8" fill="#FFFFFF"/>
+    <circle cx="80" cy="90" r="12" fill="#2EDBFF" filter="url(#mblur)"/>
+    <circle cx="80" cy="90" r="8" fill="#FFFFFF"/>
+</svg>
