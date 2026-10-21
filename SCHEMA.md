@@ -234,7 +234,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `ok` | `bool` | yes | The authoritative success bit. Producers MUST keep `ok`, `rc`, and `error`-presence consistent. Consumers branch on `ok` first. |
-| `rc` | `int` | yes | Stata's `_rc` after the last user-submitted command (after any `capture` masking). `0` on success. Synthetic codes are negative: `-1` adapter crash, `-2` timeout, `-3` cancellation. |
+| `rc` | `int` | yes | Stata's `_rc` after the last user-submitted command (after any `capture` masking). `0` on success. Synthetic codes are negative: `-1` adapter crash, `-2` timeout, `-3` cancellation, `-4` policy block, `-5` session contention, `-6` failed expectation. A run in which `capture` swallowed a failure still reports `0` here — see the `suppressed_error` warning (§3.8). |
 | `session_id` | `string` | yes | Defaults to `"main"`. MUST match `[A-Za-z0-9_-]+`. The character `:` is reserved for future remote-prefixing (e.g., `host-7:main`), so v1 producers MUST NOT emit colons. Producers may map ids that are not legal Stata frame names (for example `model-a` or `9abc`) to private frame names internally, but MUST echo the caller's `session_id` in the result. |
 | `request_id` | `string` | yes | Producer-generated, unique per call. Recommended format: ULID or UUIDv7 (sortable). Consumers use this for log correlation and `ref` lookup. |
 | `started_at` | `string` (ISO 8601 UTC) | yes | Timestamp at which the producer began handling the call, e.g. `"2026-04-30T14:22:08.123Z"`. Always UTC, always with millisecond precision. |
@@ -247,6 +247,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 | `graphs` | `array` | yes | Captured graphs; see §3.6. May be empty. |
 | `outputs` | `array<OutputFile>` | no | Files the run created or modified in its working directory; see §3.6a. Empty when nothing was written or `track_output_files: false`. |
 | `warnings` | `array<Warning>` | yes | Non-fatal advisories. See §3.8. De-duplicated by `(kind, message)`. |
+| `checks` | `array<CheckResult>` | no | The caller's `expect` checks, graded after a successful Stata run; see §3.8a. Empty when no `expect` was given or Stata itself failed. |
 | `error` | `object \| null` | yes | `null` iff `ok: true`. See §3.7. |
 | `origin` | `object \| null` | no | Echo of the editor-side origin metadata supplied with the request (`origin_path`, `origin_kind`, `origin_label`, `origin_cell_id`). `null` when the caller provided none. See §3.9. |
 | `schema_version` | `string` | yes | Semver-major + minor. v1.0 producers emit `"1.0"`. See §6. |
@@ -254,7 +255,7 @@ A failed execution sets `ok: false`, `rc != 0`, and populates `error`:
 
 **Producer consistency.** When `ok: true`, the producer MUST set `error: null` and `rc: 0`. When `ok: false`, the producer MUST set `error` to a non-null object whose `rc` equals the top-level `rc`. If a consumer encounters inconsistency, it MUST treat the result as failed.
 
-**Synthetic rcs and `error.rc`.** When `rc < 0` (adapter crash, timeout, cancellation, policy block, session contention), `error.rc` mirrors that synthetic code. The corresponding `error.kind` is `adapter_crash` (`-1`), `timeout` (`-2`), `cancelled` (`-3`), `policy_blocked` (`-4`), or `session_busy` (`-5`).
+**Synthetic rcs and `error.rc`.** When `rc < 0` (adapter crash, timeout, cancellation, policy block, session contention), `error.rc` mirrors that synthetic code. The corresponding `error.kind` is `adapter_crash` (`-1`), `timeout` (`-2`), `cancelled` (`-3`), `policy_blocked` (`-4`), `session_busy` (`-5`), or `expectation_failed` (`-6`).
 
 **Numeric encoding.** All JSON numbers in this schema are IEEE-754 doubles. Producers MUST emit them with sufficient precision to roundtrip (typically 17 significant digits for doubles). Consumers MUST treat them as doubles. Stata's system missing (`.`) is encoded as JSON `null`, in `scalars` and in every matrix cell alike. Stata's *extended* missing values (`.a`–`.z`) also become `null`, so which extended missing it was is lost — agents needing that must request it with ad-hoc Stata commands. Note that Stata represents missings internally as doubles at or above `2^1023` (`8.988e+307`); producers MUST convert them rather than passing that number through, or a consumer will format a missing standard error as a real one. Stata does not emit `Inf`/`NaN` in normal operation; if encountered, producers encode them as `null` and emit a warning of kind `non_finite`.
 
@@ -562,6 +563,7 @@ rc(s) below cite StataCorp `[P] error` (Stata 19, 2025). The code is authoritati
 | `session_busy` | (synthetic `rc: -5`) | The session's Stata process was still running an earlier request when this call's `timeout_ms` elapsed. **Nothing was submitted to Stata**, the worker is healthy and is not killed. Retriable as-is; alternatives are a longer `timeout_ms`, `run_in_background`, or a different `session_id`. |
 | `adapter_crash` | (synthetic `rc: -1`) | Producer-side failure (pystata exception, IPC death). |
 | `policy_blocked` | (synthetic `rc: -4`) | The command-safety policy rejected the code before Stata ran (an OS-escape / file-deletion command such as `shell`, `erase`, `rmdir`, or `!`). `error.recovery.needs_code_change` is true. Configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`. |
+| `expectation_failed` | (synthetic `rc: -6`) | Stata finished without error, but at least one `expect` check failed (§3.8a): the estimation sample, a coefficient, or an output file is not what the caller declared. `message` summarizes the failed checks; `checks` lists all of them. `recovery.needs_code_change` and `needs_user_input` are both true — either the specification drifted or the expectation is stale, and re-running unchanged reproduces the same numbers. |
 | `unknown` | any unmapped rc | Catch-all. Agents fall back to `message`. We aim to shrink this over time. |
 
 The rc-to-kind table is approximate and lives in code (`stata_code.core.errors`), not in this document. Discrepancies between the enum and a specific rc are bugs in the table, not in the schema. New rcs default to `unknown`.
@@ -574,7 +576,7 @@ The rc-to-kind table is approximate and lives in code (`stata_code.core.errors`)
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `kind` | `string` | Open enum. Common values: `convergence`, `singular`, `boundary`, `omitted_collinear`, `non_finite`, `dataset_variables_truncated`, `log_closed`, `output_tracking_skipped`, `estimation_from_e_b_v`, `unknown`. |
+| `kind` | `string` | Open enum. Common values: `convergence`, `singular`, `boundary`, `omitted_collinear`, `suppressed_error`, `non_finite`, `dataset_variables_truncated`, `log_closed`, `output_tracking_skipped`, `estimation_from_e_b_v`, `unknown`. |
 | `message` | `string` | Human-readable, single line. Truncated to 1,024 characters. |
 
 Warnings are de-duplicated by `(kind, message)`.
@@ -588,6 +590,42 @@ alarm; putting the estimation last in the block restores the `r_table` path.
 It is emitted only when the estimation was produced by *this* run: `e()` is
 session-global, so a later `summarize` in the same session keeps reporting the
 inherited table through the same fallback without re-warning.
+
+`suppressed_error` reports a command that failed inside a successful run
+because `capture` turned its error into rc 0 — `capture noisily use "x.dta"`,
+`capture noisily do "step.do"`, a `capture { … }` block. The message names the
+command, the inferred rc and Stata's own diagnosis. Producers detect it from the
+log: an `r(###);` line (Stata prints one only for an error) or a known Stata
+error sentence in the output of a `capture`d command. It is emitted only when
+`ok: true` — on a failed run, the final `r(###);` is the real error. A silent
+`capture` (no `noisily`) prints nothing and cannot be detected.
+
+### 3.8a `checks`
+
+One entry per expectation graded from the request's `expect` option (§4):
+
+```json
+{ "check": "n_obs", "target": null, "passed": false, "expected": 74, "actual": 52,
+  "message": "e(N) = 52, expected 74 — the estimation sample changed" }
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `check` | `string` | `n_obs`, `coefficient`, `output`, or `no_suppressed_errors`. |
+| `target` | `string \| null` | The coefficient term, or the absolute output path; `null` otherwise. |
+| `passed` | `bool` | Whether this expectation held. |
+| `expected` | `any` | The declared value (`n_obs`, `b`, or `sign`; `0` for `no_suppressed_errors`). |
+| `actual` | `any` | The observed value, when there is one. |
+| `message` | `string` | One-line explanation. |
+
+Checks are graded only when Stata itself succeeded. `n_obs` and `coefficient`
+checks read the estimation *this* run produced, from the full coefficient table
+regardless of `include_estimation` / `max_coefficients`; when the run produced
+no estimation (e() still holds an earlier one, or none), they fail rather than
+grade the inherited result. An `output` check passes when the file exists and
+was written during the run (mtime not older than the run's start). If any check
+fails the result becomes `ok: false`, `rc: -6`, `error.kind:
+"expectation_failed"`.
 
 ### 3.9 `origin`
 
@@ -642,6 +680,7 @@ The schema also dictates what callers may *ask for*. Every frontend exposes the 
 | `origin_cell_id` | `string \| null` | `null` | Stable nbformat 4.5+ cell id when the code is one cell of a `.ipynb`. Pure metadata: not interpreted by the runner; echoed in `result.origin` and recorded in the run-bundle manifest so notebook-aware agents can correlate runs with cells without the protocol becoming notebook-aware. |
 | `use_origin_workdir` | `bool` | `true` | With `origin_path`, `cd` Stata to the source directory before running. |
 | `working_dir` | `string \| null` | `null` | Explicit Stata working directory; overrides the source directory. |
+| `expect` | `object \| null` | `null` | Acceptance checks graded after a successful run (§3.8a): `n_obs` (int, required `e(N)`), `coefficients` (`{term: {"b": number, "tol": number}}` with `tol` defaulting to `1e-6`, or `{term: {"sign": "positive" \| "negative"}}`), `outputs` (paths the run must write; relative to the working directory), `no_suppressed_errors` (bool). Unknown keys and malformed values are rejected before Stata runs. Any failed check returns `ok: false`, `rc: -6`, `error.kind: "expectation_failed"`. |
 
 Frontends translate their native idiom (MCP `inputSchema`, Jupyter kernel options, VSCode commands) into these names without renaming.
 
@@ -712,6 +751,7 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `background_runs` | Producer accepts `run_in_background` and registers `stata_run_status` / `list_background_runs`. |
 | `output_tracking` | Producer populates `outputs` by diffing the working directory around a run. |
 | `log_hygiene` | Producer closes log handles a failed run leaked, so an aborted script cannot poison the session with r(604). |
+| `expectations` | Producer accepts `expect`, populates `checks`, and emits `suppressed_error` warnings. |
 
 Consumers detect optional features via `capabilities`, not by parsing `schema_version`. Producers may add entries; agents MUST treat unknown capability names as opaque.
 

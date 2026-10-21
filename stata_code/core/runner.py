@@ -41,6 +41,12 @@ from stata_code.core.errors import (
     suggestions_for,
 )
 from stata_code.core.estimation import build_estimation_result, trim_estimation
+from stata_code.core.expect import (
+    evaluate_expectations,
+    expectation_error,
+    needs_estimation,
+    normalize_expect,
+)
 from stata_code.core.log_artifacts import (
     MAX_SNAPSHOT_ENTRIES,
     FileSnapshot,
@@ -55,6 +61,7 @@ from stata_code.core.log_artifacts import (
 from stata_code.core.policy import check as policy_check
 from stata_code.core.schema import (
     Backend,
+    CheckResult,
     DatasetInfo,
     ErrorContext,
     ErrorInfo,
@@ -865,6 +872,35 @@ def _parse_failure_transcript(
     out["command"] = failing
     out["commands_executed"] = len(cmd_echoes) - 1
 
+    # Scripts still executing when the command failed, innermost first. When
+    # there are any, the failure happened inside one of them, so they are
+    # searched before the submitted code: `use data.dta` may appear both in
+    # the cell and in the script, and only the script's copy failed.
+    active = [
+        path
+        for path in (
+            _resolve_do_target(target, working_dir)
+            for target in reversed(_active_do_stack(error_text))
+        )
+        if path is not None
+    ]
+
+    def _locate_in_script(candidate: Path) -> bool:
+        try:
+            source_lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return False
+        located = _locate_in_lines(source_lines, failing, failing_head)
+        if located is None:
+            return False
+        out.update(located)
+        out["source_file"] = str(candidate)
+        return True
+
+    for candidate in active:
+        if _locate_in_script(candidate):
+            return out
+
     # Match against original user code lines (with blanks) for line number.
     located = _locate_in_lines(user_lines, failing, failing_head)
     if located is not None:
@@ -872,20 +908,42 @@ def _parse_failure_transcript(
         return out
 
     # Not in the submitted code — the failure happened inside a script the
-    # submitted code invoked (`do "analysis.do"`). This is the common shape for
-    # agent workflows, and it used to yield `line: null` with empty context.
+    # submitted code invoked (`do "analysis.do"`), possibly several `do` calls
+    # deep. This is the common shape for agent workflows, and it used to yield
+    # `line: null` with empty context.
     for candidate in _do_file_candidates(user_code, working_dir):
-        try:
-            source_lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        located = _locate_in_lines(source_lines, failing, failing_head)
-        if located is not None:
-            out.update(located)
-            out["source_file"] = str(candidate)
+        if candidate not in active and _locate_in_script(candidate):
             return out
 
     return out
+
+
+_END_OF_DO_RE = re.compile(r"^end of do-file\b", re.IGNORECASE)
+
+
+def _active_do_stack(error_text: str) -> list[str]:
+    """Scripts still running when the failing command ran, outermost first.
+
+    Stata echoes `. do "x.do"` when a script starts and prints `end of
+    do-file` when it returns, so replaying the transcript up to the failing
+    command (the last echo) leaves exactly the open scripts on the stack. The
+    unwinding `end of do-file` lines Stata prints after the error are past
+    that point and do not count.
+    """
+    lines = error_text.split("\n")
+    last_echo = -1
+    for i, ln in enumerate(lines):
+        if ln.startswith(". ") and ln[2:].strip():
+            last_echo = i
+    stack: list[str] = []
+    for ln in lines[: max(last_echo, 0)]:
+        if ln.startswith(". "):
+            m = _DO_INVOCATION_RE.match(ln[2:])
+            if m is not None:
+                stack.append(m.group("quoted") or m.group("bare"))
+        elif stack and _END_OF_DO_RE.match(ln.strip()):
+            stack.pop()
+    return stack
 
 
 # Stata renders a command that wraps (or was continued with `///`) by prefixing
@@ -971,33 +1029,57 @@ _DO_INVOCATION_RE = re.compile(
 )
 
 
-def _do_file_candidates(user_code: str, working_dir: Path | None) -> list[Path]:
-    """Resolve every `do`/`run` script the submitted code invokes.
+# How many `do` levels deep `_do_file_candidates` follows a script chain.
+_MAX_DO_DEPTH = 8
+
+
+def _resolve_do_target(target: str, working_dir: Path | None) -> Path | None:
+    """Resolve a `do`/`run` target the way Stata does, or None if absent.
 
     Relative paths resolve against the run's working directory — the same
     directory Stata itself resolved them against. Stata appends a default
     `.do` extension, so a bare `do analysis` is checked as `analysis.do` too.
     """
+    base = Path(target).expanduser()
+    variants = [base] if base.suffix else [base, base.with_suffix(".do")]
+    for variant in variants:
+        path = variant if variant.is_absolute() else ((working_dir or Path.cwd()) / variant)
+        if path.is_file():
+            return path
+    return None
+
+
+def _do_file_candidates(user_code: str, working_dir: Path | None) -> list[Path]:
+    """Resolve every `do`/`run` script the submitted code invokes, transitively.
+
+    A master script that calls `do 01_clean.do` and `do 02_estimate.do` is the
+    usual project layout, so scripts are followed up to `_MAX_DO_DEPTH` levels
+    deep, in the order they are invoked.
+    """
     out: list[Path] = []
-    seen: set[str] = set()
-    for raw in user_code.splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith(("*", "//")):
-            continue
-        m = _DO_INVOCATION_RE.match(stripped)
-        if m is None:
-            continue
-        target = m.group("quoted") or m.group("bare")
-        base = Path(target).expanduser()
-        variants = [base] if base.suffix else [base, base.with_suffix(".do")]
-        for variant in variants:
-            path = variant if variant.is_absolute() else ((working_dir or Path.cwd()) / variant)
-            key = str(path)
-            if key in seen:
+    seen: set[Path] = set()
+
+    def _walk(source: str, depth: int) -> None:
+        for raw in source.splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith(("*", "//")):
                 continue
-            seen.add(key)
-            if path.is_file():
-                out.append(path)
+            m = _DO_INVOCATION_RE.match(stripped)
+            if m is None:
+                continue
+            path = _resolve_do_target(m.group("quoted") or m.group("bare"), working_dir)
+            if path is None or path in seen:
+                continue
+            seen.add(path)
+            out.append(path)
+            if depth < _MAX_DO_DEPTH:
+                try:
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                _walk(text, depth + 1)
+
+    _walk(user_code, 1)
     return out
 
 
@@ -1267,6 +1349,7 @@ def execute(
     origin_cell_id: str | None = None,
     use_origin_workdir: bool = True,
     working_dir: str | None = None,
+    expect: dict[str, Any] | None = None,
 ) -> RunResult:
     """Execute Stata code and return a v1.0 RunResult.
 
@@ -1293,6 +1376,13 @@ def execute(
     chosen so a single estimation is described once — as the typed coefficient
     table — rather than four times over in ``e(b)``, ``e(V)``, ``e(beta)`` and
     ``r(table)``. Raw matrix values stay retrievable via ``get_matrix(ref)``.
+
+    Expectations. ``expect`` declares what a successful run must produce — the
+    estimation sample size, key coefficients, the files it writes, no error
+    hidden by ``capture`` (see :mod:`stata_code.core.expect`). They are graded
+    only when Stata itself succeeded; any failure turns the result into
+    ``ok=False``, ``rc=-6``, ``error.kind="expectation_failed"``, and every
+    graded check is listed under ``result.checks``.
     """
     if include_graphs not in ("ref", "inline", "none"):
         raise ValueError(
@@ -1319,6 +1409,8 @@ def execute(
         ) from exc
     if max_coefficients is not None and max_coefficients < 0:
         raise ValueError(f"max_coefficients must be ≥ 0 or null; got {max_coefficients}")
+    expect_spec = normalize_expect(expect)
+    grade_estimation = needs_estimation(expect_spec)
 
     # Command-safety gate. Runs before Stata is even initialized so a blocked
     # command is rejected identically whether or not Stata is installed, and so
@@ -1334,6 +1426,8 @@ def execute(
     request_id = _new_request_id()
     started_at = _utc_iso_ms()
     started = time.monotonic()
+    # Wall clock, for `expect.outputs`: file mtimes are compared against it.
+    started_wall = time.time()
 
     if _consume_cancel(session_id):
         return _build_cancelled_result(
@@ -1382,7 +1476,7 @@ def execute(
         # e(b)/e(V) rebuild is worth reporting.
         pre_estimation = (
             _estimation_fingerprint(rt)
-            if estimation_mode != IncludeEstimation.NONE
+            if estimation_mode != IncludeEstimation.NONE or grade_estimation
             else None
         )
     graph_source_hints, unnamed_graph_source_hints = (
@@ -1415,12 +1509,13 @@ def execute(
     # On Stata error, we still surface results/dataset state — they reflect
     # whatever state existed before the failing command (per SCHEMA §3.7
     # commands_executed semantics).
-    results, estimation = _collect_results(
+    results, estimation, full_estimation = _collect_results(
         rt,
         request_id=request_id,
         results_mode=results_mode,
         estimation_mode=estimation_mode,
         max_coefficients=max_coefficients,
+        want_full_estimation=grade_estimation,
     )
     results.estimation = estimation
     dataset = _collect_dataset(rt, include_dataset_variables)
@@ -1483,6 +1578,7 @@ def execute(
         "multi_session",
         "result_budget",
         "log_hygiene",
+        "expectations",
     ]
     if include_graphs != "none":
         capabilities.append("graph_ref")
@@ -1492,6 +1588,11 @@ def execute(
     top_rc = rc if error is not None else 0
     ok = error is None and rc == 0
     warnings = _extract_warnings(log_text)
+    if ok:
+        # `capture` turns a failure into rc 0, so a run can report ok=true with
+        # a missing file or variable in the middle of it. Only scanned on
+        # success: on failure, the final `r(###);` is the real error.
+        warnings.extend(_extract_suppressed_errors(log_text))
 
     # r(table) is cleared by the next command, so a block that runs anything
     # after its estimation gets a table rebuilt from e(b)/e(V). The numbers
@@ -1571,6 +1672,25 @@ def execute(
                 ]
             except OSError:
                 outputs = []
+
+    # Grade caller-declared expectations only when Stata itself succeeded: on a
+    # failed run e() and the output files reflect a half-finished script, and
+    # the Stata error is the thing to fix first.
+    checks: list[CheckResult] = []
+    if expect_spec and ok:
+        checks = evaluate_expectations(
+            expect_spec,
+            estimation=full_estimation,
+            estimated_here=estimated_here,
+            warnings=warnings,
+            started_wall=started_wall,
+            working_dir=effective_dir,
+        )
+        failed = expectation_error(checks)
+        if failed is not None:
+            error = failed
+            ok = False
+            top_rc = failed.rc
 
     if persist_log_files and origin_path:
         try:
@@ -1655,6 +1775,7 @@ def execute(
         graphs=graphs,
         outputs=outputs,
         warnings=warnings,
+        checks=checks,
         error=error,
         origin=origin_echo,
         capabilities=capabilities,
@@ -1668,17 +1789,23 @@ def _collect_results(
     results_mode: IncludeResults,
     estimation_mode: IncludeEstimation,
     max_coefficients: int | None,
-) -> tuple[ResultsInfo, Any]:
+    want_full_estimation: bool = False,
+) -> tuple[ResultsInfo, Any, Any]:
     """Read r()/e(), derive the estimation contract, then project to the wire.
 
     The estimation contract is always built from the *complete* values, so a
     caller who suppressed ``results`` still gets correct standard errors; only
     the wire representation is reduced afterwards.
+
+    Returns ``(results, estimation, full_estimation)``: ``estimation`` is
+    trimmed to the caller's payload budget, ``full_estimation`` is the
+    untrimmed contract (every coefficient row) when ``want_full_estimation``
+    asks for it — expectations are graded against that, not the wire copy.
     """
-    want_estimation = estimation_mode != IncludeEstimation.NONE
+    want_estimation = estimation_mode != IncludeEstimation.NONE or want_full_estimation
     if results_mode == IncludeResults.NONE and not want_estimation:
         # Nothing downstream reads r()/e() — skip the Stata round-trips.
-        return ResultsInfo(last_estimation_cmd=_last_estimation_cmd(rt)), None
+        return ResultsInfo(last_estimation_cmd=_last_estimation_cmd(rt)), None, None
 
     # With results suppressed but estimation wanted, read only the matrices the
     # contract is derived from rather than every matrix in scope.
@@ -1706,21 +1833,22 @@ def _collect_results(
         ),
         last_estimation_cmd=_last_estimation_cmd(rt),
     )
-    estimation = (
-        trim_estimation(
-            build_estimation_result(raw, resolve_matrix=_refs_matrix_values),
-            mode=estimation_mode,
-            max_coefficients=max_coefficients,
-        )
+    full_estimation = (
+        build_estimation_result(raw, resolve_matrix=_refs_matrix_values)
         if want_estimation
         else None
+    )
+    estimation = trim_estimation(
+        full_estimation,
+        mode=estimation_mode,
+        max_coefficients=max_coefficients,
     )
     projected = ResultsInfo(
         r=_project_returns(raw.r, prefix="r", request_id=request_id, mode=results_mode),
         e=_project_returns(raw.e, prefix="e", request_id=request_id, mode=results_mode),
         last_estimation_cmd=raw.last_estimation_cmd,
     )
-    return projected, estimation
+    return projected, estimation, (full_estimation if want_full_estimation else None)
 
 
 def _current_stata_dir(rt: Any) -> Path | None:
@@ -1968,6 +2096,123 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
         seen.add(key)
         out.append(StataWarning(kind="note", message=msg))
 
+    return out
+
+
+# Stata prints `r(###);` only when a command fails. Inside a successful run that
+# means something caught the failure — typically `capture noisily do "x.do"`.
+_RC_LINE_RE = re.compile(r"^r\((\d+)\);$")
+
+# `capture` in any abbreviation (cap … capture), optionally behind quietly /
+# noisily / `version #:`, then whitespace, a block brace, or the prefix colon.
+_CAPTURE_PREFIX_RE = re.compile(
+    r"^(?:(?:qui\w*|noi\w*)\s+|vers(?:i|io|ion)?\s+[\d.]+\s*:\s*)*"
+    r"cap(?:t|tu|tur|ture)?(?=[\s:{]|$)",
+    re.IGNORECASE,
+)
+# A loop or program body line echoed as `  2.     capture noisily regress …`.
+_NUMBERED_BODY_RE = re.compile(r"^\s*\d+\.\s+(.*)$")
+
+# The one-line diagnosis Stata prints for common failures, verified against
+# Stata 18 under `capture noisily`. Matched against whole, stripped output
+# lines, and only inside the output of a `capture`d command, so ordinary output
+# that happens to contain these words is not flagged.
+_SUPPRESSED_ERROR_PATTERNS: tuple[tuple[int, re.Pattern[str]], ...] = tuple(
+    (rc, re.compile(pattern))
+    for rc, pattern in (
+        (111, r"variable \S+ not found"),
+        (111, r"(?:variable )?\S+ ambiguous abbreviation"),
+        (111, r"no variables defined"),
+        (111, r"estimation result \S+ not found"),
+        (601, r"file .+ not found"),
+        (602, r"file .+ already exists"),
+        (603, r"file .+ could not be opened"),
+        (199, r"command \S+ is unrecognized"),
+        (198, r"option \S+ not allowed"),
+        (198, r"invalid syntax"),
+        (9, r"assertion is false"),
+        (459, r"variables? .+ should never be missing"),
+        (459, r"variables? .+ do(?:es)? not uniquely identify the observations"),
+        (459, r"(?:panel|time) variable not set.*"),
+        (459, r"must specify panelvar; use xtset"),
+        (2000, r"no observations"),
+        (2001, r"insufficient observations"),
+        (109, r"type mismatch"),
+        (110, r"variable \S+ already defined"),
+        (7, r"'\S+' found where (?:numeric|string) variable expected"),
+        (503, r"conformability error"),
+        (4, r"no; dataset in memory has changed since last saved"),
+        (5, r"not sorted"),
+        (301, r"last estimates not found"),
+    )
+)
+
+
+def _extract_suppressed_errors(log: str) -> list:  # list[StataWarning]
+    """Find failures that `capture` turned into rc 0 in a successful run's log.
+
+    Two signals, both specific to an actual failure: an `r(###);` line (Stata
+    prints one only for an error, e.g. inside `capture noisily do "x.do"`), and
+    a known Stata error sentence printed by a `capture`d command. A silent
+    `capture` (no `noisily`) prints nothing, so it cannot be seen here.
+    """
+    from stata_code.core.schema import StataWarning
+
+    found: list[tuple[str, int | None, str]] = []  # (command, rc, message)
+    command = ""
+    in_capture = False
+    output: list[str] = []
+    in_echo = False
+    for raw in log.replace("\r\n", "\n").split("\n"):
+        if raw.startswith(". "):
+            body = raw[2:].strip()
+            in_echo = bool(body)
+            if body:
+                command = body
+                in_capture = _CAPTURE_PREFIX_RE.match(body) is not None
+                output = []
+            continue
+        if in_echo and raw.startswith(_CONTINUATION_PREFIX):
+            command = _join_continuation(command, raw[len(_CONTINUATION_PREFIX) :].strip())
+            continue
+        body_match = _NUMBERED_BODY_RE.match(raw) if in_echo else None
+        if body_match is not None:
+            # Loop / program body echoed at definition time; its output follows.
+            if _CAPTURE_PREFIX_RE.match(body_match.group(1).strip()):
+                in_capture = True
+            continue
+        in_echo = False
+        line = raw.strip()
+        if not line:
+            continue
+        m = _RC_LINE_RE.match(line)
+        if m is not None:
+            rc = int(m.group(1))
+            message = output[-1] if output else ""
+            if found and found[-1][0] == command and found[-1][2] == message:
+                found[-1] = (command, rc, message)  # same failure, now with its rc
+            else:
+                found.append((command, rc, message))
+            continue
+        output.append(line)
+        if in_capture:
+            for rc, pat in _SUPPRESSED_ERROR_PATTERNS:
+                if pat.fullmatch(line):
+                    found.append((command, rc, line))
+                    break
+
+    out: list = []
+    seen: set[str] = set()
+    for failed_cmd, failed_rc, message in found:
+        code = f"r({failed_rc}) {label_for_rc(failed_rc)}" if failed_rc is not None else "an error"
+        text = (
+            f"`{failed_cmd}` failed with {code} but the run still reports ok, because "
+            f"capture suppressed it: {message or '(no message)'}"
+        )
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(StataWarning(kind="suppressed_error", message=text))
     return out
 
 

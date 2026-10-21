@@ -84,6 +84,7 @@ report `kind` + `line` + `context.failing` + the suggestions and stop.
 | −3 | `cancelled` | A `cancel_session` killed the run | Expected after an explicit stop |
 | −4 | `policy_blocked` | The command-safety policy rejected the code before Stata ran (`shell`, `erase`, `!`, …) | Drop the OS-escape command; a human must relax the policy to allow it |
 | −5 | `session_busy` | That session's Stata process was still running an earlier request when your `timeout_ms` elapsed | **Nothing ran and nothing is wrong with the code.** Wait and retry, raise `timeout_ms`, use a different `session_id`, or submit with `run_in_background` |
+| −6 | `expectation_failed` | Stata ran cleanly, but an `expect` check (N, a coefficient, an output file, no suppressed errors) failed — `result.checks` has `expected` / `actual` | The specification drifted or the expectation is stale. **Stop and report the failed checks**; do not loosen `expect` to make it pass |
 
 ## Typed extra fields by kind
 

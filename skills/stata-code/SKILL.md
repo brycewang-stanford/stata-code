@@ -97,6 +97,7 @@ Defaults are already tuned for you; reach for these only when the situation call
 | `run_in_background` | `false` | Bootstraps, permutation tests, `prodest` loops — anything multi-minute. Returns a `job_id` immediately; poll `stata_run_status`. **Give the job its own `session_id`** if you want to keep working, since one Stata process serves one session. |
 | `track_output_files` | `true` | Leave it on: `result.outputs` tells you which `esttab` tables / exports / `.dta` files the run wrote, so you don't have to go hunting with shell tools. |
 | `auto_close_logs` | `true` | Leave it on. It closes log handles a *failed* run leaked; without it an aborted `log using` makes every later run in that session die with r(604). |
+| `expect` | unset | You know what the run must produce — the paper's N, a headline coefficient, the tables it writes. `{"n_obs": 74, "coefficients": {"mpg": {"b": -49.51, "tol": 0.01}, "weight": {"sign": "positive"}}, "outputs": ["out/t1.csv"], "no_suppressed_errors": true}`. A stray `if`, a changed cluster level or a lossy merge still runs cleanly in Stata; with `expect` it comes back `ok: false`, `error.kind: "expectation_failed"`, each check listed under `result.checks`. |
 
 There are also MCP resources (`stata://schema/run-result`, `log://...`, `graph://...`, `matrix://...`) and prompts (`run_do_file_and_report`, `debug_stata_error`, `fix_and_rerun_until_passes`, `replication_audit`, `summarize_estimation_results`, `run_notebook_cell_and_report`, `fix_and_rerun_notebook_cell`, `plan_cross_stack_parity_audit`, `data_mcp_to_stata_handoff`, `did_event_study`, `iv_2sls`, `rdd`, `publication_table`, `cross_validate_did`).
 
@@ -108,7 +109,7 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 {
   "ok": true,                      // ← branch on this first
   "rc": 0,                         // Stata _rc; -1 adapter crash, -2 timeout, -3 cancelled,
-                                   //   -4 policy blocked, -5 session busy
+                                   //   -4 policy blocked, -5 session busy, -6 expectation failed
   "session_id": "main",
   "request_id": "01HX…",
   "started_at": "2026-…Z",
@@ -150,6 +151,7 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
   "graphs":   [{"ref": "graph://…", "format": "png", "source_command": "scatter …", "source_line": 5}],
   "outputs":  [{"path": "/w/tables/t1.tex", "bytes": 4552, "created": true}],  // files the run wrote
   "warnings": [{"kind": "convergence", "message": "…"}],
+  "checks":   [{"check": "n_obs", "passed": true, "expected": 74, "actual": 74, …}],  // from `expect`
 
   "error": null,                   // populated iff ok=false; see §7
   "origin": null,                  // echoes origin_* request fields
@@ -161,6 +163,7 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 
 **Key invariants:**
 - Branch on `ok` first; never grep `log.head` to decide success.
+- **`ok: true` means Stata did not stop — not that the result is right.** `capture` turns failures into rc 0: look for warnings of kind `suppressed_error` (each names the command, the rc and Stata's message). A changed specification also runs cleanly: pass `expect` to pin N, key coefficients and output files.
 - Scalars are native numbers. Missing is JSON `null`, not `"."` and never `8.988e+307`. The same holds for every matrix cell.
 - **`results.estimation` is the coefficient table to read.** It is always derived from the complete values, so it carries real `se` / `p_value` / CI even when the matrices are stubs. Do not reconstruct inference from `e(b)` and `e(V)` yourself.
 - Matrices arrive as `values: null` + a `matrix://` ref by default — call `get_matrix` only when you need the raw numbers.
@@ -179,7 +182,7 @@ Every `stata_run` reply has this shape (full spec: `stata://schema/run-result` o
 - **Do** quote specific numbers from `results.estimation` / `results.e.scalars` rather than dumping JSON.
 - **Do** send genuinely long jobs to `run_in_background` on their own `session_id` instead of blocking a foreground call for minutes.
 
-## 7. The typed-error taxonomy (34 kinds)
+## 7. The typed-error taxonomy (35 kinds)
 
 On failure, the `error` block looks like:
 
@@ -217,6 +220,7 @@ Kinds you will see most often:
 - `convergence` / `infeasible` (rc 430/491) — model issue, not a typo; do not loop on it.
 - `no_estimation_results` (rc 301) — likely `predict`/`margins` before any `regress`.
 - `log_state` (rc 604/606) — a log handle is in the wrong state, almost always left by an earlier aborted run. Fix is `capture log close _all`, **not** a code change; `recovery.retriable` is true. `auto_close_logs` prevents most of these.
+- `expectation_failed` (−6) — Stata ran cleanly but an `expect` check failed; `result.checks` lists each with `expected` / `actual`. Either the specification drifted (sample filter, weights, FE, clustering, merge) or the expectation is stale — report which check failed and ask; **never loosen `expect` just to make it pass**.
 - `session_busy` (−5) — that session's Stata process is still running an earlier request. **Nothing ran**; the code is fine. Wait, raise `timeout_ms`, use a different `session_id`, or send the long job to the background.
 - `timeout` (−2) / `cancelled` (−3) / `adapter_crash` (−1) — system-level; do not retry blindly.
 
@@ -228,7 +232,8 @@ Kinds you will see most often:
 
 ```text
 1. stata_run(code)
-2. If ok: report scalars/warnings. Done.
+2. If ok: report scalars/warnings — call out any `suppressed_error` warning, it is a
+   failure `capture` hid. Done.
 3. If not ok:
    - State error.kind, error.line, error.context.failing.
    - List error.suggestions verbatim.
@@ -254,6 +259,8 @@ loop (cap ~5 iterations):
     adapter_crash/timeout/cancelled → STOP and surface to the user
     policy_blocked       → the code used a blocked OS-escape command (shell/erase/rmdir/!);
                            do the task with a native Stata command instead, do NOT retry as-is
+    expectation_failed   → STOP and surface result.checks; the spec or the expectation is
+                           wrong, and only the user can say which
   rewrite the .do file or notebook cell; re-run
   if the same kind+line repeats unchanged twice → STOP with a summary
 ```
@@ -282,6 +289,7 @@ The runner echoes these into `result.origin` and writes them to the run-bundle m
 - Do not shell out to `stata` / `do-file editor` / `pystata` directly. Use `stata_run`.
 - Do not use OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) inside `stata_run`. They are blocked by the command-safety policy and return `policy_blocked`. Stay within native Stata data commands (`save` / `use` / `copy`); if a file genuinely must be deleted, ask the user to do it or to relax the policy.
 - Do not parse English from `log.head` to detect success — use `ok` / `rc` / `error.kind`.
+- Do not report a run as "done" on `ok` alone when it carried `suppressed_error` warnings, or when the numbers feed a paper and no `expect` pinned them.
 - Do not retry a failing command unchanged. The taxonomy tells you why it failed; act on it or report it.
 - Do not loop the fix-and-rerun routine on a model problem (`convergence`, `infeasible`).
 - Do not assume `e()` is populated after a non-estimation command. Check `results.last_estimation_cmd` first.

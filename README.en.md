@@ -610,7 +610,7 @@ stata_code/
 | Standalone MCP | ✓ | ✓ | bundled with VS Code | — (bespoke HTTP + copy-paste) | — |
 | Jupyter kernel | ✓ | — | — | — | ✓ |
 | Unified result schema | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | raw log to the agent | per-tool |
-| Typed errors + suggestions | ✓ (34 kinds) | — | — | — | — |
+| Typed errors + suggestions | ✓ (35 kinds) | — | — | — | — |
 | Token-economy defaults | ✓ (log refs, graph refs) | — | — | — | — |
 | Command-safety guard | ✓ (`shell`/`erase`/`rmdir`/`!`) | ✓ (27-rule) | — | — | — |
 | Bash / plain-terminal CLI | ✓ (`stata-code run`) | ✓ | — | — | — |
@@ -624,7 +624,7 @@ stata_code/
 
 `stata-code` owns the **agent-native, typed-contract** lane: one structured
 `RunResult` schema across MCP, Jupyter, VS Code, and a plain-terminal CLI; a
-34-kind error taxonomy with recovery contracts; token-economy refs; and now a
+35-kind error taxonomy with recovery contracts; token-economy refs; and now a
 console backend (Stata 13+) plus a zero-Python binary. Editor-first tools like
 `stata-all-in-one` lead on human IDE polish and hand the agent raw log text;
 `stata-code` matches their onboarding/version reach while keeping the typed
@@ -651,7 +651,7 @@ the only difference is the wrapper around it:
 | --- | --- | --- |
 | Exit code on error | **`0`** — fails silently | `1` |
 | How you learn it failed | grep the log for `r(111);` yourself | `ok=False`, `rc=111` |
-| Error classification | none | `[varname_not_found]` (34 kinds) |
+| Error classification | none | `[varname_not_found]` (35 kinds) |
 | Recovery hint | none | "Run `describe` to list available variables" |
 | Getting a coefficient | scrape the aligned ASCII table | `e.scalars["r2"] → 0.6515312529087511` (float) |
 | State across calls | no | `run --daemon` (see below) |
@@ -689,7 +689,7 @@ Rule of thumb:
 - Graph capture: `png` / `svg` / `pdf` with ref store and source-command attribution
 - Log truncation with ref store
 - Warning extraction: 5 categories + generic notes
-- 34-kind error taxonomy with canonical suggestions and a machine-readable `recovery` verdict (retriable / needs-code-change / needs-user-input)
+- 35-kind error taxonomy with canonical suggestions and a machine-readable `recovery` verdict (retriable / needs-code-change / needs-user-input)
 - MCP server: 23 tools, including notebook navigation / search / atomic edits, the run-bundle index (`list_runs`), log grep (`search_log`), dataset inspection (`inspect_data`), static linting (`lint_do`), Stata-free variable-label editing (`set_variable_labels`), and package installation (`install_package`)
 - Command-safety guard: OS-escape / file-deletion commands (`shell`, `winexec`, `erase`, `rm`, `rmdir`, `!`) are blocked before Stata runs; configurable via `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK`
 - Bash / plain-terminal surface: `stata-code run` (a `.do` file, `-e` snippets, or stdin) prints the same structured `RunResult` any agent that can shell out can consume; `stata-code lint` runs the linter; `stata-code setup` writes MCP client configs

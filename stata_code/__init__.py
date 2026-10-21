@@ -20,7 +20,7 @@ defaults are all defined in ``SCHEMA.md`` (the normative contract).
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from stata_code.core._pool import (
     get_default_pool,
@@ -112,6 +112,7 @@ def run(
     origin_cell_id: str | None = None,
     use_origin_workdir: bool = True,
     working_dir: str | None = None,
+    expect: dict[str, Any] | None = None,
 ) -> RunResult:
     """Run Stata code through the subprocess-backed public API.
 
@@ -124,6 +125,12 @@ def run(
     values are fetched with :func:`stata_code.get_matrix`. Pass
     ``include_results="full"`` for the pre-0.11 shape. ``results.estimation``
     is unaffected — it carries the typed coefficient table either way.
+
+    ``expect`` declares what a successful run must produce, e.g.
+    ``{"n_obs": 74, "coefficients": {"mpg": {"b": -49.51, "tol": 0.01}},
+    "outputs": ["out/table1.csv"], "no_suppressed_errors": True}``. A mismatch
+    returns ``ok=False`` with ``error.kind="expectation_failed"`` (``rc=-6``);
+    every graded check is listed under ``result.checks``.
     """
     return pool_execute(
         code,
@@ -148,6 +155,7 @@ def run(
         origin_cell_id=origin_cell_id,
         use_origin_workdir=use_origin_workdir,
         working_dir=working_dir,
+        expect=expect,
     )
 
 
@@ -260,7 +268,7 @@ def is_available() -> bool:
     return True
 
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 __all__ = [
     # Primary entry points

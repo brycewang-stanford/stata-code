@@ -8,6 +8,51 @@
       "title": "Backend",
       "type": "string"
     },
+    "CheckResult": {
+      "additionalProperties": true,
+      "description": "Outcome of one caller-declared expectation (``stata_run(expect=...)``).\n\n``check`` names the expectation (``n_obs``, ``coefficient``, ``output``,\n``no_suppressed_errors``); ``target`` is the coefficient term or output\npath it applies to, when there is one. ``expected`` / ``actual`` carry the\ncompared values so a failure can be reported without re-deriving them.",
+      "properties": {
+        "actual": {
+          "default": null,
+          "title": "Actual"
+        },
+        "check": {
+          "title": "Check",
+          "type": "string"
+        },
+        "expected": {
+          "default": null,
+          "title": "Expected"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        }
+      },
+      "required": [
+        "check",
+        "passed"
+      ],
+      "title": "CheckResult",
+      "type": "object"
+    },
     "Coefficient": {
       "additionalProperties": true,
       "description": "One row of a typed coefficient table (see ``EstimationResult``).",
@@ -343,6 +388,7 @@
         "session_busy",
         "adapter_crash",
         "policy_blocked",
+        "expectation_failed",
         "unknown"
       ],
       "title": "ErrorKind",
@@ -1201,6 +1247,13 @@
         "type": "string"
       },
       "title": "Capabilities",
+      "type": "array"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/CheckResult"
+      },
+      "title": "Checks",
       "type": "array"
     },
     "dataset": {

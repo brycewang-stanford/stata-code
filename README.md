@@ -575,7 +575,7 @@ stata_code/
 | Jupyter kernel | ✓ | — | — | ✓ |
 | 统一结果格式 | ✓ ([SCHEMA.md](SCHEMA.md)) | per-tool | per-tool | per-tool |
 | 默认节省 token | ✓ (log refs, graph refs) | — | — | — |
-| 结构化错误和建议 | ✓ (34 kinds) | — | — | — |
+| 结构化错误和建议 | ✓ (35 kinds) | — | — | — |
 | 多 session | ✓ (Stata frames) | partial | — | — |
 | 生态成熟度 | early | ✓ (statamcp.com, cookbook) | ✓ (11k installs) | ✓ |
 
@@ -598,7 +598,7 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 | --- | --- | --- |
 | 出错时的退出码 | **`0`** —— 静默失败 | `1` |
 | 怎么知道出了错 | 自己 grep 日志里的 `r(111);` | `ok=False`、`rc=111` |
-| 错误分类 | 无 | `[varname_not_found]`（共 34 类） |
+| 错误分类 | 无 | `[varname_not_found]`（共 35 类） |
 | 修复建议 | 无 | "Run `describe` to list available variables" |
 | 取回归系数 | 从对齐的 ASCII 表里抠 | `e.scalars["r2"] → 0.6515312529087511`（float） |
 | 跨调用保持数据 | 不能 | `run --daemon`（见下节） |
@@ -631,7 +631,7 @@ printf 'sysuse auto, clear\nsummarize mpg\nexit, clear\n' | stata-mp -q
 - 图形捕获：`png` / `svg` / `pdf` + ref store，并记录来源命令归属
 - 日志截断 + ref store
 - 警告抽取：5 类 + 通用 notes
-- 34 类错误分类法 + 标准化建议，以及机器可读的 `recovery` 判定（可重试 / 需改代码 / 需人工介入）
+- 35 类错误分类法 + 标准化建议，以及机器可读的 `recovery` 判定（可重试 / 需改代码 / 需人工介入）
 - MCP server：23 个工具，覆盖执行、notebook 导航 / 检索 / 原子化编辑、运行索引（`list_runs`）、日志检索（`search_log`）、数据集检查（`inspect_data`）、静态检查（`lint_do`）、无需 Stata 的变量标签编辑（`set_variable_labels`）和包安装（`install_package`）
 - 命令安全护栏：`shell`、`winexec`、`erase`、`rm`、`rmdir`、`!` 等 OS 逃逸 / 删除文件命令在执行前被拦截；可通过 `STATA_CODE_COMMAND_POLICY` / `STATA_CODE_POLICY_ALLOW` / `STATA_CODE_POLICY_BLOCK` 配置
 - Bash / 终端入口：`stata-code run`（`.do` 文件、`-e` 片段或 stdin）打印同一套结构化 `RunResult`，任何能调用 shell 的 agent 都可消费；`stata-code lint` 运行静态检查；`stata-code setup` 写入 MCP 客户端配置

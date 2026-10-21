@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -55,6 +55,7 @@ class ErrorKind(str, Enum):
     SESSION_BUSY = "session_busy"
     ADAPTER_CRASH = "adapter_crash"
     POLICY_BLOCKED = "policy_blocked"
+    EXPECTATION_FAILED = "expectation_failed"
     UNKNOWN = "unknown"
 
 
@@ -456,6 +457,23 @@ class OutputFile(_Base):
     created: bool = False
 
 
+class CheckResult(_Base):
+    """Outcome of one caller-declared expectation (``stata_run(expect=...)``).
+
+    ``check`` names the expectation (``n_obs``, ``coefficient``, ``output``,
+    ``no_suppressed_errors``); ``target`` is the coefficient term or output
+    path it applies to, when there is one. ``expected`` / ``actual`` carry the
+    compared values so a failure can be reported without re-deriving them.
+    """
+
+    check: str
+    target: str | None = None
+    passed: bool
+    expected: Any = None
+    actual: Any = None
+    message: str = ""
+
+
 class OriginInfo(_Base):
     """Echo of the editor-side origin metadata supplied with the request.
 
@@ -498,6 +516,7 @@ class RunResult(_Base):
     graphs: list[GraphInfo] = Field(default_factory=list)
     outputs: list[OutputFile] = Field(default_factory=list)
     warnings: list[StataWarning] = Field(default_factory=list)
+    checks: list[CheckResult] = Field(default_factory=list)
     error: ErrorInfo | None = None
     origin: OriginInfo | None = None
 

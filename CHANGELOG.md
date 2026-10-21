@@ -6,6 +6,45 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.18.0 — 2026-10-21
+
+`ok: true` used to mean only that Stata did not stop. A run can finish with an
+error hidden by `capture`, or with a specification that quietly changed, and
+both looked like success. This release reports the first and lets the caller
+rule out the second. The result schema gains one optional field (`checks`),
+one error kind and one warning kind; `schema_version` stays `"1.0"` and the
+new surface is advertised as the `expectations` capability.
+
+### Added
+
+- **`expect` on `stata_run` / `run()`.** Declare what the run must produce:
+  the estimation's `n_obs`, coefficients (`{"b": …, "tol": …}` or
+  `{"sign": "positive" | "negative"}`), the files it must write, and
+  `no_suppressed_errors`. Checks are graded only after Stata succeeds, against
+  the full coefficient table whatever `include_estimation` says, and only
+  against an estimation this run produced. Any failure returns `ok: false`,
+  `rc: -6`, `error.kind: "expectation_failed"`; every check is listed under
+  the new `result.checks`. On `auto.dta`, adding `if foreign == 0` to
+  `regress price mpg weight` now fails `{"n_obs": 74}` with `e(N) = 52`
+  instead of passing. Malformed expectations are rejected before Stata runs.
+- **`suppressed_error` warnings.** A successful run's log is read for
+  failures that `capture` turned into rc 0: an `r(###);` line (as from
+  `capture noisily do "step.do"`), or one of 24 Stata error sentences —
+  each taken from Stata 18's own output — printed by a `capture`d command or
+  loop body. Each warning names
+  the command, the rc and Stata's message. A silent `capture` prints nothing
+  and still cannot be seen.
+
+### Fixed
+
+- **A failure two or more `do` files deep reported `line: null`.** `do
+  master.do` calling `do step.do` only searched `master.do` for the failing
+  command. The transcript's `do` / `end of do-file` pairs now identify the
+  script that was running, and the search follows `do` chains up to eight
+  levels (cycles included), so `source_file` and `line` point into
+  `step.do`. A script that is still running is also preferred over an
+  identical line in the submitted code.
+
 ## 0.17.0 — 2026-10-04
 
 The `.dta` viewer loses four limits, and a real batch Stata now tests the

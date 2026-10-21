@@ -71,6 +71,7 @@ from stata_code.core.dta_labels import (
     read_variable_labels,
     set_variable_labels,
 )
+from stata_code.core.expect import normalize_expect
 from stata_code.core.lint import lint_code
 from stata_code.core.notebook import (
     NotebookError,
@@ -108,7 +109,7 @@ from stata_code.core.runner import (
 )
 from stata_code.core.schema import RunResult
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 SERVER_INSTRUCTIONS = (
     "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
@@ -508,7 +509,12 @@ def _tool_definitions() -> list[Tool]:
                 "error.kind/message/line/suggestions. Use suggestions for "
                 "iterative debug/fix loops only when the user asked for that "
                 "or approved changes; for run/validate-only requests, report "
-                "diagnostics without rewriting source code."
+                "diagnostics without rewriting source code. ok=true only means "
+                "Stata did not stop: check warnings for kind='suppressed_error' "
+                "(a failure hidden by capture), and pass expect={...} to have "
+                "the sample size, key coefficients and output files graded "
+                "(a mismatch returns ok=false, error.kind='expectation_failed', "
+                "with every check under result.checks)."
             ),
             inputSchema={
                 "type": "object",
@@ -673,6 +679,63 @@ def _tool_definitions() -> list[Tool]:
                             "Optional explicit Stata working directory. "
                             "Overrides origin_path's directory."
                         ),
+                    },
+                    "expect": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "description": (
+                            "Acceptance checks graded after Stata succeeds. "
+                            "Any failure turns the result into ok=false, "
+                            "rc=-6, error.kind='expectation_failed'; every "
+                            "graded check is listed under result.checks. Use "
+                            "it to pin the specification you intend, so a "
+                            "changed sample, a moved coefficient or a missing "
+                            "table cannot pass as success."
+                        ),
+                        "properties": {
+                            "n_obs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Required e(N) of the estimation this run performs.",
+                            },
+                            "coefficients": {
+                                "type": "object",
+                                "description": (
+                                    "Term -> {b, tol} (|b - expected| <= tol; "
+                                    "tol defaults to 1e-6) or {sign: "
+                                    "'positive'|'negative'}. Terms are named as "
+                                    "in results.estimation.coefficients[].term."
+                                ),
+                                "additionalProperties": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "b": {"type": "number"},
+                                        "tol": {"type": "number", "minimum": 0},
+                                        "sign": {
+                                            "type": "string",
+                                            "enum": ["positive", "negative"],
+                                        },
+                                    },
+                                },
+                            },
+                            "outputs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "Files this run must write (created or "
+                                    "modified during the run). Relative paths "
+                                    "resolve against the run's working directory."
+                                ),
+                            },
+                            "no_suppressed_errors": {
+                                "type": "boolean",
+                                "description": (
+                                    "Fail when capture hid an error "
+                                    "(warnings of kind 'suppressed_error')."
+                                ),
+                            },
+                        },
                     },
                     "origin_kind": {
                         "type": "string",
@@ -2900,6 +2963,13 @@ def _prepare_run_arguments(arguments: dict[str, Any]) -> tuple[str, dict[str, An
         if value is not _SENTINEL:
             args[key] = value
 
+    if "expect" in args:
+        # Reject a malformed expectation before Stata runs, not after.
+        try:
+            args["expect"] = normalize_expect(args["expect"])
+        except ValueError as exc:
+            return "", {}, _error_result(str(exc), kind="invalid_request")
+
     return code, args, None
 
 
@@ -3690,6 +3760,7 @@ def _info_payload_from_stata(
                 "background_runs",      # run_in_background + stata_run_status
                 "output_tracking",      # RunResult.outputs
                 "log_hygiene",          # auto-close of logs leaked by a failed run
+                "expectations",         # stata_run(expect=...) + RunResult.checks
                 # Notebook side-channel — present when the server registers
                 # the corresponding `notebook_*` and `list_runs` tools.
                 # Clients can feature-detect rather than calling each tool

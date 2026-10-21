@@ -128,6 +128,7 @@ SYNTHETIC_RC_TO_KIND: dict[int, ErrorKind] = {
     -3: ErrorKind.CANCELLED,
     -4: ErrorKind.POLICY_BLOCKED,
     -5: ErrorKind.SESSION_BUSY,
+    -6: ErrorKind.EXPECTATION_FAILED,
 }
 
 
@@ -216,6 +217,7 @@ SYNTHETIC_RC_LABEL: dict[int, str] = {
     -3: "cancelled",
     -4: "policy_blocked",
     -5: "session_busy",
+    -6: "expectation_failed",
 }
 
 
@@ -291,6 +293,10 @@ _RECOVERY: dict[ErrorKind, tuple[str, bool, bool, bool]] = {
     # Command policy blocked the code before Stata ran: the submitted code must
     # change (drop the OS-escape command), or a human must relax the policy.
     ErrorKind.POLICY_BLOCKED: ("user_code", False, True, True),
+    # Stata ran cleanly but the result is not what the caller declared: either
+    # the specification drifted (fix the code) or the expectation is stale (a
+    # human decides which). Re-running unchanged reproduces the same numbers.
+    ErrorKind.EXPECTATION_FAILED: ("user_code", False, True, True),
     ErrorKind.UNKNOWN: ("unknown", False, False, False),
 }
 
