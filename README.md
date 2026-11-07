@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo-v5/horizontal-on-dark@1024.png" />
-    <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo-v5/horizontal@1024.png" alt="stata-code logo" width="520" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo/horizontal-on-dark@1024.png" />
+    <img src="https://raw.githubusercontent.com/brycewang-stanford/stata-code/main/branding/logo/horizontal@1024.png" alt="stata-code logo" width="520" />
   </picture>
 </p>
 
