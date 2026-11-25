@@ -43,11 +43,13 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from queue import Empty, Queue
 from typing import Any
 
@@ -848,7 +850,36 @@ class SessionPool:
         On timeout: SIGTERM/SIGKILL the worker and return a synthetic
         `RunResult(rc=-2, error.kind="timeout")`. Subsequent calls to the
         same `session_id` will respawn a fresh worker.
+
+        The worker writes its transcript to a live-log file as Stata produces
+        it. A killed worker cannot answer, so that file is where the timeout
+        and mid-run-cancel results get their log from. A caller that wants to
+        read it while the run is going passes its own ``live_log_path`` and
+        owns the file; otherwise a temporary one is used and removed here.
         """
+        caller_path = options.pop("live_log_path", None)
+        live_path = caller_path or new_live_log_path()
+        try:
+            return self._execute(
+                code,
+                session_id=session_id,
+                timeout_ms=timeout_ms,
+                live_log_path=live_path,
+                **options,
+            )
+        finally:
+            if not caller_path:
+                remove_live_log(live_path)
+
+    def _execute(
+        self,
+        code: str,
+        *,
+        session_id: str,
+        timeout_ms: int | None,
+        live_log_path: str,
+        **options: Any,
+    ) -> RunResult:
         # Normalize: pass session_id through to the worker so it routes
         # to the right Stata frame. timeout_ms is enforced HERE — the
         # worker doesn't see it.
@@ -866,7 +897,7 @@ class SessionPool:
                 elapsed_ms=max(1, int((time.monotonic() - started) * 1000)),
             )
 
-        worker_options = {**options, "session_id": session_id}
+        worker_options = {**options, "session_id": session_id, "live_log_path": live_log_path}
         # Forward timeout_ms verbatim so the worker stores it on the result
         # for observability, even though the real enforcement is parent-side.
         worker_options.setdefault("timeout_ms", timeout_ms)
@@ -910,6 +941,9 @@ class SessionPool:
                 session_id=session_id,
                 elapsed_ms=elapsed_ms,
                 timeout_ms=timeout_ms or 0,
+                partial_log=read_live_log(live_log_path),
+                code=code,
+                options=options,
             )
         except _WorkerReportedError as exc:
             # The worker is alive and answered with a well-formed failure —
@@ -923,6 +957,9 @@ class SessionPool:
                     session_id=session_id,
                     elapsed_ms=max(1, elapsed_ms),
                     aborted_mid_run=True,
+                    partial_log=read_live_log(live_log_path),
+                    code=code,
+                    options=options,
                 )
             return _build_adapter_crash_result(
                 session_id=session_id,
@@ -943,6 +980,9 @@ class SessionPool:
                     session_id=session_id,
                     elapsed_ms=max(1, elapsed_ms),
                     aborted_mid_run=True,
+                    partial_log=read_live_log(live_log_path),
+                    code=code,
+                    options=options,
                 )
             return _build_adapter_crash_result(
                 session_id=session_id,
@@ -1136,35 +1176,158 @@ def _empty_dataset() -> DatasetInfo:
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Live logs: the transcript of a run, on disk while the run is going.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Longest live log read back into a result. A runaway loop can print without
+# bound; the end of the transcript is the part that says where the run was.
+_MAX_LIVE_LOG_BYTES = 4_000_000
+
+
+def new_live_log_path() -> str:
+    """Reserve a fresh file for one run's live transcript."""
+    directory = Path(tempfile.gettempdir()) / "stata-code-live"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        directory = Path(tempfile.gettempdir())
+    return str(directory / f"{uuid.uuid4().hex}.log")
+
+
+def read_live_log(path: str | None, *, max_bytes: int = _MAX_LIVE_LOG_BYTES) -> str:
+    """Read a live log, keeping its last ``max_bytes``. Empty if unreadable."""
+    if not path:
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - max_bytes))
+            data = fh.read()
+    except OSError:
+        return ""
+    text = data.decode("utf-8", errors="replace")
+    if size > max_bytes:
+        # Drop the line the cut landed in.
+        text = text.split("\n", 1)[-1]
+    return text
+
+
+def remove_live_log(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _partial_log(
+    text: str,
+    code: str | None,
+    options: dict[str, Any] | None,
+    request_id: str,
+) -> tuple[LogInfo, dict[str, Any]]:
+    """LogInfo and command pinpoint for a run whose worker was killed.
+
+    The last command Stata echoed is the one that was running, so it is
+    reported the way a failing command is: `error.command`, `error.line`.
+    """
+    empty_pin: dict[str, Any] = {
+        "command": None,
+        "line": None,
+        "source_file": None,
+        "commands_executed": None,
+        "before": [],
+        "failing": "",
+        "after": [],
+    }
+    if not text.strip():
+        return (
+            LogInfo(
+                head="",
+                tail="",
+                lines_total=0,
+                bytes_total=0,
+                truncated=False,
+                complete=False,
+                error_window=None,
+                ref=None,
+            ),
+            empty_pin,
+        )
+    # Imported here: `runner` pulls in pystata helpers the parent never needs
+    # unless a run was actually killed.
+    from stata_code.core.runner import _parse_failure_transcript, _split_log
+
+    opts = options or {}
+
+    def _lines(key: str) -> int:
+        value = opts.get(key, 20)
+        return value if isinstance(value, int) and not isinstance(value, bool) else 20
+
+    log = _split_log(
+        text,
+        _lines("log_lines_head"),
+        _lines("log_lines_tail"),
+        bool(opts.get("include_full_log", False)),
+        request_id,
+    )
+    window = [ln for ln in text.replace("\r\n", "\n").split("\n") if ln][-10:]
+    log = log.model_copy(update={"complete": False, "error_window": "\n".join(window)})
+    pin = empty_pin
+    if code:
+        working_dir = opts.get("working_dir")
+        try:
+            pin = _parse_failure_transcript(
+                text,
+                code,
+                working_dir=Path(working_dir) if isinstance(working_dir, str) else None,
+            )
+        except Exception:  # noqa: BLE001 - the pinpoint is a convenience
+            pin = empty_pin
+    return log, pin
+
+
 def _build_timeout_result(
     *,
     session_id: str,
     elapsed_ms: int,
     timeout_ms: int,
+    partial_log: str = "",
+    code: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> RunResult:
+    request_id = uuid.uuid4().hex
+    log, pin = _partial_log(partial_log, code, options, request_id)
+    message = (
+        f"Execution exceeded the configured timeout of {timeout_ms} ms. "
+        f"The worker process for session_id={session_id!r} was terminated."
+    )
+    if pin["command"]:
+        message += f" It was running: {pin['command']}"
     err = ErrorInfo(
         kind=ErrorKind.TIMEOUT,
         rc=-2,
         rc_label="timeout",
-        message=(
-            f"Execution exceeded the configured timeout of {timeout_ms} ms. "
-            f"The worker process for session_id={session_id!r} was terminated."
-        ),
-        command=None,
-        line=None,
-        context=ErrorContext(before=[], failing="", after=[]),
-        commands_executed=None,
+        message=message,
+        command=pin["command"],
+        line=pin["line"],
+        source_file=pin["source_file"],
+        context=ErrorContext(before=pin["before"], failing=pin["failing"], after=pin["after"]),
+        commands_executed=pin["commands_executed"],
         path=None,
         varname=None,
         name=None,
-        suggestions=[],
+        suggestions=suggestions_for(ErrorKind.TIMEOUT),
         recovery=recovery_for(ErrorKind.TIMEOUT),
     )
     return RunResult(
         ok=False,
         rc=-2,
         session_id=session_id,
-        request_id=uuid.uuid4().hex,
+        request_id=request_id,
         started_at=_utc_iso_ms(),
         elapsed_ms=elapsed_ms,
         stata_elapsed_ms=elapsed_ms,
@@ -1173,16 +1336,7 @@ def _build_timeout_result(
             edition=StataEdition.UNKNOWN,
             backend=Backend.PYSTATA,
         ),
-        log=LogInfo(
-            head="",
-            tail="",
-            lines_total=0,
-            bytes_total=0,
-            truncated=False,
-            complete=False,
-            error_window=None,
-            ref=None,
-        ),
+        log=log,
         results=ResultsInfo(r=_empty_returns(), e=_empty_returns(), last_estimation_cmd=None),
         dataset=_empty_dataset(),
         graphs=[],
@@ -1317,11 +1471,17 @@ def _build_cancelled_result(
     session_id: str,
     elapsed_ms: int,
     aborted_mid_run: bool = False,
+    partial_log: str = "",
+    code: str | None = None,
+    options: dict[str, Any] | None = None,
 ) -> RunResult:
     # Pre-run cancel: worker never received code, so the empty log is genuinely
-    # final. Mid-run cancel: worker was killed while Stata may have been
-    # emitting output we discarded, so match timeout/crash semantics.
+    # final. Mid-run cancel: the worker was killed mid-transcript, so the log
+    # is whatever reached the live-log file, marked incomplete.
     log_complete = not aborted_mid_run
+    request_id = uuid.uuid4().hex
+    log, pin = _partial_log(partial_log if aborted_mid_run else "", code, options, request_id)
+    log = log.model_copy(update={"complete": log_complete})
     err = ErrorInfo(
         kind=ErrorKind.CANCELLED,
         rc=-3,
@@ -1330,10 +1490,11 @@ def _build_cancelled_result(
             "Execution was cancelled before a completed Stata response was "
             f"received for session_id={session_id!r}."
         ),
-        command=None,
-        line=None,
-        context=ErrorContext(before=[], failing="", after=[]),
-        commands_executed=None,
+        command=pin["command"],
+        line=pin["line"],
+        source_file=pin["source_file"],
+        context=ErrorContext(before=pin["before"], failing=pin["failing"], after=pin["after"]),
+        commands_executed=pin["commands_executed"],
         path=None,
         varname=None,
         name=None,
@@ -1344,7 +1505,7 @@ def _build_cancelled_result(
         ok=False,
         rc=-3,
         session_id=session_id,
-        request_id=uuid.uuid4().hex,
+        request_id=request_id,
         started_at=_utc_iso_ms(),
         elapsed_ms=elapsed_ms,
         stata_elapsed_ms=0,
@@ -1353,16 +1514,7 @@ def _build_cancelled_result(
             edition=StataEdition.UNKNOWN,
             backend=Backend.PYSTATA,
         ),
-        log=LogInfo(
-            head="",
-            tail="",
-            lines_total=0,
-            bytes_total=0,
-            truncated=False,
-            complete=log_complete,
-            error_window=None,
-            ref=None,
-        ),
+        log=log,
         results=ResultsInfo(r=_empty_returns(), e=_empty_returns(), last_estimation_cmd=None),
         dataset=_empty_dataset(),
         graphs=[],

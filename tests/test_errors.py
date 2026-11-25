@@ -215,17 +215,18 @@ class TestQuietKinds:
         # Producer-side failure; nothing actionable for the Stata user.
         assert suggestions_for(ErrorKind.ADAPTER_CRASH) == []
 
-    def test_timeout_returns_empty(self):
-        assert suggestions_for(ErrorKind.TIMEOUT) == []
+    def test_timeout_points_at_background_runs(self):
+        # A timeout kills the session; say how to avoid paying for it twice.
+        (hint,) = suggestions_for(ErrorKind.TIMEOUT)
+        assert "run_in_background" in hint.action
+        assert "timeout_ms" in hint.action
 
     def test_cancelled_returns_empty(self):
         assert suggestions_for(ErrorKind.CANCELLED) == []
 
-    def test_invalid_name_returns_empty(self):
-        # We don't currently emit a hint for invalid_name (no obvious fix
-        # without parsing the message further). Lock in [] so any future
-        # change is intentional.
-        assert suggestions_for(ErrorKind.INVALID_NAME) == []
+    def test_invalid_name_explains_naming_rules(self):
+        (hint,) = suggestions_for(ErrorKind.INVALID_NAME)
+        assert "reserved word" in hint.action
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -68,6 +68,43 @@ _init_attempted = False
 _init_error: Exception | None = None
 
 
+class _TeeBuffer(io.StringIO):
+    """A StringIO that also appends every write to a file, flushed at once.
+
+    The file is best-effort: a failure to open or write it never disturbs the
+    run, whose output is still captured in memory.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        try:
+            self._tee: Any = open(path, "a", encoding="utf-8")  # noqa: SIM115
+        except OSError:
+            self._tee = None
+
+    def tee_only(self, text: str) -> None:
+        if self._tee is None:
+            return
+        try:
+            self._tee.write(text)
+            self._tee.flush()
+        except (OSError, ValueError):
+            self._tee = None
+
+    def write(self, text: str) -> int:
+        self.tee_only(text)
+        return super().write(text)
+
+    def close(self) -> None:
+        if self._tee is not None:
+            try:
+                self._tee.close()
+            except OSError:
+                pass
+            self._tee = None
+        super().close()
+
+
 class PystataNotAvailable(RuntimeError):
     """Raised when pystata cannot be imported or Stata cannot be initialized."""
 
@@ -164,15 +201,28 @@ class PystataRuntime:
     def sfi(self) -> Any:
         return self._sfi
 
-    def run_capture(self, code: str) -> tuple[str, int, str | None]:
+    # `run_capture` accepts `tee_path`. Checked by the runner so a substitute
+    # runtime without the parameter keeps working.
+    supports_live_log = True
+
+    def run_capture(
+        self,
+        code: str,
+        *,
+        tee_path: str | None = None,
+    ) -> tuple[str, int, str | None]:
         """Run Stata code and return (captured_stdout, rc, error_message).
 
         - rc == 0 on success.
         - rc > 0 is Stata's `_rc` (parsed from the SystemError message).
         - rc == -1 is an adapter-level crash (non-Stata exception).
         - error_message is None on success, non-None on failure.
+
+        ``tee_path`` names a file that receives the output as Stata produces
+        it, so another process can read the transcript of a run that is still
+        going, or of one that was killed before it could report.
         """
-        return self._run_redirected(code, quietly=False, echo=False)
+        return self._run_redirected(code, quietly=False, echo=False, tee_path=tee_path)
 
     def run_suppressed(
         self,
@@ -204,6 +254,7 @@ class PystataRuntime:
         *,
         quietly: bool,
         echo: bool,
+        tee_path: str | None = None,
     ) -> tuple[str, int, str | None]:
         """Run ``pystata.stata.run`` under the runtime's process-wide lock.
 
@@ -212,7 +263,7 @@ class PystataRuntime:
         prevents helper commands and user code from stealing each other's log
         capture in direct-runner and Jupyter-kernel use.
         """
-        buf = io.StringIO()
+        buf: io.StringIO = _TeeBuffer(tee_path) if tee_path else io.StringIO()
         with self._run_lock:
             try:
                 with redirect_stdout(buf):
@@ -223,7 +274,13 @@ class PystataRuntime:
                 self._drain_output_buffer(buf, wait_if_empty=False)
                 err_text = str(exc.args[0]) if exc.args else str(exc)
                 rc = _extract_rc(err_text)
-                return buf.getvalue(), rc, err_text.strip()
+                if isinstance(buf, _TeeBuffer):
+                    # The exception holds what pystata had not streamed yet.
+                    buf.tee_only(err_text)
+                # Trailing whitespace only: the text continues the streamed
+                # stdout mid-transcript, so its leading newline and indentation
+                # belong to the log.
+                return buf.getvalue(), rc, err_text.rstrip()
             except Exception as exc:  # noqa: BLE001
                 return buf.getvalue(), -1, f"{type(exc).__name__}: {exc}"
 

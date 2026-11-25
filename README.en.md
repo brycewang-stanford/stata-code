@@ -419,10 +419,10 @@ The MCP server registers 23 tools:
 | Tool | Purpose |
 | --- | --- |
 | `stata_run` | Execute Stata code and return a v1.0 RunResult JSON; `include_results` / `include_estimation` bound the payload, `timeout_ms` enforces a hard deadline, `run_in_background` returns a job id |
-| `stata_run_status` | Poll a background run's status and result; `wait_ms` blocks up to a bounded time |
+| `stata_run_status` | Poll a background run's status and result; `wait_ms` blocks up to a bounded time. A running job reports `log_tail` and `current_command`, so progress is visible |
 | `list_background_runs` | List background runs tracked by this server |
 | `stata_info` | Report Stata edition, version, and capabilities |
-| `get_log` | Fetch the full log behind a `log://` ref |
+| `get_log` | Fetch the log behind a `log://` ref, whole or by `start_line` / `max_lines` |
 | `search_log` | Search matching lines inside a stored `log://` payload |
 | `get_graph` | Fetch graph bytes behind a `graph://` ref (`ImageContent`) |
 | `get_matrix` | Fetch matrix payloads behind a `matrix://` ref |

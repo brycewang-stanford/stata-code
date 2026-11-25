@@ -61,11 +61,11 @@ Routing examples: "panel regression with clustered SEs" → `econometrics.md` (+
 | Tool | Use it when… |
 |---|---|
 | `stata_run(code, session_id?, …)` | The user wants Stata code executed. Default to `session_id="main"`. See §4.1 for the payload/timeout knobs. |
-| `stata_run_status(job_id, wait_ms?)` | Poll a run you submitted with `run_in_background: true`. `wait_ms` blocks up to 60 s — far cheaper than a tight poll loop. |
+| `stata_run_status(job_id, wait_ms?, log_lines_tail?)` | Poll a run you submitted with `run_in_background: true`. `wait_ms` blocks up to 60 s — far cheaper than a tight poll loop. While the job runs, the response carries `log_tail` and `current_command`: read them to tell a slow job from a stuck one. |
 | `list_background_runs()` | See which background runs are still going. Summaries only; fetch a result with `stata_run_status`. |
 | `stata_info()` | At session start (also picks live vs offline mode), or when capabilities / Stata edition matter. |
-| `get_log(ref)` | A prior `stata_run` returned `log.truncated: true` and you need the full log. |
-| `search_log(ref, pattern, is_regex?, ignore_case?, context?, max_matches?)` | You need only specific lines from a truncated `log://` ref — grep it instead of pulling the whole log back with `get_log`. |
+| `get_log(ref, start_line?, max_lines?)` | A prior `stata_run` returned `log.truncated: true` and you need the log. Pass `start_line` / `max_lines` to read part of it (`start_line: -40` is the last 40 lines). |
+| `search_log(ref, pattern, is_regex?, ignore_case?, context?, max_matches?)` | You need only specific lines from a truncated `log://` ref — grep it instead of pulling the whole log back with `get_log`. Set `is_regex` explicitly when it matters; omitted, a regex-shaped pattern that matches nothing literally is retried as a regex. |
 | `get_graph(ref, format?)` | The user wants graph bytes (export, display, embed). |
 | `get_matrix(ref)` | A matrix in `results.r.matrices` / `results.e.matrices` came back with `values: null`. By default *every* matrix is a stub, so this is the normal way to get raw `e(V)` / `e(b)` numbers. |
 | `inspect_data(varlist?, detail?, session_id?)` | "What's in this dataset?" Runs `describe` + `codebook`; returns the structured `dataset` block plus the codebook log. |

@@ -6,6 +6,85 @@ to semver-major.minor for the result schema (see `SCHEMA.md` §6).
 
 ## [Unreleased]
 
+## 0.19.0 — 2026-11-25
+
+This release comes from reading back 284 real tool calls made through
+the MCP server in October and November 2026, across seven projects. A failed
+run could return a log that stopped before the failing command; a run killed
+by its timeout returned no log at all; and a background job said nothing
+until it ended. `schema_version` stays `"1.0"`: no field of the run result
+changes shape. The new surface is advertised as the `live_log` and
+`log_window` capabilities.
+
+### Fixed
+
+- **A failure late in a block lost its own error from the log.** pystata
+  prints a block's output as it runs and puts only the part it has not printed
+  yet in the exception. The runner kept the first part alone, so `log.head`,
+  `log.tail` and `log.error_window` ended before the failing command, and
+  `error.commands_executed` counted from the wrong place. The two parts are
+  now joined. For `estimates store long` on line 5 of a block, the log now
+  ends with `long invalid name (reserved word)` / `r(7);` and the error
+  reports `line: 5`, `commands_executed: 4`.
+- **`do "code/step.do"` after `cd "project"` in the same block reported
+  `line: null`.** The script was looked up only in the directory the run
+  started in. It is now also looked up in every directory the transcript
+  shows a `cd` into and in Stata's directory after the run, so
+  `error.source_file` and `error.line` point into the script.
+- **`error.varname` / `error.path` could name the wrong thing.** They were
+  read from the first matching sentence in the transcript, which may belong
+  to an earlier `capture`d command. They are now read from the failing
+  command's own output first.
+- **Inline `input … end` inside a loop or program came back as "you pressed
+  Break".** Stata takes the `end` that closes the data as the end of the
+  block and stops with `--Break--`, `r(1)`; the result called it a retriable
+  internal interrupt with the message `9.   end`. It now says what happened,
+  marks the code as needing a change and suggests `set obs` with `generate`.
+  `lint_do` reports the same construct before it runs (`input-in-block`), and
+  no longer flags the `end` of an ordinary top-level `input` block as
+  `unexpected-end`.
+- **Output tracking switched itself off in an ordinary git checkout.** The
+  working-directory snapshot counted every file, `.git` and `node_modules`
+  included, and gave up past 5,000; 29 of the calls read back carried
+  `output_tracking_skipped` for that reason. The snapshot now records only
+  file types that can be reported as outputs and does not enter
+  version-control, dependency or cache directories. A 35 GB checkout that
+  was skipped is now scanned in half a second (1,084 candidate files).
+- **`r(7)` was `error.kind: "unknown"`.** It is now `invalid_name` when
+  Stata says so and `type_mismatch` for `'x' found where numeric variable
+  expected`. Nineteen more return codes are mapped to an existing kind
+  (network, file I/O, Stata limits), and `error.rc_label` is filled for 124
+  more codes, each read from Stata 18's own message.
+
+### Added
+
+- **A killed run keeps its transcript.** A run stopped by `timeout_ms` or by
+  `cancel_session` used to return an empty log. It now returns everything
+  Stata printed up to the kill (`log.complete: false`), and `error.command` /
+  `error.line` name the command that was running. The timeout error also
+  suggests a larger `timeout_ms` or `run_in_background`.
+- **`stata_run_status` shows progress.** While a background job is running,
+  the response carries `log_tail` (the last lines printed; `log_lines_tail`
+  sets how many, default 10), `log_lines_total` and `current_command`.
+- **`get_log(ref, start_line, max_lines)`.** Read part of a long log.
+  `start_line` is 1-based and a negative value counts from the end. Agents
+  had been guessing these arguments (`start_line`/`max_lines`,
+  `offset`/`limit`) and getting a validation error.
+- **`search_log` retries a regex-shaped pattern.** With `is_regex` omitted,
+  a pattern such as `Pre_avg|Tm[0-9]` that matches no line literally is
+  matched as a regular expression, and the response says so in `is_regex`
+  and `note`. An explicit `is_regex: false` is still literal.
+- **Hints for `invalid_name` and `timeout`** in `error.suggestions`.
+
+### Changed
+
+- **More than five "omitted because of collinearity" notes are folded into
+  one warning** that names the remaining terms. A specification with sixteen
+  dropped terms produced sixteen warnings; it now produces six.
+- `suggestions_for(ErrorKind.TIMEOUT)` and
+  `suggestions_for(ErrorKind.INVALID_NAME)` return one suggestion each
+  instead of an empty list.
+
 ## 0.18.0 — 2026-10-21
 
 `ok: true` used to mean only that Stata did not stop. A run can finish with an

@@ -134,17 +134,51 @@ def _check_program_blocks(lines: list[str]) -> list[LintFinding]:
     """
     findings: list[LintFinding] = []
     open_stack: list[tuple[int, str]] = []  # (line, keyword)
+    brace_depth = 0
+    in_input = False  # between `input …` and the `end` that closes its data
     for lineno, raw in enumerate(lines, start=1):
+        if in_input:
+            # Data lines are not commands; only a bare `end` means anything.
+            if raw.strip().lower() == "end":
+                in_input = False
+            continue
         if _STAR_COMMENT_RE.match(raw):
             continue
         stripped = _strip_comment(raw).strip()
         if not stripped:
             continue
+        cleaned = _strip_strings_and_macros(stripped)
+        depth_before = brace_depth
+        brace_depth = max(0, brace_depth + cleaned.count("{") - cleaned.count("}"))
         token = _command_token(stripped)
         if token is None:
             continue
         lowered = stripped.lower()
-        if token in ("program", "pr", "prog", "progr", "progra") and _opens_program(stripped):
+        if token in ("input", "inpu", "inp"):
+            in_input = True
+            enclosing = (
+                "loop or `if` block"
+                if depth_before > 0
+                else "program"
+                if any(keyword == "program" for _line, keyword in open_stack)
+                else None
+            )
+            if enclosing is not None:
+                findings.append(
+                    LintFinding(
+                        rule="input-in-block",
+                        severity="error",
+                        line=lineno,
+                        message=(
+                            f"Inline `input` data inside a {enclosing}: Stata reads "
+                            "the closing `end` as the end of the block and stops "
+                            "(--Break--, r(1), or `command end is unrecognized`). "
+                            "Build the data outside the block, or use `set obs` "
+                            "with `generate`."
+                        ),
+                    )
+                )
+        elif token in ("program", "pr", "prog", "progr", "progra") and _opens_program(stripped):
             open_stack.append((lineno, "program"))
         elif token == "mata" and _opens_bare_block(lowered, "mata"):
             open_stack.append((lineno, "mata"))

@@ -389,10 +389,10 @@ MCP server 注册了 23 个工具：
 | 工具 | 用途 |
 | --- | --- |
 | `stata_run` | 执行 Stata code，返回 v1.0 RunResult JSON；支持 `include_results` / `include_estimation` 控制返回体大小，`timeout_ms` 硬超时，`run_in_background` 后台执行 |
-| `stata_run_status` | 轮询后台运行（`run_in_background=true`）的状态与结果，可用 `wait_ms` 阻塞等待 |
+| `stata_run_status` | 轮询后台运行（`run_in_background=true`）的状态与结果，可用 `wait_ms` 阻塞等待；运行中会返回 `log_tail` 和 `current_command`，可以看到进度 |
 | `list_background_runs` | 列出本 server 追踪的后台运行 |
 | `stata_info` | 返回 Stata edition、version 和 capabilities |
-| `get_log` | 通过 `log://` ref 获取完整日志 |
+| `get_log` | 通过 `log://` ref 获取完整日志，或用 `start_line` / `max_lines` 只取其中一段 |
 | `search_log` | 在已存储的 `log://` payload 内搜索匹配行 |
 | `get_graph` | 通过 `graph://` ref 获取图形 bytes（`ImageContent`） |
 | `get_matrix` | 通过 `matrix://` ref 获取矩阵 `{rows, cols, values}` |

@@ -692,10 +692,10 @@ The schema implies a small set of follow-up calls. Frontends expose them under c
 
 | Tool / method | Purpose | Returns |
 | --- | --- | --- |
-| `get_log(ref)` | Fetch the full log behind a `log.ref`. **Mandatory** when any `run()` may emit `truncated: true`. | `{text: string, lines_total: int, bytes_total: int}` |
+| `get_log(ref, start_line?, max_lines?)` | Fetch the log behind a `log.ref`. **Mandatory** when any `run()` may emit `truncated: true`. Producers advertising `log_window` accept `start_line` (1-based; negative counts from the end) and `max_lines` and return only those lines. | `{text: string, lines_total: int, bytes_total: int}`, plus `{start_line: int, lines_returned: int, truncated: bool}` when a window was requested |
 | `get_graph(ref, format?)` | Fetch graph bytes (default returns the captured format; can request a re-render to png/svg/pdf). | `{format: string, bytes_b64: string, width: int, height: int}` |
 | `get_matrix(ref)` | Fetch a matrix's `values` when the producer omitted them inline. **Mandatory** when any `run()` may emit `matrices[*].ref != null`. | `{rows: [...], cols: [...], values: [[...]]}` |
-| `stata_run_status(job_id, wait_ms?)` | Poll a run submitted with `run_in_background: true`. **Mandatory** for producers that advertise `background_runs`. `wait_ms` blocks up to a bounded ceiling (60 s) so a caller need not busy-poll. | `{job_id, session_id, status: "running" \| "done" \| "error", submitted_at, finished_at, elapsed_ms, code_preview, result: Result \| null, error: string \| null}` |
+| `stata_run_status(job_id, wait_ms?)` | Poll a run submitted with `run_in_background: true`. **Mandatory** for producers that advertise `background_runs`. `wait_ms` blocks up to a bounded ceiling (60 s) so a caller need not busy-poll. Producers advertising `live_log` add the running job's transcript so far; `log_lines_tail` sets how many lines (default 10, 0 omits it). | `{job_id, session_id, status: "running" \| "done" \| "error", submitted_at, finished_at, elapsed_ms, code_preview, result: Result \| null, error: string \| null}`, plus `{log_tail: string, log_lines_total: int, current_command: string \| null}` while running |
 | `list_background_runs()` | Enumerate background runs the producer is tracking, newest first. Summaries only — no result payloads. | `{jobs: [{job_id, session_id, status, ...}, ...]}` |
 | `list_sessions()` | Enumerate live sessions. | `[{session_id, started_at, last_used_at, n_obs}, ...]` |
 | `reset_session(session_id?)` | Hard-reset a session (`clear all`). Invalidates all refs scoped to it. | `Result` with the cleared state. |
@@ -752,6 +752,8 @@ These are *additions* to `run()`. A minimal client only needs `run()` plus which
 | `output_tracking` | Producer populates `outputs` by diffing the working directory around a run. |
 | `log_hygiene` | Producer closes log handles a failed run leaked, so an aborted script cannot poison the session with r(604). |
 | `expectations` | Producer accepts `expect`, populates `checks`, and emits `suppressed_error` warnings. |
+| `live_log` | Producer keeps a run's transcript as it is produced: `stata_run_status` reports `log_tail` / `current_command` for a running job, and a run killed by its timeout or by a cancel returns the transcript up to the kill (`log.complete: false`) with `error.command` / `error.line` naming the command that was running. |
+| `log_window` | `get_log` accepts `start_line` / `max_lines`. |
 
 Consumers detect optional features via `capabilities`, not by parsing `schema_version`. Producers may add entries; agents MUST treat unknown capability names as opaque.
 

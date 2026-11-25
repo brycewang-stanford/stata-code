@@ -26,7 +26,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +35,7 @@ from typing import Any, ParamSpec, TypeVar
 from stata_code.core import _refs
 from stata_code.core._runtime import PystataNotAvailable, get_runtime
 from stata_code.core.errors import (
-    classify_rc,
+    classify_error,
     label_for_rc,
     recovery_for,
     suggestions_for,
@@ -75,12 +75,14 @@ from stata_code.core.schema import (
     Matrix,
     OriginInfo,
     OutputFile,
+    Recovery,
     ResultsInfo,
     RunResult,
     StataEdition,
     StataInfo,
     StataReturns,
     StataWarning,
+    Suggestion,
     VariableInfo,
     default_display_format,
 )
@@ -281,27 +283,58 @@ class RefNotFound(KeyError):
         return self._kind
 
 
-def get_log(ref: str) -> dict[str, Any]:
-    """Auxiliary tool: fetch the full log behind a `log.ref`.
+def get_log(
+    ref: str,
+    *,
+    start_line: int | None = None,
+    max_lines: int | None = None,
+) -> dict[str, Any]:
+    """Auxiliary tool: fetch the log behind a `log.ref`, whole or by lines.
 
     Per SCHEMA.md §5. Raises :class:`RefNotFound` (a ``KeyError`` subclass)
     when the ref is unknown.
+
+    With neither ``start_line`` nor ``max_lines`` the whole log is returned as
+    ``{text, lines_total, bytes_total}``. Otherwise ``text`` holds
+    ``max_lines`` lines starting at ``start_line`` (1-based; a negative value
+    counts from the end, so ``start_line=-40`` is the last 40 lines), and the
+    result also carries ``start_line``, ``lines_returned`` and ``truncated``
+    (whether lines remain after the slice). ``lines_total`` and
+    ``bytes_total`` always describe the whole log.
     """
     payload = _refs.get(ref)
     if payload is None:
         raise RefNotFound(ref, kind="unknown_log_ref")
-    return {
+    out = {
         "text": payload["text"],
         "lines_total": payload["lines_total"],
         "bytes_total": payload["bytes_total"],
     }
+    if start_line is None and max_lines is None:
+        return out
+    if start_line == 0:
+        raise ValueError("start_line is 1-based; use 1 for the first line or -N for the last N")
+    if max_lines is not None and max_lines < 1:
+        raise ValueError("max_lines must be ≥ 1")
+    lines = payload["text"].split("\n")
+    total = len(lines)
+    first = 1 if start_line is None else start_line
+    if first < 0:
+        first = max(1, total + first + 1)
+    begin = min(first - 1, total)
+    end = total if max_lines is None else min(total, begin + max_lines)
+    out["text"] = "\n".join(lines[begin:end])
+    out["start_line"] = begin + 1
+    out["lines_returned"] = end - begin
+    out["truncated"] = end < total
+    return out
 
 
 def search_log(
     ref: str,
     pattern: str,
     *,
-    is_regex: bool = False,
+    is_regex: bool | None = False,
     ignore_case: bool = True,
     context: int = 0,
     max_matches: int = 50,
@@ -319,9 +352,14 @@ def search_log(
     pattern : str
         Substring (default) or regular expression (``is_regex=True``) to
         match against each line.
-    is_regex : bool
+    is_regex : bool or None
         Treat ``pattern`` as a Python regular expression. A malformed
         regex raises :class:`ValueError` (surfaced as ``invalid_request``).
+        ``None`` means "not stated": the pattern is tried as a substring
+        first and, if that finds nothing and the pattern is a valid regular
+        expression containing regex syntax, as a regular expression. The
+        result's ``is_regex`` says which one matched, and ``note`` records
+        the fallback.
     ignore_case : bool
         Case-insensitive matching (default ``True``).
     context : int
@@ -352,50 +390,76 @@ def search_log(
     max_matches = max(1, min(int(max_matches), 1000))
 
     flags = re.IGNORECASE if ignore_case else 0
-    if is_regex:
-        try:
-            matcher = re.compile(pattern, flags)
-        except re.error as exc:
-            raise ValueError(f"invalid regex: {exc}") from exc
-
-        def _hit(line: str) -> bool:
-            return matcher.search(line) is not None
-    else:
-        needle = pattern.lower() if ignore_case else pattern
-
-        def _hit(line: str) -> bool:
-            hay = line.lower() if ignore_case else line
-            return needle in hay
-
     text: str = payload["text"]
     lines = text.split("\n")
-    matches: list[dict[str, Any]] = []
-    truncated = False
-    for idx, line in enumerate(lines):
-        if not _hit(line):
-            continue
-        if len(matches) >= max_matches:
-            truncated = True
-            break
-        entry: dict[str, Any] = {"line_no": idx + 1, "text": line}
-        if context:
-            before = lines[max(0, idx - context) : idx]
-            after = lines[idx + 1 : idx + 1 + context]
-            if before:
-                entry["before"] = before
-            if after:
-                entry["after"] = after
-        matches.append(entry)
 
-    return {
+    def _scan(as_regex: bool) -> tuple[list[dict[str, Any]], bool]:
+        if as_regex:
+            try:
+                matcher = re.compile(pattern, flags)
+            except re.error as exc:
+                raise ValueError(f"invalid regex: {exc}") from exc
+
+            def _hit(line: str) -> bool:
+                return matcher.search(line) is not None
+        else:
+            needle = pattern.lower() if ignore_case else pattern
+
+            def _hit(line: str) -> bool:
+                hay = line.lower() if ignore_case else line
+                return needle in hay
+
+        found: list[dict[str, Any]] = []
+        for idx, line in enumerate(lines):
+            if not _hit(line):
+                continue
+            if len(found) >= max_matches:
+                return found, True
+            entry: dict[str, Any] = {"line_no": idx + 1, "text": line}
+            if context:
+                before = lines[max(0, idx - context) : idx]
+                after = lines[idx + 1 : idx + 1 + context]
+                if before:
+                    entry["before"] = before
+                if after:
+                    entry["after"] = after
+            found.append(entry)
+        return found, False
+
+    note: str | None = None
+    used_regex = bool(is_regex)
+    matches, truncated = _scan(used_regex)
+    if is_regex is None and not matches and _REGEX_SYNTAX_RE.search(pattern):
+        # `Tm[0-9]|Tp[0-3]` sent without is_regex finds nothing as a
+        # substring, and "0 matches" then reads as "not in the log".
+        try:
+            regex_matches, regex_truncated = _scan(True)
+        except ValueError:
+            regex_matches, regex_truncated = [], False
+        if regex_matches:
+            matches, truncated, used_regex = regex_matches, regex_truncated, True
+            note = (
+                "No line contains the pattern as literal text, so it was "
+                "matched as a regular expression. Pass is_regex explicitly to "
+                "choose."
+            )
+
+    result: dict[str, Any] = {
         "ref": ref,
         "pattern": pattern,
-        "is_regex": is_regex,
+        "is_regex": used_regex,
         "lines_total": payload["lines_total"],
         "match_count": len(matches),
         "truncated": truncated,
         "matches": matches,
     }
+    if note is not None:
+        result["note"] = note
+    return result
+
+
+# Characters that only mean something in a regular expression.
+_REGEX_SYNTAX_RE = re.compile(r"[\\^$|?*+()\[\]{}]")
 
 
 def cancel(session_id: str = "main") -> bool:
@@ -817,6 +881,7 @@ def _parse_failure_transcript(
     user_code: str,
     *,
     working_dir: Path | None = None,
+    extra_dirs: Sequence[Path] = (),
 ) -> dict[str, Any]:
     """Pinpoint the failing command in multi-line user code.
 
@@ -876,10 +941,15 @@ def _parse_failure_transcript(
     # there are any, the failure happened inside one of them, so they are
     # searched before the submitted code: `use data.dta` may appear both in
     # the cell and in the script, and only the script's copy failed.
+    #
+    # Relative script paths resolve against whichever directory Stata was in
+    # when it ran them: the run's working directory, any directory the
+    # transcript shows a `cd` into, and the directory Stata ended up in.
+    search_dirs = _script_search_dirs(error_text, working_dir, extra_dirs)
     active = [
         path
         for path in (
-            _resolve_do_target(target, working_dir)
+            _resolve_do_target(target, search_dirs)
             for target in reversed(_active_do_stack(error_text))
         )
         if path is not None
@@ -911,7 +981,7 @@ def _parse_failure_transcript(
     # submitted code invoked (`do "analysis.do"`), possibly several `do` calls
     # deep. This is the common shape for agent workflows, and it used to yield
     # `line: null` with empty context.
-    for candidate in _do_file_candidates(user_code, working_dir):
+    for candidate in _do_file_candidates(user_code, search_dirs):
         if candidate not in active and _locate_in_script(candidate):
             return out
 
@@ -1033,23 +1103,85 @@ _DO_INVOCATION_RE = re.compile(
 _MAX_DO_DEPTH = 8
 
 
-def _resolve_do_target(target: str, working_dir: Path | None) -> Path | None:
+# `cd "dir"` / `cd dir` as Stata echoes it, optionally behind quietly/capture.
+_CD_INVOCATION_RE = re.compile(
+    r"""^\s*
+        (?:(?:qui(?:etly)?|cap(?:ture)?|noi(?:sily)?)\s+)*
+        (?:cd|chdir)\s+
+        (?:"(?P<quoted>[^"]+)"|(?P<bare>\S.*?))\s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _script_search_dirs(
+    error_text: str,
+    working_dir: Path | None,
+    extra_dirs: Sequence[Path] = (),
+) -> list[Path]:
+    """Directories a relative `do` target may have been resolved against.
+
+    In order: the run's working directory, each directory the transcript
+    shows a `cd` into (a relative `cd` is taken from the directory before
+    it), then ``extra_dirs``.
+    """
+    dirs: list[Path] = []
+
+    def _add(path: Path) -> None:
+        if path not in dirs:
+            dirs.append(path)
+
+    current = working_dir or Path.cwd()
+    _add(current)
+    _heads, commands = _transcript_command_echoes(error_text)
+    for command in commands:
+        m = _CD_INVOCATION_RE.match(command)
+        if m is None:
+            continue
+        target = Path(m.group("quoted") or m.group("bare")).expanduser()
+        current = target if target.is_absolute() else current / target
+        _add(current)
+    for extra in extra_dirs:
+        _add(extra)
+    return dirs
+
+
+def _resolve_do_target(
+    target: str,
+    working_dir: Path | Sequence[Path] | None,
+) -> Path | None:
     """Resolve a `do`/`run` target the way Stata does, or None if absent.
 
     Relative paths resolve against the run's working directory — the same
-    directory Stata itself resolved them against. Stata appends a default
-    `.do` extension, so a bare `do analysis` is checked as `analysis.do` too.
+    directory Stata itself resolved them against — or, when several
+    directories are given, the first one that holds the file. Stata appends a
+    default `.do` extension, so a bare `do analysis` is checked as
+    `analysis.do` too.
     """
+    if working_dir is None:
+        bases = [Path.cwd()]
+    elif isinstance(working_dir, Path):
+        bases = [working_dir]
+    else:
+        bases = list(working_dir) or [Path.cwd()]
     base = Path(target).expanduser()
     variants = [base] if base.suffix else [base, base.with_suffix(".do")]
     for variant in variants:
-        path = variant if variant.is_absolute() else ((working_dir or Path.cwd()) / variant)
-        if path.is_file():
-            return path
+        if variant.is_absolute():
+            if variant.is_file():
+                return variant
+            continue
+        for directory in bases:
+            path = directory / variant
+            if path.is_file():
+                return path
     return None
 
 
-def _do_file_candidates(user_code: str, working_dir: Path | None) -> list[Path]:
+def _do_file_candidates(
+    user_code: str,
+    working_dir: Path | Sequence[Path] | None,
+) -> list[Path]:
     """Resolve every `do`/`run` script the submitted code invokes, transitively.
 
     A master script that calls `do 01_clean.do` and `do 02_estimate.do` is the
@@ -1083,6 +1215,40 @@ def _do_file_candidates(user_code: str, working_dir: Path | None) -> list[Path]:
     return out
 
 
+def _merge_transcript(stdout_text: str, err_text: str | None) -> str | None:
+    """Join pystata's streamed stdout with the transcript in its exception.
+
+    Returns ``None`` when there is no exception text (a successful run). The
+    exception normally continues exactly where stdout stopped, so the two are
+    concatenated; the containment checks cover a runtime that reports the same
+    text through both channels.
+    """
+    if err_text is None:
+        return None
+    if not stdout_text.strip():
+        return err_text
+    err_core = err_text.strip()
+    if not err_core or err_core in stdout_text:
+        return stdout_text
+    if err_core.startswith(stdout_text.strip()):
+        return err_text
+    return stdout_text + err_text
+
+
+def _failure_tail(error_text: str) -> str:
+    """The transcript from the failing command's echo onward.
+
+    Typed fields (the missing variable, the missing file) must come from the
+    command that stopped the run. An earlier `capture`d command can print the
+    same kind of sentence about a different name.
+    """
+    lines = error_text.split("\n")
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].startswith(". ") and lines[i][2:].strip():
+            return "\n".join(lines[i:])
+    return error_text
+
+
 def _build_error(
     rc: int,
     error_message: str,
@@ -1090,13 +1256,16 @@ def _build_error(
     available_varnames: list[str] | None,
     *,
     working_dir: Path | None = None,
+    extra_dirs: Sequence[Path] = (),
 ) -> ErrorInfo:
-    kind = classify_rc(rc)
     short_msg = _last_error_line(error_message) if error_message else ""
-    # Classification reads the raw transcript, but the typed-field regexes
-    # should see the diagnosis sentence we just isolated as well, so a message
-    # buried above Stata's `end of do-file` boilerplate still yields a varname.
-    typed = _extract_typed_fields(kind, error_message)
+    kind = classify_error(rc, short_msg)
+    # Read the failing command's own output first; fall back to the whole
+    # transcript for a field it does not name.
+    typed = _extract_typed_fields(kind, _failure_tail(error_message))
+    if any(value is None for value in typed.values()):
+        whole = _extract_typed_fields(kind, error_message)
+        typed = {key: value if value is not None else whole[key] for key, value in typed.items()}
     suggs = suggestions_for(
         kind,
         rc=rc,
@@ -1106,7 +1275,34 @@ def _build_error(
         path=typed["path"],
         available_varnames=available_varnames,
     )
-    pinpoint = _parse_failure_transcript(error_message, user_code, working_dir=working_dir)
+    pinpoint = _parse_failure_transcript(
+        error_message, user_code, working_dir=working_dir, extra_dirs=extra_dirs
+    )
+    recovery = recovery_for(kind)
+    if rc == 1 and _INPUT_IN_BLOCK_RE.search(error_message):
+        # Not a keypress. Inside a loop or program body Stata takes the `end`
+        # that closes inline `input` data as the end of the block and stops
+        # with --Break--, leaving a last line like "9.   end" as the message.
+        short_msg = (
+            "inline `input` data cannot be read inside a loop or program; "
+            "Stata stopped with --Break-- at the `end` that closes it"
+        )
+        suggs = [
+            Suggestion(
+                action=(
+                    "Move the `input … end` block out of the loop or program "
+                    "(build the dataset once and `preserve`/`restore`, or "
+                    "`save` it to a tempfile and `use` it inside the loop), or "
+                    "create the rows with `set obs` and `generate`/`replace`."
+                ),
+            )
+        ]
+        recovery = Recovery(
+            category="user_code",
+            retriable=False,
+            needs_code_change=True,
+            needs_user_input=False,
+        )
     return ErrorInfo(
         kind=kind,
         rc=rc,
@@ -1125,8 +1321,13 @@ def _build_error(
         varname=typed["varname"],
         name=typed["name"],
         suggestions=suggs,
-        recovery=recovery_for(kind),
+        recovery=recovery,
     )
+
+
+# A loop/program body line `  4.   input byte x y` (any abbreviation of
+# `input`), as Stata echoes it while reading the block.
+_INPUT_IN_BLOCK_RE = re.compile(r"^\s*\d+\.\s+inp(?:u|ut)?\s", re.MULTILINE)
 
 
 # Structural lines Stata prints around a failure that carry no diagnosis.
@@ -1350,6 +1551,7 @@ def execute(
     use_origin_workdir: bool = True,
     working_dir: str | None = None,
     expect: dict[str, Any] | None = None,
+    live_log_path: str | None = None,
 ) -> RunResult:
     """Execute Stata code and return a v1.0 RunResult.
 
@@ -1383,6 +1585,10 @@ def execute(
     only when Stata itself succeeded; any failure turns the result into
     ``ok=False``, ``rc=-6``, ``error.kind="expectation_failed"``, and every
     graded check is listed under ``result.checks``.
+
+    Live log. ``live_log_path`` names a file that receives the transcript as
+    Stata produces it. The subprocess pool uses it to report the progress of a
+    run that is still going and to keep the transcript of one it had to kill.
     """
     if include_graphs not in ("ref", "inline", "none"):
         raise ValueError(
@@ -1483,7 +1689,10 @@ def execute(
         _graph_source_hints(code) if include_graphs != "none" else ({}, [])
     )
 
-    stdout_text, rc, err_msg = rt.run_capture(code)
+    if live_log_path and getattr(rt, "supports_live_log", False):
+        stdout_text, rc, err_msg = rt.run_capture(code, tee_path=live_log_path)
+    else:
+        stdout_text, rc, err_msg = rt.run_capture(code)
 
     elapsed_total_ms = max(1, int((time.monotonic() - started) * 1000))
     # The in-process runner has no IPC overhead to subtract. We still report
@@ -1496,7 +1705,19 @@ def execute(
     # with no log at all — no `log.head`, no `log://` ref, nothing for
     # `search_log` to search, exactly when the agent needs the transcript most.
     # Adopt the transcript as the log text when stdout has nothing.
-    log_text = stdout_text if stdout_text.strip() or not err_msg else err_msg
+    #
+    # The two are complementary, not alternatives. pystata streams output to
+    # stdout while a block runs and puts only what it had not yet streamed in
+    # the exception, so a failure late in a block arrives as "everything up to
+    # the last flush" on stdout plus "the failing command and Stata's message"
+    # in the exception. Keeping stdout alone cut the log off before the
+    # failing command; parsing the exception alone lost every command (and
+    # every `do` call) that ran before the last flush.
+    transcript = _merge_transcript(stdout_text, err_msg) if rc != -1 else None
+    if transcript is not None:
+        log_text = transcript
+    else:
+        log_text = stdout_text if stdout_text.strip() or not err_msg else err_msg
 
     log = _split_log(
         log_text,
@@ -1525,10 +1746,14 @@ def execute(
     if err_msg is not None:
         error = _build_error(
             rc,
-            err_msg,
+            transcript if transcript is not None else err_msg,
             code,
             available_varnames,
             working_dir=effective_dir,
+            # Where Stata is now. A block that starts with `cd "project"` and
+            # then runs `do "code/step.do"` resolves that path against the new
+            # directory, not the one the run started in.
+            extra_dirs=[d for d in (_current_stata_dir(rt),) if d is not None],
         )
         # Build an error_window: prefer log tail; fall back to the error message
         # itself when the log is empty (pystata can raise before any stdout
@@ -2096,6 +2321,46 @@ def _extract_warnings(log: str) -> list:  # list[StataWarning]
         seen.add(key)
         out.append(StataWarning(kind="note", message=msg))
 
+    return _collapse_collinear(out)
+
+
+# A fixed-effects or event-study specification can drop dozens of terms, each
+# with its own "omitted because of collinearity" note. Past this many, the
+# rest are folded into one warning that still names them.
+_MAX_COLLINEAR_WARNINGS = 5
+_MAX_COLLINEAR_NAMES = 40
+
+
+def _collapse_collinear(warnings: list) -> list:  # list[StataWarning]
+    from stata_code.core.schema import StataWarning
+
+    collinear = [w for w in warnings if w.kind == "omitted_collinear"]
+    if len(collinear) <= _MAX_COLLINEAR_WARNINGS:
+        return warnings
+    extra = collinear[_MAX_COLLINEAR_WARNINGS:]
+    dropped = {id(w) for w in extra}
+    names: list[str] = []
+    for w in extra:
+        m = _WARNING_PATTERNS[0][1].search(w.message)
+        names.append(m.group(1) if m else w.message)
+    shown = ", ".join(names[:_MAX_COLLINEAR_NAMES])
+    if len(names) > _MAX_COLLINEAR_NAMES:
+        shown += f", … ({len(names) - _MAX_COLLINEAR_NAMES} not listed)"
+    out: list = []
+    for w in warnings:
+        if id(w) in dropped:
+            continue
+        out.append(w)
+        if w is collinear[_MAX_COLLINEAR_WARNINGS - 1]:
+            out.append(
+                StataWarning(
+                    kind="omitted_collinear",
+                    message=(
+                        f"note: {len(names)} more terms omitted because of "
+                        f"collinearity: {shown}"
+                    ),
+                )
+            )
     return out
 
 

@@ -8,6 +8,7 @@ time as we encounter real-world failures.
 from __future__ import annotations
 
 import difflib
+import re
 
 from stata_code.core.schema import ErrorKind, Recovery, Suggestion
 
@@ -33,6 +34,16 @@ RC_TO_KIND: dict[int, ErrorKind] = {
     631: ErrorKind.NETWORK,  # host not found
     672: ErrorKind.NETWORK,  # server refused to send file
     677: ErrorKind.NETWORK,  # remote connection failed
+    639: ErrorKind.NETWORK,  # file transmission error (checksums do not match)
+    660: ErrorKind.NETWORK,  # proxy host not found
+    662: ErrorKind.NETWORK,  # proxy server refused request to send
+    663: ErrorKind.NETWORK,  # remote connection to proxy failed
+    669: ErrorKind.NETWORK,  # invalid URL
+    673: ErrorKind.NETWORK,  # authorization required by server
+    674: ErrorKind.NETWORK,  # unexpected response from server
+    675: ErrorKind.NETWORK,  # server reported server error
+    676: ErrorKind.NETWORK,  # server refused request to send
+    678: ErrorKind.NETWORK,  # could not open local network socket
     # Data state
     4: ErrorKind.DATA_IN_MEMORY,  # no; dataset in memory has changed since saved
     # Sorting. The canonical "not sorted" return code is r(5); the previous
@@ -60,11 +71,13 @@ RC_TO_KIND: dict[int, ErrorKind] = {
     197: ErrorKind.SYNTAX,  # invalid syntax (from `syntax`)
     198: ErrorKind.SYNTAX,  # invalid syntax
     # Command resolution
+    133: ErrorKind.SYNTAX,  # invalid syntax (unknown function)
     199: ErrorKind.COMMAND_NOT_FOUND,  # unrecognized command
     # Varname / name
     111: ErrorKind.VARNAME_NOT_FOUND,  # variable not found
     110: ErrorKind.NAME_CONFLICT,  # already defined
     # Types
+    106: ErrorKind.TYPE_MISMATCH,  # type mismatch (merge/append key types differ)
     109: ErrorKind.TYPE_MISMATCH,  # type mismatch
     408: ErrorKind.TYPE_MISMATCH,  # (not in public manual table; kept from prior art)
     # Estimation / convergence
@@ -110,10 +123,17 @@ RC_TO_KIND: dict[int, ErrorKind] = {
     691: ErrorKind.FILE_IO,  # I/O error (local filesystem; was mis-mapped to NETWORK)
     692: ErrorKind.FILE_IO,  # file I/O error on read (was mis-mapped to NETWORK)
     693: ErrorKind.FILE_IO,  # file I/O error on write (was mis-mapped to NETWORK)
+    694: ErrorKind.FILE_IO,  # could not rename file
+    695: ErrorKind.FILE_IO,  # could not copy file
+    699: ErrorKind.FILE_IO,  # insufficient disk space
     # Permission
     608: ErrorKind.PERMISSION,  # file is read-only; cannot be modified or erased
     # Memory / Stata limits
+    900: ErrorKind.STATA_LIMIT,  # no room to add more variables
     901: ErrorKind.STATA_LIMIT,  # no room to add more observations
+    908: ErrorKind.STATA_LIMIT,  # matsize too small
+    913: ErrorKind.OUT_OF_MEMORY,  # op. sys. refuses to provide sufficient memory
+    920: ErrorKind.STATA_LIMIT,  # macro substitution results in line that is too long
     902: ErrorKind.STATA_LIMIT,  # no room to add more variables because of width
     903: ErrorKind.STATA_LIMIT,  # no room to promote variable because of width
     907: ErrorKind.STATA_LIMIT,  # maxvar too small
@@ -137,6 +157,30 @@ def classify_rc(rc: int) -> ErrorKind:
     if rc in SYNTHETIC_RC_TO_KIND:
         return SYNTHETIC_RC_TO_KIND[rc]
     return RC_TO_KIND.get(rc, ErrorKind.UNKNOWN)
+
+
+# r(7) is shared by two unrelated failures, told apart only by the message:
+# a name Stata will not accept (`estimates store long`: "long invalid name"),
+# and a value of the wrong type ("'abc' found where numeric variable expected").
+_INVALID_NAME_MESSAGE_RE = re.compile(r"\binvalid name\b", re.IGNORECASE)
+_FOUND_WHERE_MESSAGE_RE = re.compile(r"\bfound where\b.*\bexpected\b", re.IGNORECASE)
+
+
+def classify_error(rc: int, message: str | None = None) -> ErrorKind:
+    """Classify a failure by return code, refined by Stata's own message.
+
+    ``classify_rc`` alone leaves a code ``unknown`` when it covers failures of
+    different kinds. Where Stata's message settles which one happened, use it.
+    """
+    kind = classify_rc(rc)
+    if not message:
+        return kind
+    if rc == 7:
+        if _INVALID_NAME_MESSAGE_RE.search(message):
+            return ErrorKind.INVALID_NAME
+        if _FOUND_WHERE_MESSAGE_RE.search(message):
+            return ErrorKind.TYPE_MISMATCH
+    return kind
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +252,133 @@ RC_LABEL: dict[int, str] = {
     1400: "numerical overflow",
     2000: "no observations",
     2001: "insufficient observations",
+    # The codes below were read from Stata 18 itself (`capture noisily error
+    # <rc>`), first line of each message.
+    3: "no dataset in use",
+    18: "you must start with an empty dataset",
+    104: "nothing to input",
+    106: "type mismatch",
+    107: "not possible with numeric variable",
+    108: "not possible with string variable",
+    119: "statement out of context",
+    120: "invalid %format",
+    131: "not possible with test",
+    133: "invalid syntax",
+    134: "too many values",
+    135: "not possible with weighted data",
+    140: "repeated categorical variable in term",
+    141: "repeated term",
+    142: "attempt to classify extraneous variable",
+    143: "variable left unclassified",
+    144: "variable classified inconsistently",
+    145: "term contains more than 8 variables",
+    146: "too many variables or values (matsize too small)",
+    147: "term not in model",
+    148: "too few categories",
+    149: "too many categories",
+    151: "non r-class program may not set r()",
+    152: "non e-class program may not set e()",
+    153: "non s-class program may not set s()",
+    161: "ado-file has commands outside of program define ... end",
+    162: "ado-file does not define command",
+    170: "unable to chdir",
+    171: "internal FV error: FV information not complete",
+    172: "internal FV error: FV terms not parsed",
+    173: "internal FV error: out of range for FV terms",
+    174: "internal FV error: out of range for FV ivars",
+    175: "factor level out of range",
+    176: "internal MS error: generic",
+    180: "invalid attempt to modify label",
+    181: "may not label strings",
+    182: "not labeled",
+    184: "may not be combined",
+    190: "request may not be combined with by",
+    191: "request may not be combined with by() option",
+    196: "could not restore sort order because variables were dropped",
+    302: "last test not found",
+    303: "equation not found",
+    304: "ml model not found",
+    305: "ml model not found",
+    310: "not possible because object(s) in use",
+    321: "requested action not valid after most recent estimation command",
+    401: "may not use noninteger frequency weights",
+    402: "negative weights encountered",
+    403: "may not specify norobust with pweights",
+    404: "not possible with pweighted data",
+    406: "not possible with analytic weights",
+    407: "weights must be the same for all observations in a group",
+    411: "nonpositive values encountered",
+    412: "redundant or inconsistent constraints",
+    421: "could not determine between-subject error term; use bse() option",
+    422: "could not determine between-subject basic unit; use bseunit() option",
+    450: "0/1 variable required",
+    451: "invalid values for time variable",
+    452: "invalid values for factor variable",
+    459: "something that should be true of your data is not",
+    460: "fpc must be >= 0",
+    461: "fpc for all observations within a stratum must be the same",
+    462: "fpc must be <= 1 if a rate, or >= no. sampled units per stratum if unit totals",
+    463: "sum of weights equals zero",
+    464: "poststratum weights must be constant within poststrata",
+    465: "poststratum weights must be >= 0",
+    466: "standardization weights must be constant within standard strata",
+    467: "standardization weights must be >= 0",
+    471: "esample() invalid",
+    481: "equation/system not identified",
+    501: "matrix operation not found",
+    505: "matrix not symmetric",
+    509: "matrix operators that return matrices not allowed in this context",
+    607: "no cmdlog file open",
+    609: "file xp format",
+    611: "record too long",
+    612: "unexpected end of file",
+    613: "file does not contain dictionary",
+    614: "dictionary invalid",
+    615: "cannot determine separator -- use tab or comma option",
+    616: "wrong number of values in checksum file",
+    621: "already preserved",
+    622: "nothing to restore",
+    632: "web filename not supported in this context",
+    633: "may not write files over Internet",
+    639: "file transmission error (checksums do not match)",
+    640: "package file too long",
+    641: "package file invalid",
+    651: "may not seek past end of file",
+    660: "proxy host not found",
+    662: "proxy server refused request to send",
+    663: "remote connection to proxy failed",
+    665: "could not set socket nonblocking",
+    667: "wrong version winsock.dll",
+    668: "could not find a valid winsock.dll",
+    669: "invalid URL",
+    670: "invalid network port number",
+    671: "unknown network protocol",
+    673: "authorization required by server",
+    674: "unexpected response from server",
+    675: "server reported server error",
+    676: "server refused request to send",
+    678: "could not open local network socket",
+    681: "too many open files",
+    682: "could not connect to odbc dsn",
+    683: "could not fetch variable in odbc table",
+    694: "could not rename file",
+    695: "could not copy file",
+    699: "insufficient disk space",
+    702: "op. sys. refused to start new process",
+    703: "op. sys. refused to open pipe",
+    791: "system administrator will not allow you to change this setting",
+    900: "no room to add more variables",
+    908: "matsize too small",
+    910: "value too small",
+    912: "value too large",
+    913: "op. sys. refuses to provide sufficient memory",
+    914: "op. sys. refused to allow Stata to open temporary file.",
+    915: "unable to allocate matrix",
+    916: "unable to allocate matrix",
+    920: "macro substitution results in line that is too long",
+    # `error 7` and `error 9` print nothing; these two are the manual's wording.
+    7: "'…' found where … expected",
+    9: "assertion is false",
 }
 
 # Synthetic codes carry their own labels (the producer, not Stata, sets these).
@@ -694,6 +865,33 @@ def suggestions_for(
 
     elif kind == ErrorKind.LOG_STATE:
         out.extend(_log_state_suggestions(rc))
+
+    elif kind == ErrorKind.INVALID_NAME:
+        out.append(
+            Suggestion(
+                action=(
+                    "Stata rejected a name. Names are 1-32 characters, start "
+                    "with a letter or underscore, and cannot be a reserved "
+                    "word (byte, int, long, float, double, str#, strL, if, in, "
+                    "using, with, _all, _n, _N, _b, _se, _pi, _rc, _cons, …). "
+                    "Pick a different name."
+                ),
+            )
+        )
+
+    elif kind == ErrorKind.TIMEOUT:
+        out.append(
+            Suggestion(
+                action=(
+                    "The run was killed at its timeout and the session's data "
+                    "in memory was lost. Re-run with a larger `timeout_ms` (or "
+                    "null), or submit it with `run_in_background=true` and "
+                    "follow it with `stata_run_status`, which shows the log as "
+                    "it grows. For a job in many steps, `save` intermediate "
+                    "results so a later timeout does not cost the whole run."
+                ),
+            )
+        )
 
     elif kind == ErrorKind.SESSION_BUSY:
         out.append(

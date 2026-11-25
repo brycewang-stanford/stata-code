@@ -27,7 +27,12 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
-from stata_code.core._pool import pool_execute
+from stata_code.core._pool import (
+    new_live_log_path,
+    pool_execute,
+    read_live_log,
+    remove_live_log,
+)
 from stata_code.core.schema import RunResult
 
 # How many finished jobs to keep for status queries before evicting the oldest.
@@ -58,6 +63,7 @@ class Job:
         "status",
         "result",
         "error",
+        "live_log_path",
         "_done",
         "_started",
         "_elapsed_ms",
@@ -72,6 +78,10 @@ class Job:
         self.status: str = "running"
         self.result: RunResult | None = None
         self.error: str | None = None
+        # Where the run's transcript accumulates while it is going. Cleared
+        # (and the file removed) once the job reaches a terminal state: from
+        # then on the log is in `result`.
+        self.live_log_path: str | None = None
         self._done = threading.Event()
         self._started = time.monotonic()
         self._elapsed_ms: int | None = None
@@ -95,6 +105,31 @@ class Job:
         if self._elapsed_ms is not None:
             return self._elapsed_ms
         return max(0, int((time.monotonic() - self._started) * 1000))
+
+    def progress(self, max_lines: int = 10) -> dict[str, Any] | None:
+        """The end of a running job's transcript, or None when there is none.
+
+        ``{"log_tail": str, "log_lines_total": int, "current_command": str |
+        None}``. ``current_command`` is the last command Stata echoed, which
+        is the one still running.
+        """
+        path = self.live_log_path
+        if path is None or self.done:
+            return None
+        text = read_live_log(path)
+        if not text.strip():
+            return None
+        lines = text.replace("\r\n", "\n").rstrip("\n").split("\n")
+        current: str | None = None
+        for line in reversed(lines):
+            if line.startswith(". ") and line[2:].strip():
+                current = line[2:].strip()
+                break
+        return {
+            "log_tail": "\n".join(lines[-max_lines:]) if max_lines > 0 else "",
+            "log_lines_total": len(lines),
+            "current_command": current,
+        }
 
     def summary(self) -> dict[str, Any]:
         """Status without the (potentially large) result payload."""
@@ -122,6 +157,7 @@ class JobRegistry:
     def submit(self, code: str, *, session_id: str = "main", **options: Any) -> Job:
         """Start `code` on a worker thread and return its :class:`Job` at once."""
         job = Job(uuid.uuid4().hex, session_id, code)
+        job.live_log_path = new_live_log_path()
         with self._lock:
             self._jobs[job.job_id] = job
             self._evict_locked()
@@ -139,7 +175,9 @@ class JobRegistry:
         error: str | None = None
         status = "done"
         try:
-            result = pool_execute(code, session_id=session_id, **options)
+            result = pool_execute(
+                code, session_id=session_id, live_log_path=job.live_log_path, **options
+            )
         except BaseException as exc:  # noqa: BLE001 - a job thread must never die silently
             # Includes ValueError for a bad option set. Recorded on the job so
             # the polling caller sees the failure instead of a job that stays
@@ -159,6 +197,8 @@ class JobRegistry:
             job.finished_at = _utc_iso_ms()
             job.status = status
             job._done.set()  # noqa: SLF001 - same-module private handshake
+            live_path, job.live_log_path = job.live_log_path, None
+            remove_live_log(live_path)
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:

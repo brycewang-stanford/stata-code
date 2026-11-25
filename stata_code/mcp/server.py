@@ -109,7 +109,7 @@ from stata_code.core.runner import (
 )
 from stata_code.core.schema import RunResult
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 SERVER_INSTRUCTIONS = (
     "Use stata-code for running and inspecting Stata code. Prefer structuredContent "
@@ -171,6 +171,10 @@ _RUN_STATUS_OUTPUT_SCHEMA = _object_schema(
         **_JOB_SUMMARY_PROPERTIES,
         "result": {"type": ["object", "null"]},
         "error": {"type": ["string", "null"]},
+        # While the job is running: the end of its transcript so far.
+        "log_tail": {"type": "string"},
+        "log_lines_total": {"type": "integer"},
+        "current_command": {"type": ["string", "null"]},
     },
     ["job_id", "status"],
 )
@@ -190,6 +194,10 @@ _LOG_OUTPUT_SCHEMA = _object_schema(
         "text": {"type": "string"},
         "lines_total": {"type": "integer"},
         "bytes_total": {"type": "integer"},
+        # Present when start_line / max_lines selected part of the log.
+        "start_line": {"type": "integer"},
+        "lines_returned": {"type": "integer"},
+        "truncated": {"type": "boolean"},
     },
     ["text", "lines_total", "bytes_total"],
 )
@@ -790,7 +798,10 @@ def _tool_definitions() -> list[Tool]:
                 "carries the full RunResult under `result` (or `error` if the "
                 "job itself failed to start). Pass wait_ms to block up to that "
                 "long for completion instead of returning immediately — that "
-                "is cheaper than a tight poll loop."
+                "is cheaper than a tight poll loop. A job that is still "
+                "running reports log_tail (the last lines Stata has printed), "
+                "log_lines_total and current_command, so you can tell a slow "
+                "bootstrap from a stuck one without waiting for it to end."
             ),
             inputSchema={
                 "type": "object",
@@ -809,6 +820,16 @@ def _tool_definitions() -> list[Tool]:
                             "Block up to this many milliseconds for the job to "
                             f"finish (max {jobs.MAX_WAIT_MS}). 0 returns the "
                             "current status immediately."
+                        ),
+                    },
+                    "log_lines_tail": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 200,
+                        "default": 10,
+                        "description": (
+                            "Lines of the running job's transcript to return "
+                            "as log_tail. 0 omits it."
                         ),
                     },
                 },
@@ -870,14 +891,31 @@ def _tool_definitions() -> list[Tool]:
             name="get_log",
             title="Fetch Stata Log",
             description=(
-                "Fetch the full log text behind a log:// ref returned by a "
-                "prior stata_run call. Returns JSON {text, lines_total, "
-                "bytes_total}."
+                "Fetch the log text behind a log:// ref returned by a prior "
+                "stata_run call. Returns JSON {text, lines_total, "
+                "bytes_total}. Pass start_line and/or max_lines to read part "
+                "of a long log (the response then adds start_line, "
+                "lines_returned and truncated); search_log finds the lines "
+                "worth reading."
             ),
             inputSchema={
                 "type": "object",
                 "additionalProperties": False,
-                "properties": {"ref": {"type": "string"}},
+                "properties": {
+                    "ref": {"type": "string"},
+                    "start_line": {
+                        "type": "integer",
+                        "description": (
+                            "First line to return, 1-based. Negative counts "
+                            "from the end: -40 is the last 40 lines."
+                        ),
+                    },
+                    "max_lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Return at most this many lines.",
+                    },
+                },
                 "required": ["ref"],
             },
             outputSchema=_LOG_OUTPUT_SCHEMA,
@@ -1429,7 +1467,10 @@ def _tool_definitions() -> list[Tool]:
                 "optional surrounding context) instead of pulling the whole "
                 "log back via get_log — the token-economy way to inspect a "
                 "long log. Substring match by default; set is_regex=true for "
-                "a Python regular expression."
+                "a Python regular expression. When is_regex is omitted and "
+                "the literal text matches nothing, a pattern written as a "
+                "regex (alternation, character classes, anchors) is retried "
+                "as one; the response's is_regex and note say so."
             ),
             inputSchema={
                 "type": "object",
@@ -1445,8 +1486,11 @@ def _tool_definitions() -> list[Tool]:
                     },
                     "is_regex": {
                         "type": "boolean",
-                        "default": False,
-                        "description": "Treat pattern as a Python regular expression.",
+                        "description": (
+                            "true: Python regular expression. false: literal "
+                            "substring. Omitted: substring, then regex if the "
+                            "substring matches nothing."
+                        ),
                     },
                     "ignore_case": {
                         "type": "boolean",
@@ -2763,8 +2807,7 @@ async def _dispatch(name: str, arguments: dict[str, Any]) -> Any:
         if name == "stata_info":
             return _json_result(json.loads(await _info_payload_async()))
         if name == "get_log":
-            payload = get_log(arguments["ref"])
-            return _json_result(payload)
+            return _get_log_tool(arguments)
         if name == "get_graph":
             ref = arguments["ref"]
             # Forward the advertised `format` argument; a mismatch with the
@@ -2990,8 +3033,10 @@ def _run_tool(arguments: dict[str, Any]) -> Any:
             return _error_result(f"{type(exc).__name__}: {exc}", kind="invalid_request")
         payload = job.summary()
         payload["hint"] = (
-            "Poll stata_run_status with this job_id. Runs in the same session "
-            "queue behind each other; cancel_session aborts this job."
+            "Poll stata_run_status with this job_id (wait_ms up to "
+            f"{jobs.MAX_WAIT_MS} blocks until it finishes; a running job "
+            "reports log_tail). Runs in the same session queue behind each "
+            "other; cancel_session aborts this job."
         )
         return _json_result(payload)
 
@@ -3091,6 +3136,10 @@ def _run_status_tool(arguments: dict[str, Any]) -> Any:
     if wait_ms is _SENTINEL:
         wait_ms = 0
     wait_ms = min(int(wait_ms), jobs.MAX_WAIT_MS)
+    tail_lines, err = _int_arg(arguments, "log_lines_tail", minimum=0)
+    if err is not None:
+        return err
+    tail_lines = 10 if tail_lines is _SENTINEL else min(int(tail_lines), 200)
 
     job = jobs.get(job_id)
     if job is None:
@@ -3105,7 +3154,27 @@ def _run_status_tool(arguments: dict[str, Any]) -> Any:
         # payload look exactly like a foreground run's.
         return _run_result_payload(job.result, envelope=payload)
     payload["result"] = None
+    if tail_lines:
+        progress = job.progress(max_lines=tail_lines)
+        if progress is not None:
+            payload.update(progress)
     return _json_result(payload)
+
+
+def _get_log_tool(arguments: dict[str, Any]) -> Any:
+    ref, err = _require_str(arguments, "ref")
+    if err is not None:
+        return err
+    window: dict[str, int] = {}
+    for key in ("start_line", "max_lines"):
+        value = arguments.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int):
+            return _error_result(f"{key} must be an integer", kind="invalid_request")
+        window[key] = value
+    # get_log raises RefNotFound and ValueError (bad window); _dispatch maps both.
+    return _json_result(get_log(ref, **window))
 
 
 def _compact_log(log: Any) -> dict[str, Any]:
@@ -3222,9 +3291,14 @@ def _search_log_tool(arguments: dict[str, Any]) -> Any:
     pattern, err = _require_str(arguments, "pattern")
     if err is not None:
         return err
+    is_regex: bool | None
     is_regex, err = _bool_arg(arguments, "is_regex", default=False)
     if err is not None:
         return err
+    if "is_regex" not in arguments:
+        # Not stated: let search_log fall back to a regex when the literal
+        # text is nowhere in the log.
+        is_regex = None
     ignore_case, err = _bool_arg(arguments, "ignore_case", default=True)
     if err is not None:
         return err
@@ -3761,6 +3835,8 @@ def _info_payload_from_stata(
                 "output_tracking",      # RunResult.outputs
                 "log_hygiene",          # auto-close of logs leaked by a failed run
                 "expectations",         # stata_run(expect=...) + RunResult.checks
+                "live_log",             # progress in stata_run_status; log kept on timeout
+                "log_window",           # get_log(start_line, max_lines)
                 # Notebook side-channel — present when the server registers
                 # the corresponding `notebook_*` and `list_runs` tools.
                 # Clients can feature-detect rather than calling each tool

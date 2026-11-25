@@ -96,6 +96,30 @@ FileSnapshot = dict[str, tuple[int, int]]
 # output detection is skipped rather than reported wrong.
 MAX_SNAPSHOT_ENTRIES = 5000
 
+# Directories that never hold a run's outputs and routinely hold thousands of
+# files. Walking them is what pushed an ordinary git checkout past the cap and
+# switched output detection off for the whole project.
+_SNAPSHOT_SKIP_DIRS = frozenset(
+    {
+        "log-files",
+        ".git",
+        ".hg",
+        ".svn",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".ipynb_checkpoints",
+        ".Rproj.user",
+        "renv",
+        "site-packages",
+    }
+)
+
 # Sentinel key marking a snapshot that stopped early. Not a legal file path
 # (paths are absolute), so it can never collide with a tracked file.
 SNAPSHOT_TRUNCATED_KEY = ""
@@ -221,6 +245,10 @@ def snapshot_working_dir_files(
 ) -> FileSnapshot:
     """Capture file size/mtime for generated-output detection.
 
+    Only files that can be reported as outputs are recorded (see
+    ``_OUTPUT_EXTENSIONS``), and version-control, dependency and cache
+    directories are not entered, so the cap is spent on files that matter.
+
     Walking stops once ``max_entries`` files have been recorded. A truncated
     snapshot is marked by the sentinel key ``""`` so callers can tell it apart
     from a genuinely small directory and decline to report output diffs they
@@ -237,16 +265,18 @@ def snapshot_working_dir_files(
             rel_dir = current_path.resolve().relative_to(root)
         except ValueError:
             continue
-        if "log-files" in rel_dir.parts:
+        if _SNAPSHOT_SKIP_DIRS.intersection(rel_dir.parts):
             dirs[:] = []
             continue
         if len(rel_dir.parts) >= max_depth:
             dirs[:] = []
         try:
-            dirs[:] = [d for d in dirs if d != "log-files"]
+            dirs[:] = [d for d in dirs if d not in _SNAPSHOT_SKIP_DIRS]
         except OSError:
             dirs[:] = []
         for filename in files:
+            if os.path.splitext(filename)[1].lower() not in _OUTPUT_EXTENSIONS:
+                continue
             path = current_path / filename
             if not path.is_file():
                 continue
