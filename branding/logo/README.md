@@ -1,4 +1,4 @@
-# stata-code logo — v4 (coef-plot · Anthropic clay)
+# stata-code logo (coef-plot · Anthropic clay)
 
 Final brand kit. Mark = a small forest / coefficient plot: dashed zero axis,
 three estimates with whiskers, three orange point estimates. Speaks directly
@@ -46,21 +46,30 @@ developer tool, and the typography reflects that.
 
 PNG renders at @512 / @1024 / @1280 sit alongside each SVG.
 
+## Where it's used
+
+| Surface | Asset |
+| --- | --- |
+| GitHub README / PyPI description (`README.md`, `README.en.md`) | `horizontal@1024.png`, `horizontal-on-dark@1024.png` under `prefers-color-scheme: dark` |
+| GitHub social preview (repo Settings → Social preview; no API, re-upload by hand) | `social-card@1200.png` |
+| VS Code Marketplace icon (`vscode/icon.png`) | `mark` rendered at 256 px |
+| Jupyter kernel logos (`stata_code/kernel/assets/`) | rendered from `mark-on-cream.svg` |
+
 ## Embedding
 
 ```markdown
 <!-- README hero -->
 <p align="center">
-  <img src="branding/logo-v4/horizontal.svg" alt="stata-code" width="420" />
+  <img src="branding/logo/horizontal.svg" alt="stata-code" width="420" />
 </p>
 ```
 
 ```html
 <!-- HTML head -->
-<link rel="icon" type="image/svg+xml" href="/branding/logo-v4/favicon.svg" />
-<link rel="icon" type="image/png" sizes="32x32" href="/branding/logo-v4/favicon-32.png" />
-<link rel="apple-touch-icon" href="/branding/logo-v4/apple-touch-icon-180.png" />
-<meta property="og:image" content="https://.../branding/logo-v4/social-card@1200.png" />
+<link rel="icon" type="image/svg+xml" href="/branding/logo/favicon.svg" />
+<link rel="icon" type="image/png" sizes="32x32" href="/branding/logo/favicon-32.png" />
+<link rel="apple-touch-icon" href="/branding/logo/apple-touch-icon-180.png" />
+<meta property="og:image" content="https://.../branding/logo/social-card@1200.png" />
 ```
 
 ## Don'ts
